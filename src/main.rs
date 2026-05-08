@@ -10,6 +10,7 @@ mod ai;
 
 use map::{MapPlugin, GridPos};
 use units::{UnitPlugin, MoveTarget};
+use combat::{CombatPlugin, AttackTarget, Health};
 
 fn main() {
     App::new()
@@ -17,10 +18,13 @@ fn main() {
         .add_plugins(
             RemotePlugin::default()
                 .with_method("unit/move", handle_unit_move)
+                .with_method("combat/attack", handle_combat_attack)
+                .with_method("combat/status", handle_combat_status)
         )
         .add_plugins(RemoteHttpPlugin::default().with_port(15703))
         .add_plugins(MapPlugin)
         .add_plugins(UnitPlugin)
+        .add_plugins(CombatPlugin)
         .add_systems(Startup, on_startup)
         .run();
 }
@@ -73,6 +77,102 @@ fn handle_unit_move(In(params): In<Option<Value>>, world: &mut World) -> BrpResu
         });
 
     Ok(Value::Bool(true))
+}
+
+/// BRP handler for "combat/attack": { attacker_entity, target_entity }
+/// Inserts AttackTarget on the attacker entity.
+fn handle_combat_attack(In(params): In<Option<Value>>, world: &mut World) -> BrpResult {
+    let params = params.ok_or_else(|| BrpError {
+        code: -32602,
+        message: "missing params".into(),
+        data: None,
+    })?;
+
+    let attacker_id = params["attacker_entity"]
+        .as_u64()
+        .ok_or_else(|| BrpError {
+            code: -32602,
+            message: "attacker_entity must be a u64".into(),
+            data: None,
+        })?;
+
+    let target_id = params["target_entity"]
+        .as_u64()
+        .ok_or_else(|| BrpError {
+            code: -32602,
+            message: "target_entity must be a u64".into(),
+            data: None,
+        })?;
+
+    let attacker = Entity::try_from_bits(attacker_id).map_err(|_| BrpError {
+        code: -32602,
+        message: format!("attacker entity {attacker_id} not found"),
+        data: None,
+    })?;
+    let target = Entity::try_from_bits(target_id).map_err(|_| BrpError {
+        code: -32602,
+        message: format!("target entity {target_id} not found"),
+        data: None,
+    })?;
+
+    world
+        .get_entity_mut(attacker)
+        .map_err(|_| BrpError {
+            code: -32602,
+            message: format!("attacker entity {attacker_id} not found"),
+            data: None,
+        })?
+        .insert(AttackTarget { entity: target });
+
+    Ok(Value::Bool(true))
+}
+
+/// BRP handler for "combat/status": { entity }
+/// Returns { health_current, health_max, is_dead }
+fn handle_combat_status(In(params): In<Option<Value>>, world: &mut World) -> BrpResult {
+    let params = params.ok_or_else(|| BrpError {
+        code: -32602,
+        message: "missing params".into(),
+        data: None,
+    })?;
+
+    let entity_id = params["entity"]
+        .as_u64()
+        .ok_or_else(|| BrpError {
+            code: -32602,
+            message: "entity must be a u64".into(),
+            data: None,
+        })?;
+
+    let entity = Entity::try_from_bits(entity_id).map_err(|_| BrpError {
+        code: -32602,
+        message: format!("entity {entity_id} not found"),
+        data: None,
+    })?;
+
+    let entity_ref = world
+        .get_entity(entity)
+        .map_err(|_| BrpError {
+            code: -32602,
+            message: format!("entity {entity_id} not found"),
+            data: None,
+        })?;
+
+    let health = entity_ref
+        .get::<Health>()
+        .ok_or_else(|| BrpError {
+            code: -32602,
+            message: "entity has no Health component".into(),
+            data: None,
+        })?;
+
+    let is_dead = entity_ref.get::<combat::Dead>().is_some();
+
+    Ok(serde_json::json!({
+        "health_current": health.current,
+        "health_max": health.max,
+        "is_dead": is_dead,
+    }))
 }
 
 fn on_startup() {
