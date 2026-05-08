@@ -7,6 +7,7 @@ mod units;
 mod combat;
 mod resources;
 mod control;
+mod buildings;
 mod ai;
 
 use map::{MapPlugin, GridPos, Faction, ControlPoint, ControlPointType};
@@ -14,6 +15,7 @@ use units::{UnitPlugin, MoveTarget, UnitPos, RiflemanBundle};
 use combat::{CombatPlugin, AttackTarget, Health, Morale, Suppression, Facing, morale_state};
 use resources::{ResourcesPlugin, FactionBundle, ResourcePool, ResourceTrickle, ResourceCost, spend};
 use control::ControlPlugin;
+use buildings::{BuildingsPlugin, BuildingType, BuildingBundle, BuildingPos, ConstructionProgress, building_cost, try_pay, can_place, Built, UnderConstruction};
 
 fn main() {
     App::new()
@@ -30,6 +32,9 @@ fn main() {
                 .with_method("resources/spend", handle_resources_spend)
                 .with_method("point/spawn", handle_point_spawn)
                 .with_method("point/status", handle_point_status)
+                .with_method("building/place", handle_building_place)
+                .with_method("building/status", handle_building_status)
+                .with_method("dev/reset", handle_dev_reset)
         )
         .add_plugins(RemoteHttpPlugin::default().with_port(15703))
         .add_plugins(MapPlugin)
@@ -37,6 +42,7 @@ fn main() {
         .add_plugins(CombatPlugin)
         .add_plugins(ResourcesPlugin)
         .add_plugins(ControlPlugin)
+        .add_plugins(BuildingsPlugin)
         .add_systems(Startup, on_startup)
         .run();
 }
@@ -451,6 +457,187 @@ fn handle_resources_spend(In(params): In<Option<Value>>, world: &mut World) -> B
     Ok(serde_json::json!({ "success": success }))
 }
 
+fn parse_building_type(s: &str) -> Result<BuildingType, BrpError> {
+    use BuildingType::*;
+    match s {
+        "refinery" => Ok(Refinery),
+        "scrapyard" => Ok(Scrapyard),
+        "recruitment_office" => Ok(RecruitmentOffice),
+        "barracks" => Ok(Barracks),
+        "motor_pool" => Ok(MotorPool),
+        "foundry" => Ok(Foundry),
+        "airfield" => Ok(Airfield),
+        "workshop" => Ok(Workshop),
+        "command_bunker" => Ok(CommandBunker),
+        "research_lab" => Ok(ResearchLab),
+        "supply_depot" => Ok(SupplyDepot),
+        "watchtower" => Ok(Watchtower),
+        "repair_bay" => Ok(RepairBay),
+        "pillbox" => Ok(Pillbox),
+        "aa_gun" => Ok(AAGun),
+        "tank_trap" => Ok(TankTrap),
+        other => Err(BrpError {
+            code: -32602,
+            message: format!("unknown building_type: {other}"),
+            data: None,
+        }),
+    }
+}
+
+/// BRP handler for "building/place": { faction_entity, building_type, x, y }
+/// Validates affordability + non-overlap, deducts resources, spawns the
+/// building under construction, returns { entity_id }.
+fn handle_building_place(In(params): In<Option<Value>>, world: &mut World) -> BrpResult {
+    let params = params.ok_or_else(|| BrpError {
+        code: -32602,
+        message: "missing params".into(),
+        data: None,
+    })?;
+
+    let faction_id = params["faction_entity"].as_u64().ok_or_else(|| BrpError {
+        code: -32602,
+        message: "faction_entity must be a u64".into(),
+        data: None,
+    })?;
+    let building_type = parse_building_type(params["building_type"].as_str().ok_or_else(
+        || BrpError {
+            code: -32602,
+            message: "building_type must be a string".into(),
+            data: None,
+        },
+    )?)?;
+    let x = params["x"].as_i64().ok_or_else(|| BrpError {
+        code: -32602,
+        message: "x must be an integer".into(),
+        data: None,
+    })? as i32;
+    let y = params["y"].as_i64().ok_or_else(|| BrpError {
+        code: -32602,
+        message: "y must be an integer".into(),
+        data: None,
+    })? as i32;
+
+    let target = GridPos { x, y };
+
+    // Collect occupied positions from existing buildings.
+    let mut occupied: std::collections::HashSet<GridPos> = std::collections::HashSet::new();
+    {
+        let mut existing = world.query::<&BuildingPos>();
+        for bp in existing.iter(world) {
+            occupied.insert(bp.pos.clone());
+        }
+    }
+
+    let blocked: std::collections::HashSet<GridPos> = std::collections::HashSet::new();
+    if !can_place(&target, &occupied, &blocked) {
+        return Err(BrpError {
+            code: -32000,
+            message: "tile is occupied".into(),
+            data: None,
+        });
+    }
+
+    let faction_entity = Entity::try_from_bits(faction_id).map_err(|_| BrpError {
+        code: -32602,
+        message: format!("faction entity {faction_id} not found"),
+        data: None,
+    })?;
+
+    let cost = building_cost(&building_type);
+
+    // Look up the faction enum on the FactionEntity component.
+    let faction = {
+        let f_ref = world.get_entity(faction_entity).map_err(|_| BrpError {
+            code: -32602,
+            message: format!("faction entity {faction_id} not found"),
+            data: None,
+        })?;
+        f_ref
+            .get::<resources::FactionEntity>()
+            .map(|fe| fe.faction.clone())
+            .ok_or_else(|| BrpError {
+                code: -32602,
+                message: "entity is not a Faction".into(),
+                data: None,
+            })?
+    };
+
+    // Pay
+    {
+        let mut f_mut = world.get_entity_mut(faction_entity).map_err(|_| BrpError {
+            code: -32602,
+            message: format!("faction entity {faction_id} not found"),
+            data: None,
+        })?;
+        let mut pool = f_mut.get_mut::<resources::ResourcePool>().ok_or_else(|| BrpError {
+            code: -32602,
+            message: "faction has no ResourcePool".into(),
+            data: None,
+        })?;
+        try_pay(&mut pool, &cost).map_err(|_| BrpError {
+            code: -32000,
+            message: "insufficient resources".into(),
+            data: None,
+        })?;
+    }
+
+    let id = world
+        .spawn(BuildingBundle::new(building_type, faction, x, y))
+        .id()
+        .to_bits();
+
+    Ok(serde_json::json!({ "entity_id": id }))
+}
+
+/// BRP handler for "building/status": { entity }
+fn handle_building_status(In(params): In<Option<Value>>, world: &mut World) -> BrpResult {
+    let params = params.ok_or_else(|| BrpError {
+        code: -32602,
+        message: "missing params".into(),
+        data: None,
+    })?;
+    let entity_id = params["entity"].as_u64().ok_or_else(|| BrpError {
+        code: -32602,
+        message: "entity must be a u64".into(),
+        data: None,
+    })?;
+    let entity = Entity::try_from_bits(entity_id).map_err(|_| BrpError {
+        code: -32602,
+        message: format!("entity {entity_id} not found"),
+        data: None,
+    })?;
+    let er = world.get_entity(entity).map_err(|_| BrpError {
+        code: -32602,
+        message: format!("entity {entity_id} not found"),
+        data: None,
+    })?;
+
+    let bt = er.get::<BuildingType>().ok_or_else(|| BrpError {
+        code: -32602,
+        message: "entity is not a building".into(),
+        data: None,
+    })?;
+    let pos = er.get::<BuildingPos>();
+    let h = er.get::<Health>();
+    let cp = er.get::<ConstructionProgress>();
+    let faction = er.get::<map::Faction>();
+    let built = er.get::<Built>().is_some();
+    let under = er.get::<UnderConstruction>().is_some();
+
+    Ok(serde_json::json!({
+        "building_type": format!("{:?}", bt),
+        "pos_x": pos.map(|p| p.pos.x),
+        "pos_y": pos.map(|p| p.pos.y),
+        "faction": faction.map(|f| format!("{:?}", f)),
+        "health_current": h.map(|h| h.current),
+        "health_max": h.map(|h| h.max),
+        "construction_elapsed": cp.map(|c| c.elapsed),
+        "construction_total": cp.map(|c| c.total),
+        "built": built,
+        "under_construction": under,
+    }))
+}
+
 fn parse_faction(s: &str) -> Result<Faction, BrpError> {
     match s {
         "combine" => Ok(Faction::Combine),
@@ -561,6 +748,28 @@ fn handle_point_status(In(params): In<Option<Value>>, world: &mut World) -> BrpR
         "contesting": cp.contesting.as_ref().map(|f| format!("{:?}", f)),
         "capture_progress": cp.capture_progress,
     }))
+}
+
+/// BRP handler for "dev/reset": despawns all gameplay entities (factions,
+/// units, buildings, control points). For tests so each run starts clean.
+fn handle_dev_reset(In(_params): In<Option<Value>>, world: &mut World) -> BrpResult {
+    let mut to_despawn: Vec<Entity> = Vec::new();
+    {
+        let mut q = world.query_filtered::<Entity, Or<(
+            With<resources::FactionEntity>,
+            With<units::UnitType>,
+            With<map::ControlPoint>,
+            With<BuildingType>,
+        )>>();
+        for e in q.iter(world) {
+            to_despawn.push(e);
+        }
+    }
+    let count = to_despawn.len();
+    for e in to_despawn {
+        world.despawn(e);
+    }
+    Ok(serde_json::json!({ "despawned": count }))
 }
 
 fn on_startup() {

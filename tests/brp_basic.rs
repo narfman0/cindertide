@@ -11,6 +11,17 @@
 
 const URL: &str = "http://127.0.0.1:15703";
 
+/// Stateful tests must call this first. Acquires a process-wide mutex
+/// (so parallel cargo-test threads don't race against the same server)
+/// and resets the world via the dev/reset BRP method.
+fn lock_world() -> std::sync::MutexGuard<'static, ()> {
+    use std::sync::Mutex;
+    static LOCK: Mutex<()> = Mutex::new(());
+    let g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _ = post("dev/reset", serde_json::json!({}));
+    g
+}
+
 fn post(method: &str, params: serde_json::Value) -> serde_json::Value {
     let body = serde_json::json!({
         "jsonrpc": "2.0",
@@ -90,6 +101,7 @@ fn brp_combat_status_method_registered() {
 #[test]
 #[ignore = "requires a running Cindertide server on port 15703"]
 fn brp_unit_spawn_and_status() {
+    let _g = lock_world();
     // Step 1: spawn rifleman at (0, 0)
     let spawn_resp = post(
         "unit/spawn",
@@ -138,6 +150,7 @@ fn combat_status(entity: u64) -> serde_json::Value {
 #[test]
 #[ignore = "requires a running Cindertide server on port 15703"]
 fn brp_combat_live_fire_drops_health_and_accumulates_suppression() {
+    let _g = lock_world();
     let attacker = spawn_rifleman(0, 0);
     let target = spawn_rifleman(2, 0);
 
@@ -169,6 +182,7 @@ fn brp_combat_live_fire_drops_health_and_accumulates_suppression() {
 #[test]
 #[ignore = "requires a running Cindertide server on port 15703"]
 fn brp_unit_status_includes_facing_and_morale() {
+    let _g = lock_world();
     let id = spawn_rifleman(5, 5);
     let s = unit_status(id);
     assert_eq!(s["facing"].as_str().unwrap(), "North");
@@ -190,6 +204,7 @@ fn resources_status(entity: u64) -> serde_json::Value {
 #[test]
 #[ignore = "requires a running Cindertide server on port 15703"]
 fn brp_faction_spawn_has_starting_resources() {
+    let _g = lock_world();
     let id = spawn_faction("combine");
     let s = resources_status(id);
     assert_eq!(s["fuel"].as_f64().unwrap(), 200.0);
@@ -201,6 +216,7 @@ fn brp_faction_spawn_has_starting_resources() {
 #[test]
 #[ignore = "requires a running Cindertide server on port 15703"]
 fn brp_resources_spend_deducts_when_affordable() {
+    let _g = lock_world();
     let id = spawn_faction("ironborn");
     let resp = post(
         "resources/spend",
@@ -218,6 +234,7 @@ fn brp_resources_spend_deducts_when_affordable() {
 #[test]
 #[ignore = "requires a running Cindertide server on port 15703"]
 fn brp_resources_spend_rejects_when_unaffordable() {
+    let _g = lock_world();
     let id = spawn_faction("covenant");
     let resp = post(
         "resources/spend",
@@ -231,6 +248,7 @@ fn brp_resources_spend_rejects_when_unaffordable() {
 #[test]
 #[ignore = "requires a running Cindertide server on port 15703"]
 fn brp_manpower_trickles_over_time() {
+    let _g = lock_world();
     let id = spawn_faction("hollow");
     let before = resources_status(id);
     let m_before = before["manpower"].as_f64().unwrap();
@@ -277,6 +295,7 @@ fn spawn_rifleman_with_faction(x: i32, y: i32, faction: &str) -> u64 {
 #[test]
 #[ignore = "requires a running Cindertide server on port 15703"]
 fn brp_lone_unit_captures_neutral_point() {
+    let _g = lock_world();
     let _faction = spawn_faction("combine");
     let pt = spawn_point("strategic", 100, 100, 2.0);
     let _u = spawn_rifleman_with_faction(100, 100, "combine");
@@ -295,6 +314,7 @@ fn brp_lone_unit_captures_neutral_point() {
 #[test]
 #[ignore = "requires a running Cindertide server on port 15703"]
 fn brp_contested_point_does_not_capture() {
+    let _g = lock_world();
     let _f1 = spawn_faction("combine");
     let _f2 = spawn_faction("hollow");
     let pt = spawn_point("strategic", 200, 200, 2.0);
@@ -310,9 +330,95 @@ fn brp_contested_point_does_not_capture() {
     );
 }
 
+fn place_building(faction: u64, building_type: &str, x: i32, y: i32) -> serde_json::Value {
+    post(
+        "building/place",
+        serde_json::json!({
+            "faction_entity": faction,
+            "building_type": building_type,
+            "x": x,
+            "y": y,
+        }),
+    )
+}
+
+fn building_status(entity: u64) -> serde_json::Value {
+    let resp = post("building/status", serde_json::json!({ "entity": entity }));
+    resp["result"].clone()
+}
+
+#[test]
+#[ignore = "requires a running Cindertide server on port 15703"]
+fn brp_building_place_succeeds_and_deducts_resources() {
+    let _g = lock_world();
+    let faction = spawn_faction("combine");
+    // Refinery cost: 200 fuel, 50 scrap
+    let resp = place_building(faction, "refinery", 10, 10);
+    assert!(resp.get("result").is_some(), "place should succeed: {resp}");
+    let bid = resp["result"]["entity_id"].as_u64().unwrap();
+
+    let r = resources_status(faction);
+    assert_eq!(r["fuel"].as_f64().unwrap(), 0.0);
+    assert_eq!(r["scrap"].as_f64().unwrap(), 150.0);
+
+    let s = building_status(bid);
+    assert_eq!(s["building_type"].as_str().unwrap(), "Refinery");
+    assert_eq!(s["under_construction"].as_bool().unwrap(), true);
+    assert_eq!(s["built"].as_bool().unwrap(), false);
+}
+
+#[test]
+#[ignore = "requires a running Cindertide server on port 15703"]
+fn brp_building_place_rejects_when_unaffordable() {
+    let _g = lock_world();
+    let faction = spawn_faction("hollow");
+    // Drain resources first
+    post("resources/spend", serde_json::json!({
+        "entity": faction, "fuel": 200.0, "scrap": 200.0
+    }));
+    let resp = place_building(faction, "refinery", 20, 20);
+    assert!(
+        resp.get("error").is_some(),
+        "expected error for unaffordable: {resp}"
+    );
+}
+
+#[test]
+#[ignore = "requires a running Cindertide server on port 15703"]
+fn brp_building_place_rejects_overlap() {
+    let _g = lock_world();
+    let faction = spawn_faction("ironborn");
+    let _ = place_building(faction, "scrapyard", 30, 30);
+    let resp = place_building(faction, "scrapyard", 30, 30);
+    assert!(
+        resp.get("error").is_some(),
+        "expected error for occupied tile: {resp}"
+    );
+}
+
+#[test]
+#[ignore = "requires a running Cindertide server on port 15703"]
+fn brp_building_finishes_construction_after_wait() {
+    let _g = lock_world();
+    let faction = spawn_faction("covenant");
+    // TankTrap: 5s build, 50 scrap cost — cheapest + fastest.
+    let resp = place_building(faction, "tank_trap", 40, 40);
+    let bid = resp["result"]["entity_id"].as_u64().unwrap();
+
+    let s0 = building_status(bid);
+    assert_eq!(s0["under_construction"].as_bool().unwrap(), true);
+
+    std::thread::sleep(std::time::Duration::from_millis(6000));
+
+    let s1 = building_status(bid);
+    assert_eq!(s1["built"].as_bool().unwrap(), true, "expected built: {s1}");
+    assert_eq!(s1["under_construction"].as_bool().unwrap(), false);
+}
+
 #[test]
 #[ignore = "requires a running Cindertide server on port 15703"]
 fn brp_held_fuel_depot_boosts_combine_fuel_trickle() {
+    let _g = lock_world();
     let combine = spawn_faction("combine");
     let pt = spawn_point("fuel_depot", 300, 300, 2.0);
     let _u = spawn_rifleman_with_faction(300, 300, "combine");
