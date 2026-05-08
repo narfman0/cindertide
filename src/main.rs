@@ -128,7 +128,7 @@ fn handle_combat_attack(In(params): In<Option<Value>>, world: &mut World) -> Brp
 }
 
 /// BRP handler for "combat/status": { entity }
-/// Returns { health_current, health_max, is_dead }
+/// Returns combat state — health plus optional suppression/pinned/cover fields.
 fn handle_combat_status(In(params): In<Option<Value>>, world: &mut World) -> BrpResult {
     let params = params.ok_or_else(|| BrpError {
         code: -32602,
@@ -167,11 +167,18 @@ fn handle_combat_status(In(params): In<Option<Value>>, world: &mut World) -> Brp
         })?;
 
     let is_dead = entity_ref.get::<combat::Dead>().is_some();
+    let is_pinned = entity_ref.get::<combat::Pinned>().is_some();
+    let supp = entity_ref.get::<combat::Suppression>();
+    let in_cover = entity_ref.get::<combat::InCover>();
 
     Ok(serde_json::json!({
         "health_current": health.current,
         "health_max": health.max,
         "is_dead": is_dead,
+        "is_pinned": is_pinned,
+        "suppression_current": supp.map(|s| s.current),
+        "suppression_max": supp.map(|s| s.max),
+        "cover": in_cover.map(|c| format!("{:?}", c.density)),
     }))
 }
 

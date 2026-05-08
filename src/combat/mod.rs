@@ -2,7 +2,7 @@
 
 use bevy::prelude::*;
 use crate::map::{CoverDensity, GridPos, Tile, damage_reduction};
-use crate::units::UnitPos;
+use crate::units::{UnitPos, MoveTarget};
 
 #[derive(Component, Debug, Clone)]
 pub struct Health {
@@ -43,6 +43,42 @@ pub struct InCover {
     pub density: CoverDensity,
 }
 
+#[derive(Component, Debug, Clone)]
+pub struct Suppression {
+    pub current: f32,
+    pub max: f32,
+}
+
+#[derive(Component, Debug, Clone)]
+pub struct SuppressionDecay {
+    pub per_second: f32,
+}
+
+#[derive(Component, Debug, Clone)]
+pub struct SuppressionContribution {
+    pub per_attack: f32,
+}
+
+#[derive(Component, Debug)]
+pub struct Pinned;
+
+/// Facing direction of a unit on the grid.
+#[derive(Component, Debug, Clone, PartialEq)]
+pub enum Facing {
+    North,
+    South,
+    East,
+    West,
+}
+
+/// The angle of an incoming attack relative to target's facing.
+#[derive(Debug, Clone, PartialEq)]
+pub enum AttackAngle {
+    Front,
+    Flank,
+    Rear,
+}
+
 // --- Pure functions ---
 
 pub fn chebyshev_distance(a: &GridPos, b: &GridPos) -> f32 {
@@ -69,11 +105,106 @@ pub fn damage_after_cover(base_damage: f32, cover: &CoverDensity) -> f32 {
     base_damage * (1.0 - damage_reduction(cover))
 }
 
-/// Compute effective damage taking InCover component into account.
-pub fn effective_damage(base: f32, cover: Option<&InCover>) -> f32 {
+/// Determine attack angle based on attacker position, target position, and target facing.
+/// dx/dy is direction from target to attacker.
+pub fn attack_angle(attacker_pos: &GridPos, target_pos: &GridPos, target_facing: &Facing) -> AttackAngle {
+    let dx = attacker_pos.x - target_pos.x;
+    let dy = attacker_pos.y - target_pos.y;
+    let adx = dx.abs();
+    let ady = dy.abs();
+
+    match target_facing {
+        Facing::North => {
+            if adx > ady { AttackAngle::Flank }
+            else if dy < 0 { AttackAngle::Front }
+            else { AttackAngle::Rear }
+        }
+        Facing::South => {
+            if adx > ady { AttackAngle::Flank }
+            else if dy > 0 { AttackAngle::Front }
+            else { AttackAngle::Rear }
+        }
+        Facing::East => {
+            if ady > adx { AttackAngle::Flank }
+            else if dx > 0 { AttackAngle::Front }
+            else { AttackAngle::Rear }
+        }
+        Facing::West => {
+            if ady > adx { AttackAngle::Flank }
+            else if dx < 0 { AttackAngle::Front }
+            else { AttackAngle::Rear }
+        }
+    }
+}
+
+/// Damage multiplier for attack angle: Front=1.0, Flank=1.35, Rear=1.75
+pub fn angle_damage_multiplier(angle: &AttackAngle) -> f32 {
+    match angle {
+        AttackAngle::Front => 1.0,
+        AttackAngle::Flank => 1.35,
+        AttackAngle::Rear => 1.75,
+    }
+}
+
+/// Cover effectiveness is reduced when flanked/rear:
+/// Flank gives 50% of normal cover reduction, Rear gives 0%.
+pub fn effective_cover_reduction(cover: &CoverDensity, angle: &AttackAngle) -> f32 {
+    let base = damage_reduction(cover);
+    match angle {
+        AttackAngle::Front => base,
+        AttackAngle::Flank => base * 0.5,
+        AttackAngle::Rear => 0.0,
+    }
+}
+
+/// Compute effective damage taking InCover component and attack angle into account.
+/// Apply angle multiplier first, then cover reduction (cover less effective when flanked/rear).
+pub fn effective_damage(base: f32, cover: Option<&InCover>, angle: Option<AttackAngle>) -> f32 {
+    let multiplier = angle.as_ref().map(angle_damage_multiplier).unwrap_or(1.0);
+    let after_angle = base * multiplier;
     match cover {
-        Some(c) => damage_after_cover(base, &c.density),
-        None => base,
+        Some(c) => {
+            let reduction = match &angle {
+                Some(a) => effective_cover_reduction(&c.density, a),
+                None => damage_reduction(&c.density),
+            };
+            after_angle * (1.0 - reduction)
+        }
+        None => after_angle,
+    }
+}
+
+pub fn add_suppression(s: &mut Suppression, amount: f32) {
+    s.current = (s.current + amount).clamp(0.0, s.max);
+}
+
+pub fn decay_suppression(s: &mut Suppression, dt: f32, per_second: f32) {
+    s.current = (s.current - dt * per_second).max(0.0);
+}
+
+pub fn is_fully_suppressed(s: &Suppression) -> bool {
+    s.current >= s.max
+}
+
+/// Output multiplier for a suppressed attacker (mechanics.md: reduced
+/// accuracy → reduced expected damage). Full suppression halves output.
+pub fn suppression_output_multiplier(s: &Suppression) -> f32 {
+    let frac = (s.current / s.max).clamp(0.0, 1.0);
+    1.0 - frac * 0.5
+}
+
+/// Movement multiplier for a suppressed unit. Full suppression halves
+/// movement; the Pinned marker (added separately) blocks movement entirely.
+pub fn suppression_movement_multiplier(s: &Suppression) -> f32 {
+    let frac = (s.current / s.max).clamp(0.0, 1.0);
+    1.0 - frac * 0.5
+}
+
+/// Cover reduces incoming suppression by the same fraction it reduces damage.
+pub fn suppression_after_cover(amount: f32, cover: Option<&InCover>) -> f32 {
+    match cover {
+        Some(c) => amount * (1.0 - damage_reduction(&c.density)),
+        None => amount,
     }
 }
 
@@ -90,22 +221,42 @@ pub fn cooldown_system(time: Res<Time>, mut query: Query<&mut AttackCooldown>) {
 
 pub fn attack_system(
     mut commands: Commands,
-    mut attackers: Query<(Entity, &AttackTarget, &AttackDamage, &mut AttackCooldown, &UnitPos, &AttackSpeed, &AttackRange)>,
-    mut targets: Query<(&mut Health, &UnitPos, Option<&InCover>), Without<Dead>>,
+    mut attackers: Query<(
+        Entity,
+        &AttackTarget,
+        &AttackDamage,
+        &mut AttackCooldown,
+        &UnitPos,
+        &AttackSpeed,
+        &AttackRange,
+        Option<&Suppression>,
+        Option<&SuppressionContribution>,
+    )>,
+    mut targets: Query<(&mut Health, &UnitPos, Option<&InCover>, Option<&mut Suppression>, Option<&Facing>), Without<Dead>>,
 ) {
     let mut to_remove_target: Vec<Entity> = Vec::new();
 
-    for (attacker_entity, attack_target, damage, mut cooldown, attacker_pos, speed, range) in &mut attackers {
+    for (attacker_entity, attack_target, damage, mut cooldown, attacker_pos, speed, range, attacker_supp, supp_contrib) in &mut attackers {
         if cooldown.remaining > 0.0 {
             continue;
         }
 
         let target_entity = attack_target.entity;
 
-        if let Ok((mut health, target_pos, in_cover)) = targets.get_mut(target_entity) {
+        if let Ok((mut health, target_pos, in_cover, target_supp, target_facing)) = targets.get_mut(target_entity) {
             if is_in_range(&attacker_pos.pos, &target_pos.pos, range.tiles) {
-                let final_damage = effective_damage(damage.base, in_cover);
+                let angle = target_facing.map(|f| attack_angle(&attacker_pos.pos, &target_pos.pos, f));
+                let attacker_mult = attacker_supp
+                    .map(suppression_output_multiplier)
+                    .unwrap_or(1.0);
+                let final_damage = effective_damage(damage.base, in_cover, angle) * attacker_mult;
                 let died = apply_damage(&mut health, final_damage);
+
+                if let (Some(contrib), Some(mut ts)) = (supp_contrib, target_supp) {
+                    let amount = suppression_after_cover(contrib.per_attack, in_cover) * attacker_mult;
+                    add_suppression(&mut ts, amount);
+                }
+
                 cooldown.remaining = 1.0 / speed.attacks_per_second;
                 if died {
                     to_remove_target.push(attacker_entity);
@@ -120,6 +271,34 @@ pub fn attack_system(
     for entity in to_remove_target {
         if let Ok(mut e) = commands.get_entity(entity) {
             e.remove::<AttackTarget>();
+        }
+    }
+}
+
+pub fn suppression_decay_system(
+    time: Res<Time>,
+    mut query: Query<(&mut Suppression, &SuppressionDecay)>,
+) {
+    let dt = time.delta_secs();
+    for (mut supp, decay) in &mut query {
+        decay_suppression(&mut supp, dt, decay.per_second);
+    }
+}
+
+pub fn suppression_pin_system(
+    mut commands: Commands,
+    query: Query<(Entity, &Suppression, Option<&Pinned>)>,
+) {
+    for (entity, supp, pinned) in &query {
+        let should_pin = is_fully_suppressed(supp);
+        match (should_pin, pinned) {
+            (true, None) => {
+                commands.entity(entity).insert(Pinned);
+            }
+            (false, Some(_)) => {
+                commands.entity(entity).remove::<Pinned>();
+            }
+            _ => {}
         }
     }
 }
@@ -162,13 +341,51 @@ pub fn update_cover_system(
     }
 }
 
+/// Update facing direction based on MoveTarget. Units with a MoveTarget face toward
+/// their destination. Units without a MoveTarget keep their current facing (defaulting to North).
+pub fn update_facing_system(
+    mut commands: Commands,
+    mut units: Query<(Entity, &UnitPos, Option<&MoveTarget>, Option<&mut Facing>)>,
+) {
+    for (entity, unit_pos, move_target, facing) in &mut units {
+        if let Some(target) = move_target {
+            let dx = target.target.x - unit_pos.pos.x;
+            let dy = target.target.y - unit_pos.pos.y;
+            let new_facing = if dx.abs() >= dy.abs() {
+                if dx >= 0 { Facing::East } else { Facing::West }
+            } else {
+                if dy < 0 { Facing::North } else { Facing::South }
+            };
+            if let Some(mut f) = facing {
+                *f = new_facing;
+            } else {
+                commands.entity(entity).insert(new_facing);
+            }
+        } else if facing.is_none() {
+            commands.entity(entity).insert(Facing::North);
+        }
+    }
+}
+
 // --- Plugin ---
 
 pub struct CombatPlugin;
 
 impl Plugin for CombatPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (update_cover_system, cooldown_system, attack_system, death_system).chain());
+        app.add_systems(
+            Update,
+            (
+                update_cover_system,
+                update_facing_system,
+                suppression_decay_system,
+                cooldown_system,
+                attack_system,
+                suppression_pin_system,
+                death_system,
+            )
+                .chain(),
+        );
     }
 }
 
@@ -270,34 +487,218 @@ mod tests {
     #[test]
     fn test_cover_reduces_damage_light() {
         let cover = InCover { density: CoverDensity::Light };
-        let result = effective_damage(100.0, Some(&cover));
+        let result = effective_damage(100.0, Some(&cover), None);
         assert_eq!(result, 75.0);
     }
 
     #[test]
     fn test_cover_reduces_damage_heavy() {
         let cover = InCover { density: CoverDensity::Heavy };
-        let result = effective_damage(100.0, Some(&cover));
+        let result = effective_damage(100.0, Some(&cover), None);
         assert_eq!(result, 50.0);
     }
 
     #[test]
     fn test_no_cover_full_damage() {
-        let result = effective_damage(100.0, None);
+        let result = effective_damage(100.0, None, None);
         assert_eq!(result, 100.0);
     }
 
     #[test]
     fn test_cover_cannot_reduce_below_zero() {
         let cover = InCover { density: CoverDensity::Heavy };
-        let result = effective_damage(0.0, Some(&cover));
+        let result = effective_damage(0.0, Some(&cover), None);
         assert_eq!(result, 0.0);
     }
 
     #[test]
     fn test_effective_damage_calculation() {
         let cover = InCover { density: CoverDensity::Heavy };
-        let result = effective_damage(100.0, Some(&cover));
+        let result = effective_damage(100.0, Some(&cover), None);
         assert_eq!(result, 50.0);
+    }
+
+    // --- Suppression tests ---
+
+    fn make_supp(current: f32, max: f32) -> Suppression {
+        Suppression { current, max }
+    }
+
+    #[test]
+    fn test_add_suppression_accumulates() {
+        let mut s = make_supp(0.0, 100.0);
+        add_suppression(&mut s, 30.0);
+        assert_eq!(s.current, 30.0);
+        add_suppression(&mut s, 20.0);
+        assert_eq!(s.current, 50.0);
+    }
+
+    #[test]
+    fn test_add_suppression_clamps_to_max() {
+        let mut s = make_supp(80.0, 100.0);
+        add_suppression(&mut s, 50.0);
+        assert_eq!(s.current, 100.0);
+    }
+
+    #[test]
+    fn test_decay_reduces_suppression() {
+        let mut s = make_supp(50.0, 100.0);
+        decay_suppression(&mut s, 1.0, 10.0);
+        assert_eq!(s.current, 40.0);
+    }
+
+    #[test]
+    fn test_decay_does_not_go_below_zero() {
+        let mut s = make_supp(5.0, 100.0);
+        decay_suppression(&mut s, 1.0, 100.0);
+        assert_eq!(s.current, 0.0);
+    }
+
+    #[test]
+    fn test_is_fully_suppressed_true_at_max() {
+        let s = make_supp(100.0, 100.0);
+        assert!(is_fully_suppressed(&s));
+    }
+
+    #[test]
+    fn test_is_fully_suppressed_false_below_max() {
+        let s = make_supp(99.0, 100.0);
+        assert!(!is_fully_suppressed(&s));
+    }
+
+    #[test]
+    fn test_suppression_output_multiplier_zero_supp_full_output() {
+        let s = make_supp(0.0, 100.0);
+        assert_eq!(suppression_output_multiplier(&s), 1.0);
+    }
+
+    #[test]
+    fn test_suppression_output_multiplier_full_supp_half_output() {
+        let s = make_supp(100.0, 100.0);
+        assert_eq!(suppression_output_multiplier(&s), 0.5);
+    }
+
+    #[test]
+    fn test_suppression_movement_multiplier_full_supp_half_speed() {
+        let s = make_supp(100.0, 100.0);
+        assert_eq!(suppression_movement_multiplier(&s), 0.5);
+    }
+
+    #[test]
+    fn test_suppression_after_cover_no_cover_unchanged() {
+        assert_eq!(suppression_after_cover(20.0, None), 20.0);
+    }
+
+    #[test]
+    fn test_suppression_after_heavy_cover_halved() {
+        let c = InCover { density: CoverDensity::Heavy };
+        assert_eq!(suppression_after_cover(20.0, Some(&c)), 10.0);
+    }
+
+    #[test]
+    fn test_suppression_after_light_cover_reduced_25pct() {
+        let c = InCover { density: CoverDensity::Light };
+        assert_eq!(suppression_after_cover(20.0, Some(&c)), 15.0);
+    }
+
+    // --- Facing / AttackAngle tests ---
+
+    #[test]
+    fn test_attack_angle_front_north() {
+        // Attacker north of target (dy < 0 from target to attacker), target facing North → Front
+        let attacker = make_pos(0, -1);
+        let target = make_pos(0, 0);
+        assert_eq!(attack_angle(&attacker, &target, &Facing::North), AttackAngle::Front);
+    }
+
+    #[test]
+    fn test_attack_angle_rear_north() {
+        // Attacker south of target (dy > 0), target facing North → Rear
+        let attacker = make_pos(0, 1);
+        let target = make_pos(0, 0);
+        assert_eq!(attack_angle(&attacker, &target, &Facing::North), AttackAngle::Rear);
+    }
+
+    #[test]
+    fn test_attack_angle_flank_east() {
+        // Attacker east of target facing North → Flank
+        let attacker = make_pos(1, 0);
+        let target = make_pos(0, 0);
+        assert_eq!(attack_angle(&attacker, &target, &Facing::North), AttackAngle::Flank);
+    }
+
+    #[test]
+    fn test_attack_angle_front_east() {
+        // Attacker east of target, target facing East → Front
+        let attacker = make_pos(1, 0);
+        let target = make_pos(0, 0);
+        assert_eq!(attack_angle(&attacker, &target, &Facing::East), AttackAngle::Front);
+    }
+
+    #[test]
+    fn test_attack_angle_rear_west() {
+        // Attacker east of target, target facing West → Rear
+        let attacker = make_pos(1, 0);
+        let target = make_pos(0, 0);
+        assert_eq!(attack_angle(&attacker, &target, &Facing::West), AttackAngle::Rear);
+    }
+
+    #[test]
+    fn test_angle_multiplier_front() {
+        assert_eq!(angle_damage_multiplier(&AttackAngle::Front), 1.0);
+    }
+
+    #[test]
+    fn test_angle_multiplier_flank() {
+        assert_eq!(angle_damage_multiplier(&AttackAngle::Flank), 1.35);
+    }
+
+    #[test]
+    fn test_angle_multiplier_rear() {
+        assert_eq!(angle_damage_multiplier(&AttackAngle::Rear), 1.75);
+    }
+
+    #[test]
+    fn test_effective_cover_front() {
+        // Heavy cover front → full 0.5 reduction
+        let reduction = effective_cover_reduction(&CoverDensity::Heavy, &AttackAngle::Front);
+        assert_eq!(reduction, 0.5);
+    }
+
+    #[test]
+    fn test_effective_cover_flank() {
+        // Heavy cover flank → 0.25 reduction (half)
+        let reduction = effective_cover_reduction(&CoverDensity::Heavy, &AttackAngle::Flank);
+        assert_eq!(reduction, 0.25);
+    }
+
+    #[test]
+    fn test_effective_cover_rear() {
+        // Heavy cover rear → 0.0 reduction
+        let reduction = effective_cover_reduction(&CoverDensity::Heavy, &AttackAngle::Rear);
+        assert_eq!(reduction, 0.0);
+    }
+
+    #[test]
+    fn test_effective_damage_flank_no_cover() {
+        // base=100, flank, no cover → 135.0
+        let result = effective_damage(100.0, None, Some(AttackAngle::Flank));
+        assert_eq!(result, 135.0);
+    }
+
+    #[test]
+    fn test_effective_damage_rear_heavy_cover() {
+        // base=100, rear, heavy cover → 175.0 (cover bypassed)
+        let cover = InCover { density: CoverDensity::Heavy };
+        let result = effective_damage(100.0, Some(&cover), Some(AttackAngle::Rear));
+        assert_eq!(result, 175.0);
+    }
+
+    #[test]
+    fn test_effective_damage_front_light_cover() {
+        // base=100, front, light cover → 75.0
+        let cover = InCover { density: CoverDensity::Light };
+        let result = effective_damage(100.0, Some(&cover), Some(AttackAngle::Front));
+        assert_eq!(result, 75.0);
     }
 }
