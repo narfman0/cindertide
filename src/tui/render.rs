@@ -6,7 +6,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use ratatui::Frame;
 
-use super::state::{Screen, TuiApp, UnitSummary, BuildingSummary, TileSummary};
+use super::state::{Screen, TuiApp, UnitSummary, BuildingSummary, TileSummary, InputMode, BUILD_MENU_OPTIONS};
 
 pub fn draw(f: &mut Frame, app: &TuiApp) {
     match &app.screen {
@@ -300,11 +300,15 @@ fn draw_in_mission(f: &mut Frame, app: &TuiApp) {
     draw_mission_sidebar(f, app, body[0]);
     draw_mission_map(f, app, body[1]);
 
+    let hint = match (&app.input_mode, app.selected_unit) {
+        (InputMode::Normal, None) => " Space pause  hjkl move cursor  Enter select unit  b build  Esc abandon",
+        (InputMode::Normal, Some(_)) => " m move  a attack  b build  Enter reselect  Esc deselect",
+        (InputMode::Moving, _) => " hjkl move target  Enter confirm move  Esc cancel",
+        (InputMode::Attacking, _) => " hjkl move to enemy  Enter confirm attack  Esc cancel",
+        (InputMode::Building, _) => " ↑↓ pick type  hjkl place cursor  Enter build  Esc cancel",
+    };
     f.render_widget(
-        Paragraph::new(Line::from(Span::styled(
-            " Space pause   Esc abandon   q quit",
-            Style::default().fg(Color::DarkGray),
-        ))),
+        Paragraph::new(Line::from(Span::styled(hint, Style::default().fg(Color::DarkGray)))),
         main_chunks[1],
     );
 }
@@ -389,7 +393,6 @@ fn draw_mission_sidebar(f: &mut Frame, app: &TuiApp, area: Rect) {
 }
 
 fn draw_mission_map(f: &mut Frame, app: &TuiApp, area: Rect) {
-    // Determine bounds from tiles.
     if app.snapshot.tiles.is_empty() {
         let p = Paragraph::new(Line::from(Span::styled(
             "(no tiles loaded)",
@@ -403,7 +406,6 @@ fn draw_mission_map(f: &mut Frame, app: &TuiApp, area: Rect) {
     let w = (max_x + 1) as usize;
     let h = (max_y + 1) as usize;
 
-    // Build a grid of (char, color).
     let mut grid: Vec<Vec<(char, Color)>> = vec![vec![(' ', Color::Reset); w]; h];
     for t in &app.snapshot.tiles {
         if let (Some(row), x) = (grid.get_mut(t.y as usize), t.x as usize) {
@@ -429,19 +431,72 @@ fn draw_mission_map(f: &mut Frame, app: &TuiApp, area: Rect) {
         }
     }
 
+    let selected_pos: Option<(i32, i32)> = app.selected_unit.and_then(|id| {
+        app.snapshot.units.iter().find(|u| u.entity_id == id).map(|u| (u.x, u.y))
+    });
+    let (cx, cy) = app.cursor;
+    let cursor_bg = match app.input_mode {
+        InputMode::Moving   => Color::Green,
+        InputMode::Attacking => Color::Red,
+        _                    => Color::DarkGray,
+    };
+
     let lines: Vec<Line> = grid
         .iter()
+        .enumerate()
         .take(area.height as usize)
-        .map(|row| {
+        .map(|(row_idx, row)| {
             let spans: Vec<Span> = row
                 .iter()
+                .enumerate()
                 .take(area.width as usize)
-                .map(|(c, color)| Span::styled(c.to_string(), Style::default().fg(*color)))
+                .map(|(col_idx, (c, color))| {
+                    let rx = col_idx as i32;
+                    let ry = row_idx as i32;
+                    let style = if Some((rx, ry)) == selected_pos {
+                        Style::default().fg(*color).bg(Color::Blue)
+                    } else if rx == cx && ry == cy {
+                        Style::default().fg(*color).bg(cursor_bg)
+                    } else {
+                        Style::default().fg(*color)
+                    };
+                    Span::styled(c.to_string(), style)
+                })
                 .collect();
             Line::from(spans)
         })
         .collect();
     f.render_widget(Paragraph::new(lines), area);
+
+    if app.build_menu_open {
+        draw_build_menu(f, app, area);
+    }
+}
+
+fn draw_build_menu(f: &mut Frame, app: &TuiApp, area: Rect) {
+    let menu_w = 18u16;
+    let menu_h = BUILD_MENU_OPTIONS.len() as u16 + 2;
+    let x = area.x;
+    let y = area.y + area.height.saturating_sub(menu_h + 1);
+    let menu_area = Rect::new(x, y, menu_w.min(area.width), menu_h.min(area.height));
+
+    let block = Block::default().borders(Borders::ALL).title(" Build ");
+    let inner = block.inner(menu_area);
+    f.render_widget(block, menu_area);
+
+    let lines: Vec<Line> = BUILD_MENU_OPTIONS
+        .iter()
+        .enumerate()
+        .map(|(i, name)| {
+            let style = if i == app.build_menu_selected {
+                Style::default().fg(Color::White).add_modifier(Modifier::BOLD).bg(Color::DarkGray)
+            } else {
+                Style::default().fg(Color::Gray)
+            };
+            Line::from(Span::styled(format!(" {}", name), style))
+        })
+        .collect();
+    f.render_widget(Paragraph::new(lines), inner);
 }
 
 fn draw_game_over(f: &mut Frame, won: bool, handler_unlocked: bool, finale_text: Option<&str>) {

@@ -1,8 +1,9 @@
 // Combat module — damage, targeting, and resolution systems.
 
 use bevy::prelude::*;
-use crate::map::{CoverDensity, GridPos, Tile, damage_reduction};
-use crate::units::{UnitPos, MoveTarget};
+use crate::map::{CoverDensity, GridPos, Tile, damage_reduction, TerrainType};
+use crate::units::{UnitPos, MoveTarget, MoveProgress, UnitKind};
+use crate::map::pathfinding::{PathfindingGrid, UnitKind as PfUnitKind};
 
 #[derive(Component, Debug, Clone)]
 pub struct Health {
@@ -63,6 +64,11 @@ pub struct SuppressionContribution {
 #[derive(Component, Debug)] pub struct Pinned;
 #[derive(Component, Debug)] pub struct Routing;
 #[derive(Component)] pub struct TookDamageThisFrame;
+
+#[derive(Component, Debug, Clone)]
+pub struct PlayerAttackOrder {
+    pub target: Entity,
+}
 
 /// Records the most recent attacker. Used by unit AI for threat response.
 /// Refreshed on every successful hit; cleared by ai cleanup after a window.
@@ -560,6 +566,50 @@ pub fn clear_took_damage_system(
     }
 }
 
+pub fn player_attack_order_system(
+    mut commands: Commands,
+    attackers: Query<(Entity, &PlayerAttackOrder, &UnitPos, &AttackRange, Option<&UnitKind>), Without<Dead>>,
+    targets: Query<(&UnitPos, Option<&Health>), Without<Dead>>,
+    tiles: Query<&Tile>,
+) {
+    let tile_map: std::collections::HashMap<(i32, i32), TerrainType> = tiles
+        .iter()
+        .map(|t| ((t.pos.x, t.pos.y), t.terrain_type.clone()))
+        .collect();
+    let max_x = tile_map.keys().map(|(x, _)| *x).max().unwrap_or(32);
+    let max_y = tile_map.keys().map(|(_, y)| *y).max().unwrap_or(32);
+
+    for (attacker_entity, order, unit_pos, range, unit_kind) in &attackers {
+        let target_alive = targets.get(order.target).is_ok();
+        if !target_alive {
+            commands.entity(attacker_entity).remove::<PlayerAttackOrder>();
+            continue;
+        }
+        let (target_pos, _) = targets.get(order.target).unwrap();
+        if is_in_range(&unit_pos.pos, &target_pos.pos, range.tiles) {
+            commands.entity(attacker_entity).insert(AttackTarget { entity: order.target });
+        } else {
+            let pf_kind = match unit_kind {
+                Some(UnitKind::Vehicle) => PfUnitKind::Vehicle,
+                _ => PfUnitKind::Infantry,
+            };
+            let grid = PathfindingGrid {
+                width: max_x + 1,
+                height: max_y + 1,
+                tiles: tile_map.clone(),
+                unit_type: pf_kind,
+            };
+            if let Some(path) = grid.find_path(unit_pos.pos.clone(), target_pos.pos.clone()) {
+                let steps = path.len();
+                commands.entity(attacker_entity)
+                    .insert(MoveTarget { target: target_pos.pos.clone() })
+                    .insert(MoveProgress { path, current_step: 0, elapsed: 0.0 });
+                let _ = steps;
+            }
+        }
+    }
+}
+
 // --- Plugin ---
 
 pub struct CombatPlugin;
@@ -580,6 +630,7 @@ impl Plugin for CombatPlugin {
                 morale_system,
                 morale_decay_system,
                 death_system,
+                player_attack_order_system,
             )
                 .chain(),
         );

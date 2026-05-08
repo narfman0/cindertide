@@ -28,9 +28,10 @@ pub mod tui;
 pub mod narrative;
 
 use map::{MapPlugin, GridPos, Faction, ControlPoint, ControlPointType};
-use units::{UnitPlugin, MoveTarget, UnitPos, RiflemanBundle};
+use units::{UnitPlugin, MoveTarget, MoveProgress, UnitPos, UnitKind, RiflemanBundle};
+use combat::PlayerAttackOrder;
 use combat::{CombatPlugin, AttackTarget, Health, Morale, Suppression, Facing, morale_state};
-use resources::{ResourcesPlugin, FactionBundle, ResourcePool, ResourceTrickle, ResourceCost, spend};
+use resources::{ResourcesPlugin, FactionBundle, ResourcePool, ResourceTrickle, ResourceCost, spend, can_afford};
 use control::ControlPlugin;
 use buildings::{BuildingsPlugin, BuildingType, BuildingBundle, BuildingPos, ConstructionProgress, building_cost, try_pay, can_place, Built, UnderConstruction};
 use production::{ProductionPlugin, ProductionQueue, building_produces, try_enqueue, EnqueueError};
@@ -105,6 +106,9 @@ pub fn run_server() {
                 .with_method("narrative/mission", handle_narrative_mission)
                 .with_method("narrative/debrief", handle_narrative_debrief)
                 .with_method("narrative/finale", handle_narrative_finale)
+                .with_method("unit/move_path", handle_unit_move_path)
+                .with_method("unit/attack_order", handle_unit_attack_order)
+                .with_method("building/construct", handle_building_construct)
         )
         .add_plugins(RemoteHttpPlugin::default().with_port(15703))
         .add_plugins(MapPlugin)
@@ -190,6 +194,110 @@ fn handle_unit_move(In(params): In<Option<Value>>, world: &mut World) -> BrpResu
         });
 
     Ok(Value::Bool(true))
+}
+
+/// BRP handler for "unit/move_path": { entity_id, x, y } — pathfinds and issues move order.
+fn handle_unit_move_path(In(params): In<Option<Value>>, world: &mut World) -> BrpResult {
+    let params = params.ok_or_else(|| BrpError { code: -32602, message: "missing params".into(), data: None })?;
+    let entity_id = params["entity_id"].as_u64().ok_or_else(|| BrpError { code: -32602, message: "entity_id required".into(), data: None })?;
+    let tx = params["x"].as_i64().ok_or_else(|| BrpError { code: -32602, message: "x required".into(), data: None })? as i32;
+    let ty = params["y"].as_i64().ok_or_else(|| BrpError { code: -32602, message: "y required".into(), data: None })? as i32;
+
+    let entity = Entity::from_bits(entity_id);
+    let start = {
+        let er = world.get_entity(entity).map_err(|_| BrpError { code: -32602, message: format!("entity {entity_id} not found"), data: None })?;
+        er.get::<UnitPos>().ok_or_else(|| BrpError { code: -32602, message: "entity has no UnitPos".into(), data: None })?.pos.clone()
+    };
+    let unit_kind = {
+        let er = world.get_entity(entity).map_err(|_| BrpError { code: -32602, message: format!("entity {entity_id} not found"), data: None })?;
+        er.get::<UnitKind>().cloned()
+    };
+
+    let goal = map::GridPos { x: tx, y: ty };
+    let tile_map: std::collections::HashMap<(i32, i32), map::TerrainType> = {
+        let mut q = world.query::<&map::Tile>();
+        q.iter(world).map(|t| ((t.pos.x, t.pos.y), t.terrain_type.clone())).collect()
+    };
+    let max_x = tile_map.keys().map(|(x, _)| *x).max().unwrap_or(32);
+    let max_y = tile_map.keys().map(|(_, y)| *y).max().unwrap_or(32);
+    let pf_kind = match unit_kind {
+        Some(UnitKind::Vehicle) => map::pathfinding::UnitKind::Vehicle,
+        _ => map::pathfinding::UnitKind::Infantry,
+    };
+    let grid = map::pathfinding::PathfindingGrid { width: max_x + 1, height: max_y + 1, tiles: tile_map, unit_type: pf_kind };
+    match grid.find_path(start, goal) {
+        Some(path) => {
+            let steps = path.len();
+            world.get_entity_mut(entity).map_err(|_| BrpError { code: -32602, message: "entity not found".into(), data: None })?
+                .insert(MoveTarget { target: map::GridPos { x: tx, y: ty } })
+                .insert(MoveProgress { path, current_step: 0, elapsed: 0.0 });
+            Ok(serde_json::json!({ "ok": true, "steps": steps }))
+        }
+        None => Ok(serde_json::json!({ "ok": false, "reason": "no path" })),
+    }
+}
+
+/// BRP handler for "unit/attack_order": { entity_id, target_entity_id }
+fn handle_unit_attack_order(In(params): In<Option<Value>>, world: &mut World) -> BrpResult {
+    let params = params.ok_or_else(|| BrpError { code: -32602, message: "missing params".into(), data: None })?;
+    let entity_id = params["entity_id"].as_u64().ok_or_else(|| BrpError { code: -32602, message: "entity_id required".into(), data: None })?;
+    let target_id = params["target_entity_id"].as_u64().ok_or_else(|| BrpError { code: -32602, message: "target_entity_id required".into(), data: None })?;
+
+    let attacker = Entity::from_bits(entity_id);
+    let target = Entity::from_bits(target_id);
+
+    world.get_entity_mut(attacker).map_err(|_| BrpError { code: -32602, message: format!("entity {entity_id} not found"), data: None })?
+        .remove::<MoveTarget>()
+        .remove::<MoveProgress>()
+        .insert(PlayerAttackOrder { target });
+
+    Ok(serde_json::json!({ "ok": true }))
+}
+
+/// BRP handler for "building/construct": { x, y, building_type, faction } — player build order.
+fn handle_building_construct(In(params): In<Option<Value>>, world: &mut World) -> BrpResult {
+    let params = params.ok_or_else(|| BrpError { code: -32602, message: "missing params".into(), data: None })?;
+    let x = params["x"].as_i64().ok_or_else(|| BrpError { code: -32602, message: "x required".into(), data: None })? as i32;
+    let y = params["y"].as_i64().ok_or_else(|| BrpError { code: -32602, message: "y required".into(), data: None })? as i32;
+    let building_type = parse_building_type(params["building_type"].as_str().ok_or_else(|| BrpError { code: -32602, message: "building_type required".into(), data: None })?)?;
+    let faction_str = params["faction"].as_str().ok_or_else(|| BrpError { code: -32602, message: "faction required".into(), data: None })?;
+    let faction = parse_faction(faction_str)?;
+
+    let target = map::GridPos { x, y };
+    let mut occupied: std::collections::HashSet<map::GridPos> = std::collections::HashSet::new();
+    {
+        let mut q = world.query::<&BuildingPos>();
+        for bp in q.iter(world) { occupied.insert(bp.pos.clone()); }
+    }
+    if !can_place(&target, &occupied, &std::collections::HashSet::new()) {
+        return Ok(serde_json::json!({ "ok": false, "reason": "tile is occupied" }));
+    }
+
+    let cost = building_cost(&building_type);
+    let faction_entity = {
+        let mut q = world.query::<(Entity, &resources::FactionEntity)>();
+        q.iter(world)
+            .find(|(_, fe)| fe.faction == faction)
+            .map(|(e, _)| e)
+    };
+    let faction_entity = faction_entity.ok_or_else(|| BrpError { code: -32000, message: "faction entity not found".into(), data: None })?;
+
+    {
+        let mut f_mut = world.get_entity_mut(faction_entity).map_err(|_| BrpError { code: -32000, message: "faction entity gone".into(), data: None })?;
+        let mut pool = f_mut.get_mut::<resources::ResourcePool>().ok_or_else(|| BrpError { code: -32000, message: "faction has no ResourcePool".into(), data: None })?;
+        if !can_afford(&pool, &cost) {
+            return Ok(serde_json::json!({ "ok": false, "reason": "insufficient resources" }));
+        }
+        spend(&mut pool, &cost);
+    }
+
+    let bt_for_queue = building_type.clone();
+    let entity = world.spawn(BuildingBundle::new(building_type, faction, x, y)).id();
+    if !production::building_produces(&bt_for_queue).is_empty() {
+        world.entity_mut(entity).insert(production::ProductionQueue::default());
+    }
+
+    Ok(serde_json::json!({ "ok": true }))
 }
 
 /// BRP handler for "unit/spawn": { unit_type: "rifleman", x: i32, y: i32 }

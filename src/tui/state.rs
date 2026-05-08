@@ -105,11 +105,29 @@ pub struct TileSummary {
     pub cover: String,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum InputMode {
+    Normal,
+    Moving,
+    Attacking,
+    Building,
+}
+
+pub const BUILD_MENU_OPTIONS: &[&str] = &[
+    "Barracks", "Refinery", "Scrapyard", "Foundry", "SupplyDepot",
+    "MotorPool", "Pillbox", "RepairBay", "Workshop", "ResearchLab",
+];
+
 pub struct TuiApp {
     pub screen: Screen,
     pub snapshot: ServerSnapshot,
     pub should_quit: bool,
     pub last_error: Option<String>,
+    pub cursor: (i32, i32),
+    pub selected_unit: Option<u64>,
+    pub input_mode: InputMode,
+    pub build_menu_open: bool,
+    pub build_menu_selected: usize,
 }
 
 impl TuiApp {
@@ -119,7 +137,26 @@ impl TuiApp {
             snapshot: ServerSnapshot::default(),
             should_quit: false,
             last_error: None,
+            cursor: (0, 0),
+            selected_unit: None,
+            input_mode: InputMode::Normal,
+            build_menu_open: false,
+            build_menu_selected: 0,
         }
+    }
+
+    pub fn unit_at(&self, x: i32, y: i32) -> Option<&UnitSummary> {
+        self.snapshot.units.iter().find(|u| u.x == x && u.y == y)
+    }
+
+    pub fn player_unit_at(&self, x: i32, y: i32) -> Option<&UnitSummary> {
+        let player = self.snapshot.player.as_deref().unwrap_or("");
+        self.snapshot.units.iter().find(|u| u.x == x && u.y == y && u.faction == player)
+    }
+
+    pub fn enemy_unit_at(&self, x: i32, y: i32) -> Option<&UnitSummary> {
+        let player = self.snapshot.player.as_deref().unwrap_or("");
+        self.snapshot.units.iter().find(|u| u.x == x && u.y == y && u.faction != player)
     }
 
     /// Single poll tick — fetches whatever data the current screen needs.
@@ -408,18 +445,135 @@ impl TuiApp {
         }
     }
 
+    fn cursor_move(&mut self, dx: i32, dy: i32) {
+        self.cursor = (self.cursor.0 + dx, self.cursor.1 + dy);
+    }
+
     fn handle_in_mission(&mut self, key: KeyCode) {
+        match self.input_mode.clone() {
+            InputMode::Normal => self.handle_in_mission_normal(key),
+            InputMode::Moving => self.handle_in_mission_moving(key),
+            InputMode::Attacking => self.handle_in_mission_attacking(key),
+            InputMode::Building => self.handle_in_mission_building(key),
+        }
+    }
+
+    fn handle_in_mission_normal(&mut self, key: KeyCode) {
         match key {
             KeyCode::Char('q') => self.should_quit = true,
-            KeyCode::Esc => {
-                // Abandon mission — force resolve as loss.
-                let _ = super::call("game/abandon_mission", serde_json::json!({}));
-            }
             KeyCode::Char(' ') => {
-                let _ = super::call(
-                    "game/pause",
-                    serde_json::json!({ "paused": !self.snapshot.paused }),
-                );
+                let _ = super::call("game/pause", serde_json::json!({ "paused": !self.snapshot.paused }));
+            }
+            KeyCode::Char('h') | KeyCode::Left  => self.cursor_move(-1, 0),
+            KeyCode::Char('j') | KeyCode::Down  => self.cursor_move(0, 1),
+            KeyCode::Char('k') | KeyCode::Up    => self.cursor_move(0, -1),
+            KeyCode::Char('l') | KeyCode::Right => self.cursor_move(1, 0),
+            KeyCode::Enter => {
+                let (cx, cy) = self.cursor;
+                if let Some(u) = self.player_unit_at(cx, cy) {
+                    let id = u.entity_id;
+                    if self.selected_unit == Some(id) {
+                        self.selected_unit = None;
+                    } else {
+                        self.selected_unit = Some(id);
+                    }
+                } else {
+                    self.selected_unit = None;
+                }
+            }
+            KeyCode::Char('m') => {
+                if self.selected_unit.is_some() {
+                    self.input_mode = InputMode::Moving;
+                }
+            }
+            KeyCode::Char('a') => {
+                if self.selected_unit.is_some() {
+                    self.input_mode = InputMode::Attacking;
+                }
+            }
+            KeyCode::Char('b') => {
+                self.input_mode = InputMode::Building;
+                self.build_menu_open = true;
+                self.build_menu_selected = 0;
+            }
+            KeyCode::Esc => {
+                if self.selected_unit.is_some() {
+                    self.selected_unit = None;
+                } else {
+                    let _ = super::call("game/abandon_mission", serde_json::json!({}));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_in_mission_moving(&mut self, key: KeyCode) {
+        match key {
+            KeyCode::Char('h') | KeyCode::Left  => self.cursor_move(-1, 0),
+            KeyCode::Char('j') | KeyCode::Down  => self.cursor_move(0, 1),
+            KeyCode::Char('k') | KeyCode::Up    => self.cursor_move(0, -1),
+            KeyCode::Char('l') | KeyCode::Right => self.cursor_move(1, 0),
+            KeyCode::Enter => {
+                if let Some(entity_id) = self.selected_unit {
+                    let (cx, cy) = self.cursor;
+                    let _ = super::call("unit/move_path", serde_json::json!({ "entity_id": entity_id, "x": cx, "y": cy }));
+                }
+                self.input_mode = InputMode::Normal;
+            }
+            KeyCode::Esc => {
+                self.input_mode = InputMode::Normal;
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_in_mission_attacking(&mut self, key: KeyCode) {
+        match key {
+            KeyCode::Char('h') | KeyCode::Left  => self.cursor_move(-1, 0),
+            KeyCode::Char('j') | KeyCode::Down  => self.cursor_move(0, 1),
+            KeyCode::Char('k') | KeyCode::Up    => self.cursor_move(0, -1),
+            KeyCode::Char('l') | KeyCode::Right => self.cursor_move(1, 0),
+            KeyCode::Enter => {
+                if let Some(entity_id) = self.selected_unit {
+                    let (cx, cy) = self.cursor;
+                    if let Some(enemy) = self.enemy_unit_at(cx, cy) {
+                        let target_id = enemy.entity_id;
+                        let _ = super::call("unit/attack_order", serde_json::json!({ "entity_id": entity_id, "target_entity_id": target_id }));
+                    }
+                }
+                self.input_mode = InputMode::Normal;
+            }
+            KeyCode::Esc => {
+                self.input_mode = InputMode::Normal;
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_in_mission_building(&mut self, key: KeyCode) {
+        match key {
+            KeyCode::Char('h') | KeyCode::Left  => self.cursor_move(-1, 0),
+            KeyCode::Char('l') | KeyCode::Right => self.cursor_move(1, 0),
+            KeyCode::Char('j') => self.cursor_move(0, 1),
+            KeyCode::Char('k') => self.cursor_move(0, -1),
+            KeyCode::Down => {
+                self.build_menu_selected = (self.build_menu_selected + 1) % BUILD_MENU_OPTIONS.len();
+            }
+            KeyCode::Up => {
+                let n = BUILD_MENU_OPTIONS.len();
+                self.build_menu_selected = if self.build_menu_selected == 0 { n - 1 } else { self.build_menu_selected - 1 };
+            }
+            KeyCode::Enter => {
+                let (cx, cy) = self.cursor;
+                let building_type = BUILD_MENU_OPTIONS[self.build_menu_selected];
+                let faction = self.snapshot.player.clone().unwrap_or_default();
+                let _ = super::call("building/construct", serde_json::json!({ "x": cx, "y": cy, "building_type": building_type, "faction": faction }));
+                self.input_mode = InputMode::Normal;
+                self.build_menu_open = false;
+            }
+            KeyCode::Esc => {
+                self.input_mode = InputMode::Normal;
+                self.build_menu_open = false;
             }
             _ => {}
         }
