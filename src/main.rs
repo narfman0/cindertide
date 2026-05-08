@@ -6,12 +6,14 @@ mod map;
 mod units;
 mod combat;
 mod resources;
+mod control;
 mod ai;
 
-use map::{MapPlugin, GridPos, Faction};
+use map::{MapPlugin, GridPos, Faction, ControlPoint, ControlPointType};
 use units::{UnitPlugin, MoveTarget, UnitPos, RiflemanBundle};
 use combat::{CombatPlugin, AttackTarget, Health, Morale, Suppression, Facing, morale_state};
 use resources::{ResourcesPlugin, FactionBundle, ResourcePool, ResourceTrickle, ResourceCost, spend};
+use control::ControlPlugin;
 
 fn main() {
     App::new()
@@ -26,12 +28,15 @@ fn main() {
                 .with_method("faction/spawn", handle_faction_spawn)
                 .with_method("resources/status", handle_resources_status)
                 .with_method("resources/spend", handle_resources_spend)
+                .with_method("point/spawn", handle_point_spawn)
+                .with_method("point/status", handle_point_status)
         )
         .add_plugins(RemoteHttpPlugin::default().with_port(15703))
         .add_plugins(MapPlugin)
         .add_plugins(UnitPlugin)
         .add_plugins(CombatPlugin)
         .add_plugins(ResourcesPlugin)
+        .add_plugins(ControlPlugin)
         .add_systems(Startup, on_startup)
         .run();
 }
@@ -127,7 +132,21 @@ fn handle_unit_spawn(In(params): In<Option<Value>>, world: &mut World) -> BrpRes
             data: None,
         })? as i32;
 
-    let entity = world.spawn(RiflemanBundle::new(x, y)).id();
+    let faction = match params["faction"].as_str() {
+        Some("combine") | None => Faction::Combine,
+        Some("covenant") => Faction::Covenant,
+        Some("ironborn") => Faction::Ironborn,
+        Some("hollow") => Faction::Hollow,
+        Some(other) => {
+            return Err(BrpError {
+                code: -32602,
+                message: format!("unknown faction: {other}"),
+                data: None,
+            });
+        }
+    };
+
+    let entity = world.spawn(RiflemanBundle::with_faction(x, y, faction)).id();
     let entity_id = entity.to_bits();
 
     Ok(serde_json::json!({ "entity_id": entity_id }))
@@ -430,6 +449,118 @@ fn handle_resources_spend(In(params): In<Option<Value>>, world: &mut World) -> B
 
     let success = spend(&mut pool, &cost);
     Ok(serde_json::json!({ "success": success }))
+}
+
+fn parse_faction(s: &str) -> Result<Faction, BrpError> {
+    match s {
+        "combine" => Ok(Faction::Combine),
+        "covenant" => Ok(Faction::Covenant),
+        "ironborn" => Ok(Faction::Ironborn),
+        "hollow" => Ok(Faction::Hollow),
+        other => Err(BrpError {
+            code: -32602,
+            message: format!("unknown faction: {other}"),
+            data: None,
+        }),
+    }
+}
+
+fn parse_point_type(s: &str) -> Result<ControlPointType, BrpError> {
+    match s {
+        "strategic" => Ok(ControlPointType::Strategic),
+        "fuel_depot" => Ok(ControlPointType::FuelDepot),
+        "scrap_field" => Ok(ControlPointType::ScrapField),
+        "high_ground" => Ok(ControlPointType::HighGround),
+        "ancient_ruins" => Ok(ControlPointType::AncientRuins),
+        other => Err(BrpError {
+            code: -32602,
+            message: format!("unknown point type: {other}"),
+            data: None,
+        }),
+    }
+}
+
+/// BRP handler for "point/spawn": { point_type, x, y, radius?: f32 }
+fn handle_point_spawn(In(params): In<Option<Value>>, world: &mut World) -> BrpResult {
+    let params = params.ok_or_else(|| BrpError {
+        code: -32602,
+        message: "missing params".into(),
+        data: None,
+    })?;
+
+    let point_type = parse_point_type(params["point_type"].as_str().ok_or_else(|| BrpError {
+        code: -32602,
+        message: "point_type must be a string".into(),
+        data: None,
+    })?)?;
+
+    let x = params["x"].as_i64().ok_or_else(|| BrpError {
+        code: -32602,
+        message: "x must be an integer".into(),
+        data: None,
+    })? as i32;
+    let y = params["y"].as_i64().ok_or_else(|| BrpError {
+        code: -32602,
+        message: "y must be an integer".into(),
+        data: None,
+    })? as i32;
+    let radius = params["radius"].as_f64().unwrap_or(2.0) as f32;
+
+    let id = world
+        .spawn(ControlPoint {
+            point_type,
+            pos: GridPos { x, y },
+            capture_radius: radius,
+            owner: None,
+            contesting: None,
+            capture_progress: 0.0,
+        })
+        .id()
+        .to_bits();
+    Ok(serde_json::json!({ "entity_id": id }))
+}
+
+/// BRP handler for "point/status": { entity }
+fn handle_point_status(In(params): In<Option<Value>>, world: &mut World) -> BrpResult {
+    let params = params.ok_or_else(|| BrpError {
+        code: -32602,
+        message: "missing params".into(),
+        data: None,
+    })?;
+
+    let entity_id = params["entity"].as_u64().ok_or_else(|| BrpError {
+        code: -32602,
+        message: "entity must be a u64".into(),
+        data: None,
+    })?;
+
+    let entity = Entity::try_from_bits(entity_id).map_err(|_| BrpError {
+        code: -32602,
+        message: format!("entity {entity_id} not found"),
+        data: None,
+    })?;
+
+    let entity_ref = world.get_entity(entity).map_err(|_| BrpError {
+        code: -32602,
+        message: format!("entity {entity_id} not found"),
+        data: None,
+    })?;
+
+    let cp = entity_ref.get::<ControlPoint>().ok_or_else(|| BrpError {
+        code: -32602,
+        message: "entity is not a ControlPoint".into(),
+        data: None,
+    })?;
+
+    Ok(serde_json::json!({
+        "point_type": format!("{:?}", cp.point_type),
+        "pos_x": cp.pos.x,
+        "pos_y": cp.pos.y,
+        "capture_radius": cp.capture_radius,
+        "owner": cp.owner.as_ref().map(|f| format!("{:?}", f)),
+        "contesting": cp.contesting.as_ref().map(|f| format!("{:?}", f)),
+        "capture_progress": cp.capture_progress,
+    }))
 }
 
 fn on_startup() {

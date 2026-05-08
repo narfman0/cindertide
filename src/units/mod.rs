@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use crate::map::GridPos;
+use crate::map::{GridPos, Faction};
 use crate::combat::{
     Health, AttackRange, AttackDamage, AttackSpeed, AttackCooldown,
     Suppression, Morale, Facing, morale_state, MoraleState,
@@ -61,6 +61,7 @@ impl MoveProgress {
 pub struct RiflemanBundle {
     pub unit_type: UnitType,
     pub unit_kind: UnitKind,
+    pub faction: Faction,
     pub pos: UnitPos,
     pub facing: Facing,
     pub health: Health,
@@ -76,9 +77,14 @@ pub struct RiflemanBundle {
 
 impl RiflemanBundle {
     pub fn new(x: i32, y: i32) -> Self {
+        Self::with_faction(x, y, Faction::Combine)
+    }
+
+    pub fn with_faction(x: i32, y: i32, faction: Faction) -> Self {
         Self {
             unit_type: UnitType::Riflemen,
             unit_kind: UnitKind::Infantry,
+            faction,
             pos: UnitPos { pos: GridPos { x, y } },
             facing: Facing::North,
             health: Health { current: 100.0, max: 100.0 },

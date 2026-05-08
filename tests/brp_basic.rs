@@ -242,3 +242,91 @@ fn brp_manpower_trickles_over_time() {
         "manpower should trickle: before={m_before} after={m_after}"
     );
 }
+
+fn spawn_point(point_type: &str, x: i32, y: i32, radius: f64) -> u64 {
+    let resp = post(
+        "point/spawn",
+        serde_json::json!({
+            "point_type": point_type,
+            "x": x,
+            "y": y,
+            "radius": radius,
+        }),
+    );
+    resp["result"]["entity_id"].as_u64().expect("entity_id u64")
+}
+
+fn point_status(entity: u64) -> serde_json::Value {
+    let resp = post("point/status", serde_json::json!({ "entity": entity }));
+    resp["result"].clone()
+}
+
+fn spawn_rifleman_with_faction(x: i32, y: i32, faction: &str) -> u64 {
+    let resp = post(
+        "unit/spawn",
+        serde_json::json!({
+            "unit_type": "rifleman",
+            "x": x,
+            "y": y,
+            "faction": faction,
+        }),
+    );
+    resp["result"]["entity_id"].as_u64().expect("entity_id u64")
+}
+
+#[test]
+#[ignore = "requires a running Cindertide server on port 15703"]
+fn brp_lone_unit_captures_neutral_point() {
+    let _faction = spawn_faction("combine");
+    let pt = spawn_point("strategic", 100, 100, 2.0);
+    let _u = spawn_rifleman_with_faction(100, 100, "combine");
+
+    // capture_rate = 0.2/s; full capture at 5s. Wait 6s for safety.
+    std::thread::sleep(std::time::Duration::from_millis(6000));
+
+    let s = point_status(pt);
+    assert_eq!(
+        s["owner"].as_str().unwrap(),
+        "Combine",
+        "expected Combine to own point: {s}"
+    );
+}
+
+#[test]
+#[ignore = "requires a running Cindertide server on port 15703"]
+fn brp_contested_point_does_not_capture() {
+    let _f1 = spawn_faction("combine");
+    let _f2 = spawn_faction("hollow");
+    let pt = spawn_point("strategic", 200, 200, 2.0);
+    let _u1 = spawn_rifleman_with_faction(200, 200, "combine");
+    let _u2 = spawn_rifleman_with_faction(201, 200, "hollow");
+
+    std::thread::sleep(std::time::Duration::from_millis(2000));
+
+    let s = point_status(pt);
+    assert!(
+        s["owner"].is_null(),
+        "expected contested point to remain neutral: {s}"
+    );
+}
+
+#[test]
+#[ignore = "requires a running Cindertide server on port 15703"]
+fn brp_held_fuel_depot_boosts_combine_fuel_trickle() {
+    let combine = spawn_faction("combine");
+    let pt = spawn_point("fuel_depot", 300, 300, 2.0);
+    let _u = spawn_rifleman_with_faction(300, 300, "combine");
+
+    // Wait for capture (~5s) then a moment for trickle to apply.
+    std::thread::sleep(std::time::Duration::from_millis(7000));
+
+    let s = point_status(pt);
+    assert_eq!(s["owner"].as_str().unwrap(), "Combine");
+
+    let r = resources_status(combine);
+    let fuel_trickle = r["fuel_trickle"].as_f64().unwrap();
+    assert!(
+        (fuel_trickle - 7.5).abs() < 0.01,
+        "expected combine fuel trickle 7.5, got {fuel_trickle}: {r}"
+    );
+}

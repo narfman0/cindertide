@@ -32,8 +32,8 @@ pub enum ControlPointType {
     AncientRuins,
 }
 
-// Faction owner
-#[derive(Debug, Clone, PartialEq)]
+// Faction owner — also a Component so units carry their allegiance.
+#[derive(Component, Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Faction {
     Combine,
     Covenant,
@@ -65,7 +65,10 @@ pub struct Tile {
 #[derive(Component)]
 pub struct ControlPoint {
     pub point_type: ControlPointType,
+    pub pos: GridPos,
+    pub capture_radius: f32,
     pub owner: Option<Faction>,
+    pub contesting: Option<Faction>,
     pub capture_progress: f32,
 }
 
