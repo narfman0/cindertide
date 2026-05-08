@@ -14,6 +14,7 @@ mod tech;
 mod unit_ai;
 mod repair;
 mod mapgen;
+mod mission;
 mod ai;
 
 use map::{MapPlugin, GridPos, Faction, ControlPoint, ControlPointType};
@@ -28,6 +29,7 @@ use tech::{TechPlugin, Tech, Tier, Doctrine, ResearchTarget, ResearchInProgress,
 use unit_ai::UnitAiPlugin;
 use repair::RepairPlugin;
 use ai::{AiPlugin, AiController};
+use mission::{MissionPlugin, Mission, MissionStatus};
 
 fn main() {
     App::new()
@@ -50,6 +52,8 @@ fn main() {
                 .with_method("dev/give_resources", handle_dev_give_resources)
                 .with_method("ai/enable", handle_ai_enable)
                 .with_method("map/generate", handle_map_generate)
+                .with_method("mission/start", handle_mission_start)
+                .with_method("mission/status", handle_mission_status)
                 .with_method("production/enqueue", handle_production_enqueue)
                 .with_method("production/queue_status", handle_production_queue_status)
                 .with_method("hero/spawn", handle_hero_spawn)
@@ -71,6 +75,7 @@ fn main() {
         .add_plugins(UnitAiPlugin)
         .add_plugins(RepairPlugin)
         .add_plugins(AiPlugin)
+        .add_plugins(MissionPlugin)
         .add_systems(Startup, on_startup)
         .run();
 }
@@ -1317,6 +1322,69 @@ fn handle_hero_ability_use(In(params): In<Option<Value>>, world: &mut World) -> 
     Ok(serde_json::json!({ "fired": true }))
 }
 
+/// BRP handler for "mission/start": { mission_type, player, opponent, deadline? }
+fn handle_mission_start(In(params): In<Option<Value>>, world: &mut World) -> BrpResult {
+    let params = params.ok_or_else(|| BrpError {
+        code: -32602,
+        message: "missing params".into(),
+        data: None,
+    })?;
+    let mission_type = parse_mission_type(params["mission_type"].as_str().unwrap_or("control"))?;
+    let player = parse_faction(params["player"].as_str().unwrap_or("combine"))?;
+    let opponent = parse_faction(params["opponent"].as_str().unwrap_or("hollow"))?;
+    let deadline = params["deadline"].as_f64().unwrap_or(300.0) as f32;
+
+    let id = world
+        .spawn(Mission {
+            mission_type,
+            player_faction: player,
+            opponent_faction: opponent,
+            status: MissionStatus::Active,
+            elapsed: 0.0,
+            deadline,
+        })
+        .id()
+        .to_bits();
+    Ok(serde_json::json!({ "entity_id": id }))
+}
+
+/// BRP handler for "mission/status": { entity }
+fn handle_mission_status(In(params): In<Option<Value>>, world: &mut World) -> BrpResult {
+    let params = params.ok_or_else(|| BrpError {
+        code: -32602,
+        message: "missing params".into(),
+        data: None,
+    })?;
+    let entity_id = params["entity"].as_u64().ok_or_else(|| BrpError {
+        code: -32602,
+        message: "entity required".into(),
+        data: None,
+    })?;
+    let entity = Entity::try_from_bits(entity_id).map_err(|_| BrpError {
+        code: -32602,
+        message: format!("entity {entity_id} not found"),
+        data: None,
+    })?;
+    let r = world.get_entity(entity).map_err(|_| BrpError {
+        code: -32602,
+        message: format!("entity {entity_id} not found"),
+        data: None,
+    })?;
+    let m = r.get::<Mission>().ok_or_else(|| BrpError {
+        code: -32602,
+        message: "entity is not a Mission".into(),
+        data: None,
+    })?;
+    Ok(serde_json::json!({
+        "mission_type": format!("{:?}", m.mission_type),
+        "player": format!("{:?}", m.player_faction),
+        "opponent": format!("{:?}", m.opponent_faction),
+        "status": format!("{:?}", m.status),
+        "elapsed": m.elapsed,
+        "deadline": m.deadline,
+    }))
+}
+
 fn parse_mission_type(s: &str) -> Result<mapgen::MissionType, BrpError> {
     match s {
         "assault" => Ok(mapgen::MissionType::Assault),
@@ -1456,6 +1524,7 @@ fn handle_dev_reset(In(_params): In<Option<Value>>, world: &mut World) -> BrpRes
             With<BuildingType>,
             With<Hero>,
             With<map::Tile>,
+            With<Mission>,
         )>>();
         for e in q.iter(world) {
             to_despawn.push(e);

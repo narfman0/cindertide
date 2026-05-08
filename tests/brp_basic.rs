@@ -206,6 +206,26 @@ fn spawn_unit(unit_type: &str, x: i32, y: i32) -> u64 {
 
 #[test]
 #[ignore = "requires a running Cindertide server on port 15703"]
+fn brp_mission_starts_active() {
+    let _g = lock_world();
+    let resp = post(
+        "mission/start",
+        serde_json::json!({
+            "mission_type": "control",
+            "player": "combine",
+            "opponent": "hollow",
+            "deadline": 600.0,
+        }),
+    );
+    let mid = resp["result"]["entity_id"].as_u64().unwrap();
+    let s = post("mission/status", serde_json::json!({ "entity": mid }));
+    let r = &s["result"];
+    assert_eq!(r["status"].as_str().unwrap(), "Active");
+    assert_eq!(r["mission_type"].as_str().unwrap(), "Control");
+}
+
+#[test]
+#[ignore = "requires a running Cindertide server on port 15703"]
 fn brp_map_generate_assault_layout() {
     let _g = lock_world();
     let resp = post(
