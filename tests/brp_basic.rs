@@ -206,6 +206,37 @@ fn spawn_unit(unit_type: &str, x: i32, y: i32) -> u64 {
 
 #[test]
 #[ignore = "requires a running Cindertide server on port 15703"]
+fn brp_beats_fired_starts_empty_and_records_hero_down() {
+    let _g = lock_world();
+    let r0 = post("beats/fired", serde_json::json!({}));
+    let fired0 = r0["result"]["fired"].as_array().unwrap();
+    assert!(fired0.iter().all(|b| b.as_str() != Some("HeroGoesDown")));
+
+    // Spawn a hero, kill them via massive damage by ordering attack.
+    let hero = spawn_hero("Iron", "combine", 0, 0, "rally");
+    // Heroes have 500 HP; need a lot of damage. Spawn many enemies.
+    for i in 0..6 {
+        let e = spawn_rifleman_with_faction(2 + i, 0, "hollow");
+        post(
+            "combat/attack",
+            serde_json::json!({ "attacker_entity": e, "target_entity": hero }),
+        );
+    }
+    std::thread::sleep(std::time::Duration::from_millis(20_000));
+
+    let s = hero_status(hero);
+    assert_eq!(s["downed"].as_bool().unwrap(), true, "hero should be downed: {s}");
+
+    let r1 = post("beats/fired", serde_json::json!({}));
+    let fired1 = r1["result"]["fired"].as_array().unwrap();
+    assert!(
+        fired1.iter().any(|b| b.as_str() == Some("HeroGoesDown")),
+        "expected HeroGoesDown beat: {fired1:?}"
+    );
+}
+
+#[test]
+#[ignore = "requires a running Cindertide server on port 15703"]
 fn brp_campaign_init_and_advance_changes_zone_owner() {
     let _g = lock_world();
     post("campaign/init", serde_json::json!({}));

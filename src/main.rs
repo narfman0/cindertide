@@ -16,6 +16,7 @@ mod repair;
 mod mapgen;
 mod mission;
 mod campaign;
+mod beats;
 mod ai;
 
 use map::{MapPlugin, GridPos, Faction, ControlPoint, ControlPointType};
@@ -32,6 +33,7 @@ use repair::RepairPlugin;
 use ai::{AiPlugin, AiController};
 use mission::{MissionPlugin, Mission, MissionStatus};
 use campaign::{CampaignState, default_state, apply_mission_outcome, spread_corruption, generate_mission_options};
+use beats::{BeatsPlugin, FiredBeats};
 
 fn main() {
     App::new()
@@ -60,6 +62,7 @@ fn main() {
                 .with_method("campaign/state", handle_campaign_state)
                 .with_method("campaign/advance", handle_campaign_advance)
                 .with_method("campaign/options", handle_campaign_options)
+                .with_method("beats/fired", handle_beats_fired)
                 .with_method("production/enqueue", handle_production_enqueue)
                 .with_method("production/queue_status", handle_production_queue_status)
                 .with_method("hero/spawn", handle_hero_spawn)
@@ -82,6 +85,7 @@ fn main() {
         .add_plugins(RepairPlugin)
         .add_plugins(AiPlugin)
         .add_plugins(MissionPlugin)
+        .add_plugins(BeatsPlugin)
         .add_systems(Startup, on_startup)
         .run();
 }
@@ -1328,6 +1332,20 @@ fn handle_hero_ability_use(In(params): In<Option<Value>>, world: &mut World) -> 
     Ok(serde_json::json!({ "fired": true }))
 }
 
+/// BRP handler for "beats/fired": returns the set of authored beats that
+/// have triggered so far.
+fn handle_beats_fired(In(_params): In<Option<Value>>, world: &mut World) -> BrpResult {
+    let fired = world
+        .get_resource::<FiredBeats>()
+        .map(|f| {
+            f.0.iter()
+                .map(|b| format!("{:?}", b))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    Ok(serde_json::json!({ "fired": fired }))
+}
+
 /// BRP handler for "campaign/init": initializes the default 4-zone campaign state.
 fn handle_campaign_init(In(_params): In<Option<Value>>, world: &mut World) -> BrpResult {
     world.insert_resource(default_state());
@@ -1615,6 +1633,11 @@ fn handle_dev_reset(In(_params): In<Option<Value>>, world: &mut World) -> BrpRes
     for e in to_despawn {
         world.despawn(e);
     }
+    // Reset resources that accumulate across runs.
+    if let Some(mut fired) = world.get_resource_mut::<FiredBeats>() {
+        fired.0.clear();
+    }
+    world.remove_resource::<CampaignState>();
     Ok(serde_json::json!({ "despawned": count }))
 }
 
