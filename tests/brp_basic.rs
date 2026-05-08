@@ -85,3 +85,94 @@ fn brp_combat_status_method_registered() {
     let code = err.get("code").and_then(|c| c.as_i64()).unwrap_or(0);
     assert_eq!(code, -32602, "expected entity-not-found, got: {json}");
 }
+
+/// Spawn a rifleman via BRP, then check unit/status returns health_current == 100.0.
+#[test]
+#[ignore = "requires a running Cindertide server on port 15703"]
+fn brp_unit_spawn_and_status() {
+    // Step 1: spawn rifleman at (0, 0)
+    let spawn_resp = post(
+        "unit/spawn",
+        serde_json::json!({ "unit_type": "rifleman", "x": 0, "y": 0 }),
+    );
+    let result = spawn_resp.get("result").expect("expected result from unit/spawn");
+    let entity_id = result["entity_id"]
+        .as_u64()
+        .expect("entity_id should be a u64");
+
+    // Step 2: query unit/status
+    let status_resp = post(
+        "unit/status",
+        serde_json::json!({ "entity": entity_id }),
+    );
+    let status = status_resp.get("result").expect("expected result from unit/status");
+    let health_current = status["health_current"]
+        .as_f64()
+        .expect("health_current should be a float");
+    assert_eq!(health_current, 100.0, "rifleman health_current should be 100.0 at spawn");
+}
+
+fn spawn_rifleman(x: i32, y: i32) -> u64 {
+    let resp = post(
+        "unit/spawn",
+        serde_json::json!({ "unit_type": "rifleman", "x": x, "y": y }),
+    );
+    resp["result"]["entity_id"]
+        .as_u64()
+        .expect("entity_id u64")
+}
+
+fn unit_status(entity: u64) -> serde_json::Value {
+    let resp = post("unit/status", serde_json::json!({ "entity": entity }));
+    resp["result"].clone()
+}
+
+fn combat_status(entity: u64) -> serde_json::Value {
+    let resp = post("combat/status", serde_json::json!({ "entity": entity }));
+    resp["result"].clone()
+}
+
+/// End-to-end: two riflemen, one orders an attack against the other; after a
+/// short wait the target's health drops, suppression accumulates, and after
+/// enough fire the target becomes pinned.
+#[test]
+#[ignore = "requires a running Cindertide server on port 15703"]
+fn brp_combat_live_fire_drops_health_and_accumulates_suppression() {
+    let attacker = spawn_rifleman(0, 0);
+    let target = spawn_rifleman(2, 0);
+
+    let before = combat_status(target);
+    assert_eq!(before["health_current"].as_f64().unwrap(), 100.0);
+    assert_eq!(before["suppression_current"].as_f64().unwrap(), 0.0);
+
+    let attack = post(
+        "combat/attack",
+        serde_json::json!({ "attacker_entity": attacker, "target_entity": target }),
+    );
+    assert!(
+        attack.get("result").is_some(),
+        "combat/attack should succeed: {attack}"
+    );
+
+    // Let combat run for a couple of seconds — attacker fires every 1s.
+    std::thread::sleep(std::time::Duration::from_millis(2200));
+
+    let after = combat_status(target);
+    let health = after["health_current"].as_f64().unwrap();
+    let supp = after["suppression_current"].as_f64().unwrap();
+    assert!(health < 100.0, "expected health to drop, got {health}; full: {after}");
+    assert!(supp > 0.0, "expected suppression to accumulate, got {supp}; full: {after}");
+}
+
+/// Verify spawn returns a usable entity id and unit/status reflects facing
+/// (default North) and the morale system reports Steady at 100/100.
+#[test]
+#[ignore = "requires a running Cindertide server on port 15703"]
+fn brp_unit_status_includes_facing_and_morale() {
+    let id = spawn_rifleman(5, 5);
+    let s = unit_status(id);
+    assert_eq!(s["facing"].as_str().unwrap(), "North");
+    assert_eq!(s["morale_state"].as_str().unwrap(), "Steady");
+    assert_eq!(s["pos_x"].as_i64().unwrap(), 5);
+    assert_eq!(s["pos_y"].as_i64().unwrap(), 5);
+}

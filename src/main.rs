@@ -9,8 +9,8 @@ mod resources;
 mod ai;
 
 use map::{MapPlugin, GridPos};
-use units::{UnitPlugin, MoveTarget};
-use combat::{CombatPlugin, AttackTarget, Health, Morale, morale_state};
+use units::{UnitPlugin, MoveTarget, UnitPos, RiflemanBundle};
+use combat::{CombatPlugin, AttackTarget, Health, Morale, Suppression, Facing, morale_state};
 
 fn main() {
     App::new()
@@ -18,6 +18,8 @@ fn main() {
         .add_plugins(
             RemotePlugin::default()
                 .with_method("unit/move", handle_unit_move)
+                .with_method("unit/spawn", handle_unit_spawn)
+                .with_method("unit/status", handle_unit_status)
                 .with_method("combat/attack", handle_combat_attack)
                 .with_method("combat/status", handle_combat_status)
         )
@@ -77,6 +79,116 @@ fn handle_unit_move(In(params): In<Option<Value>>, world: &mut World) -> BrpResu
         });
 
     Ok(Value::Bool(true))
+}
+
+/// BRP handler for "unit/spawn": { unit_type: "rifleman", x: i32, y: i32 }
+/// Spawns the unit and returns { entity_id: u64 }.
+fn handle_unit_spawn(In(params): In<Option<Value>>, world: &mut World) -> BrpResult {
+    let params = params.ok_or_else(|| BrpError {
+        code: -32602,
+        message: "missing params".into(),
+        data: None,
+    })?;
+
+    let unit_type = params["unit_type"]
+        .as_str()
+        .ok_or_else(|| BrpError {
+            code: -32602,
+            message: "unit_type must be a string".into(),
+            data: None,
+        })?;
+
+    if unit_type != "rifleman" {
+        return Err(BrpError {
+            code: -32602,
+            message: format!("unknown unit_type: {unit_type}"),
+            data: None,
+        });
+    }
+
+    let x = params["x"]
+        .as_i64()
+        .ok_or_else(|| BrpError {
+            code: -32602,
+            message: "x must be an integer".into(),
+            data: None,
+        })? as i32;
+
+    let y = params["y"]
+        .as_i64()
+        .ok_or_else(|| BrpError {
+            code: -32602,
+            message: "y must be an integer".into(),
+            data: None,
+        })? as i32;
+
+    let entity = world.spawn(RiflemanBundle::new(x, y)).id();
+    let entity_id = entity.to_bits();
+
+    Ok(serde_json::json!({ "entity_id": entity_id }))
+}
+
+/// BRP handler for "unit/status": { entity: u64 }
+/// Returns full unit status including type, position, health, suppression, morale.
+fn handle_unit_status(In(params): In<Option<Value>>, world: &mut World) -> BrpResult {
+    let params = params.ok_or_else(|| BrpError {
+        code: -32602,
+        message: "missing params".into(),
+        data: None,
+    })?;
+
+    let entity_id = params["entity"]
+        .as_u64()
+        .ok_or_else(|| BrpError {
+            code: -32602,
+            message: "entity must be a u64".into(),
+            data: None,
+        })?;
+
+    let entity = Entity::try_from_bits(entity_id).map_err(|_| BrpError {
+        code: -32602,
+        message: format!("entity {entity_id} not found"),
+        data: None,
+    })?;
+
+    let entity_ref = world
+        .get_entity(entity)
+        .map_err(|_| BrpError {
+            code: -32602,
+            message: format!("entity {entity_id} not found"),
+            data: None,
+        })?;
+
+    let unit_type = entity_ref
+        .get::<units::UnitType>()
+        .map(|t| format!("{:?}", t))
+        .unwrap_or_else(|| "unknown".into());
+
+    let pos = entity_ref.get::<UnitPos>();
+    let health = entity_ref.get::<Health>().ok_or_else(|| BrpError {
+        code: -32602,
+        message: "entity has no Health component".into(),
+        data: None,
+    })?;
+
+    let is_dead = entity_ref.get::<combat::Dead>().is_some();
+    let facing = entity_ref.get::<Facing>().map(|f| format!("{:?}", f));
+    let suppression = entity_ref.get::<Suppression>();
+    let morale = entity_ref.get::<Morale>();
+    let morale_st = morale.map(morale_state).map(|s| format!("{:?}", s));
+
+    Ok(serde_json::json!({
+        "unit_type": unit_type,
+        "pos_x": pos.map(|p| p.pos.x),
+        "pos_y": pos.map(|p| p.pos.y),
+        "facing": facing,
+        "health_current": health.current,
+        "health_max": health.max,
+        "is_dead": is_dead,
+        "suppression_current": suppression.map(|s| s.current),
+        "morale_current": morale.map(|m| m.current),
+        "morale_state": morale_st,
+    }))
 }
 
 /// BRP handler for "combat/attack": { attacker_entity, target_entity }

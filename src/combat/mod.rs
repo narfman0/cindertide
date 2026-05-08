@@ -268,62 +268,104 @@ pub fn cooldown_system(time: Res<Time>, mut query: Query<&mut AttackCooldown>) {
     }
 }
 
+struct PendingAttack {
+    attacker: Entity,
+    target: Entity,
+    base_damage: f32,
+    suppression_value: f32,
+    attacker_pos: GridPos,
+    range: f32,
+    attacker_mult: f32,
+    attacks_per_second: f32,
+}
+
 pub fn attack_system(
     mut commands: Commands,
-    mut attackers: Query<(
-        Entity,
-        &AttackTarget,
-        &AttackDamage,
-        &mut AttackCooldown,
-        &UnitPos,
-        &AttackSpeed,
-        &AttackRange,
-        Option<&Suppression>,
-        Option<&SuppressionContribution>,
+    mut queries: ParamSet<(
+        Query<(
+            Entity,
+            &AttackTarget,
+            &AttackDamage,
+            &AttackCooldown,
+            &UnitPos,
+            &AttackSpeed,
+            &AttackRange,
+            Option<&Suppression>,
+        )>,
+        Query<&mut AttackCooldown>,
+        Query<(&mut Health, &UnitPos, Option<&InCover>, Option<&mut Suppression>, Option<&Facing>), Without<Dead>>,
     )>,
-    mut targets: Query<(&mut Health, &UnitPos, Option<&InCover>, Option<&mut Suppression>, Option<&Facing>), Without<Dead>>,
 ) {
-    let mut to_remove_target: Vec<Entity> = Vec::new();
-
-    for (attacker_entity, attack_target, damage, mut cooldown, attacker_pos, speed, range, attacker_supp, supp_contrib) in &mut attackers {
-        if cooldown.remaining > 0.0 {
+    // Phase 1: read attackers, collect actions; no mutation yet so the
+    // attacker-side Suppression read does not conflict with the target-side
+    // mut borrow in p2.
+    let mut pending: Vec<PendingAttack> = Vec::new();
+    for (entity, at, dmg, cd, pos, spd, range, supp) in queries.p0().iter() {
+        if cd.remaining > 0.0 {
             continue;
         }
+        let mult = supp.map(suppression_output_multiplier).unwrap_or(1.0);
+        pending.push(PendingAttack {
+            attacker: entity,
+            target: at.entity,
+            base_damage: dmg.base,
+            suppression_value: dmg.suppression_value,
+            attacker_pos: pos.pos.clone(),
+            range: range.tiles,
+            attacker_mult: mult,
+            attacks_per_second: spd.attacks_per_second,
+        });
+    }
 
-        let target_entity = attack_target.entity;
-
-        if let Ok((mut health, target_pos, in_cover, target_supp, target_facing)) = targets.get_mut(target_entity) {
-            if is_in_range(&attacker_pos.pos, &target_pos.pos, range.tiles) {
-                let angle = target_facing.map(|f| attack_angle(&attacker_pos.pos, &target_pos.pos, f));
-                let attacker_mult = attacker_supp
-                    .map(suppression_output_multiplier)
-                    .unwrap_or(1.0);
-                let final_damage = effective_damage(damage.base, in_cover, angle) * attacker_mult;
-                let died = apply_damage(&mut health, final_damage);
-
-                if final_damage > 0.0 {
-                    commands.entity(target_entity).insert(TookDamageThisFrame);
+    // Phase 2: apply effects to targets; record successful hits and stale targets.
+    let mut hits: Vec<(Entity, f32)> = Vec::new();
+    let mut to_remove_target: Vec<Entity> = Vec::new();
+    let mut took_damage: Vec<Entity> = Vec::new();
+    {
+        let mut targets = queries.p2();
+        for p in &pending {
+            match targets.get_mut(p.target) {
+                Ok((mut health, tpos, cover, tsupp, tfacing)) => {
+                    if !is_in_range(&p.attacker_pos, &tpos.pos, p.range) {
+                        continue;
+                    }
+                    let angle = tfacing.map(|f| attack_angle(&p.attacker_pos, &tpos.pos, f));
+                    let dmg = effective_damage(p.base_damage, cover, angle) * p.attacker_mult;
+                    let died = apply_damage(&mut health, dmg);
+                    if dmg > 0.0 {
+                        took_damage.push(p.target);
+                    }
+                    let supp_gain = suppression_gain_per_hit(p.suppression_value, cover) * p.attacker_mult;
+                    if let Some(mut ts) = tsupp {
+                        add_suppression(&mut ts, supp_gain);
+                    }
+                    hits.push((p.attacker, p.attacks_per_second));
+                    if died {
+                        to_remove_target.push(p.attacker);
+                    }
                 }
-
-                // Add suppression from weapon suppression_value
-                let supp_gain = suppression_gain_per_hit(damage.suppression_value, in_cover);
-                if let Some(mut ts) = target_supp {
-                    add_suppression(&mut ts, supp_gain * attacker_mult);
-                }
-
-                let _ = supp_contrib; // legacy field; suppression now handled via suppression_value
-
-                cooldown.remaining = 1.0 / speed.attacks_per_second;
-                if died {
-                    to_remove_target.push(attacker_entity);
+                Err(_) => {
+                    to_remove_target.push(p.attacker);
                 }
             }
-        } else {
-            // Target missing (dead or despawned), remove target
-            to_remove_target.push(attacker_entity);
         }
     }
 
+    // Phase 3: reset cooldowns on attackers whose attack landed.
+    {
+        let mut cooldowns = queries.p1();
+        for (entity, aps) in hits {
+            if let Ok(mut cd) = cooldowns.get_mut(entity) {
+                cd.remaining = 1.0 / aps;
+            }
+        }
+    }
+
+    for entity in took_damage {
+        if let Ok(mut e) = commands.get_entity(entity) {
+            e.insert(TookDamageThisFrame);
+        }
+    }
     for entity in to_remove_target {
         if let Ok(mut e) = commands.get_entity(entity) {
             e.remove::<AttackTarget>();
