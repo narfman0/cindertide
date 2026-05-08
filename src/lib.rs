@@ -104,6 +104,7 @@ pub fn run_server() {
                 .with_method("game/abandon_mission", handle_game_abandon_mission)
                 .with_method("narrative/mission", handle_narrative_mission)
                 .with_method("narrative/debrief", handle_narrative_debrief)
+                .with_method("narrative/finale", handle_narrative_finale)
         )
         .add_plugins(RemoteHttpPlugin::default().with_port(15703))
         .add_plugins(MapPlugin)
@@ -2776,5 +2777,26 @@ fn handle_narrative_debrief(In(params): In<Option<Value>>, world: &mut World) ->
         data: None,
     })?;
     let text = if won { &mission.win } else { &mission.loss };
+    Ok(serde_json::json!({ "text": text }))
+}
+
+fn handle_narrative_finale(In(_params): In<Option<Value>>, world: &mut World) -> BrpResult {
+    let (has_beaten, combine_beaten_first) = world
+        .get_resource::<GlobalProgress>()
+        .map(|g| {
+            let beaten = g.first_beaten.is_some();
+            let combine_first = g.first_beaten.as_ref().map(|f| matches!(f, PlayableFaction::Combine)).unwrap_or(false);
+            (beaten, combine_first)
+        })
+        .unwrap_or((false, false));
+    if !has_beaten {
+        return Ok(serde_json::json!({ "text": "" }));
+    }
+    let narrative = world.get_resource::<narrative::NarrativeData>().ok_or_else(|| BrpError {
+        code: -32000,
+        message: "narrative data not loaded".into(),
+        data: None,
+    })?;
+    let text = narrative.finale(combine_beaten_first);
     Ok(serde_json::json!({ "text": text }))
 }

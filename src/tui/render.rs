@@ -11,11 +11,13 @@ use super::state::{Screen, TuiApp, UnitSummary, BuildingSummary, TileSummary};
 pub fn draw(f: &mut Frame, app: &TuiApp) {
     match &app.screen {
         Screen::Title { selected } => draw_title(f, *selected),
-        Screen::FactionPicker { selected } => draw_faction_picker(f, *selected),
+        Screen::FactionPicker { selected } => draw_faction_picker(f, *selected, app.snapshot.handler_unlocked),
         Screen::LoadPicker { selected, slots } => draw_load_picker(f, *selected, slots),
         Screen::Campaign => draw_campaign(f, app),
+        Screen::Briefing { title, briefing } => draw_briefing(f, title, briefing),
         Screen::InMission => draw_in_mission(f, app),
-        Screen::GameOver { won, handler_unlocked } => draw_game_over(f, *won, *handler_unlocked),
+        Screen::Debrief { title, text, won } => draw_debrief(f, title, text, *won),
+        Screen::GameOver { won, handler_unlocked } => draw_game_over(f, *won, *handler_unlocked, app.snapshot.finale_text.as_deref()),
     }
 }
 
@@ -58,7 +60,7 @@ fn draw_title(f: &mut Frame, selected: usize) {
     f.render_widget(Paragraph::new(lines), inner);
 }
 
-fn draw_faction_picker(f: &mut Frame, selected: usize) {
+fn draw_faction_picker(f: &mut Frame, selected: usize, handler_unlocked: bool) {
     let area = f.area();
     let block = Block::default()
         .borders(Borders::ALL)
@@ -66,10 +68,13 @@ fn draw_faction_picker(f: &mut Frame, selected: usize) {
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    let factions = [
+    let mut factions: Vec<(&str, &str, Color)> = vec![
         ("Combine",  "Industrial expansion: 1 Bunker, 1 Refinery, 1 Barracks, 4 Riflemen", Color::Yellow),
         ("Ironborn", "Aggressive salvage: 1 Foundry, 5 Riflemen",                          Color::Gray),
     ];
+    if handler_unlocked {
+        factions.push(("The Architect", "A different kind of war. Five sites. A ritual. You already know how it ends.", Color::Cyan));
+    }
     let mut lines: Vec<Line> = vec![Line::from("")];
     for (i, (name, blurb, color)) in factions.iter().enumerate() {
         let prefix = if i == selected { "> " } else { "  " };
@@ -90,6 +95,70 @@ fn draw_faction_picker(f: &mut Frame, selected: usize) {
         Style::default().fg(Color::DarkGray),
     )));
     f.render_widget(Paragraph::new(lines), inner);
+}
+
+fn draw_briefing(f: &mut Frame, title: &str, briefing: &str) {
+    let area = f.area();
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(format!(" Briefing: {} ", title));
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(6), Constraint::Length(2)])
+        .split(inner);
+
+    let lines: Vec<Line> = std::iter::once(Line::from(""))
+        .chain(briefing.lines().map(|l| Line::from(format!("  {}", l))))
+        .collect();
+
+    f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), chunks[0]);
+    f.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            "  Enter deploy   Esc back",
+            Style::default().fg(Color::DarkGray),
+        ))),
+        chunks[1],
+    );
+}
+
+fn draw_debrief(f: &mut Frame, title: &str, text: &str, won: bool) {
+    let area = f.area();
+    let result_label = if won { "MISSION COMPLETE" } else { "MISSION FAILED" };
+    let result_color = if won { Color::Green } else { Color::Red };
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(format!(" {} — {} ", title, result_label));
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(2), Constraint::Min(6), Constraint::Length(2)])
+        .split(inner);
+
+    f.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            format!("  {}", result_label),
+            Style::default().fg(result_color).add_modifier(Modifier::BOLD),
+        ))),
+        chunks[0],
+    );
+
+    let lines: Vec<Line> = std::iter::once(Line::from(""))
+        .chain(text.lines().map(|l| Line::from(format!("  {}", l))))
+        .collect();
+    f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), chunks[1]);
+
+    f.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            "  Enter continue",
+            Style::default().fg(Color::DarkGray),
+        ))),
+        chunks[2],
+    );
 }
 
 fn draw_load_picker(f: &mut Frame, selected: usize, slots: &[String]) {
@@ -375,7 +444,7 @@ fn draw_mission_map(f: &mut Frame, app: &TuiApp, area: Rect) {
     f.render_widget(Paragraph::new(lines), area);
 }
 
-fn draw_game_over(f: &mut Frame, won: bool, handler_unlocked: bool) {
+fn draw_game_over(f: &mut Frame, won: bool, handler_unlocked: bool, finale_text: Option<&str>) {
     let area = f.area();
     let title = if won { " Victory " } else { " Defeat " };
     let color = if won { Color::Green } else { Color::Red };
@@ -393,9 +462,19 @@ fn draw_game_over(f: &mut Frame, won: bool, handler_unlocked: bool) {
         )),
         Line::from(""),
     ];
+    if let Some(ft) = finale_text {
+        lines.push(Line::from(""));
+        for l in ft.lines() {
+            lines.push(Line::from(Span::styled(
+                format!("  {}", l),
+                Style::default().fg(Color::Gray),
+            )));
+        }
+        lines.push(Line::from(""));
+    }
     if handler_unlocked {
         lines.push(Line::from(Span::styled(
-            "    *** HANDLER UNLOCKED — a new perspective awaits ***",
+            "    *** THE ARCHITECT UNLOCKED — a new perspective awaits ***",
             Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
         )));
         lines.push(Line::from(""));

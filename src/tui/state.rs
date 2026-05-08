@@ -9,7 +9,9 @@ pub enum Screen {
     FactionPicker { selected: usize },  // 0=Combine, 1=Ironborn
     LoadPicker { selected: usize, slots: Vec<String> },
     Campaign,
+    Briefing { title: String, briefing: String },
     InMission,
+    Debrief { title: String, text: String, won: bool },
     GameOver { won: bool, handler_unlocked: bool },
 }
 
@@ -22,6 +24,8 @@ pub struct ServerSnapshot {
     pub missions_lost: u32,
     pub current_mission_index: Option<usize>,
     pub handler_unlocked: bool,
+    pub last_won: Option<bool>,
+    pub finale_text: Option<String>,
 
     /// Campaign view data
     pub current_mission_type: Option<String>,
@@ -139,12 +143,45 @@ impl TuiApp {
                 self.screen = Screen::InMission;
             }
             (Screen::InMission, "Campaign") => {
+                let faction = self.snapshot.player.as_deref().unwrap_or("combine").to_string();
+                if let Some(v) = super::call("campaign/state", serde_json::json!({})) {
+                    if let Some(r) = v.get("result") {
+                        if let Some(outcomes) = r["outcomes"].as_array() {
+                            if let Some(last) = outcomes.last() {
+                                let won = last["won"].as_bool().unwrap_or(false);
+                                let last_index = last["mission_index"].as_u64().unwrap_or(0) as usize;
+                                self.snapshot.last_won = Some(won);
+                                let debrief_text = if let Some(v) = super::call(
+                                    "narrative/debrief",
+                                    serde_json::json!({ "faction": faction, "index": last_index, "won": won }),
+                                ) {
+                                    v["result"]["text"].as_str().unwrap_or("").to_string()
+                                } else {
+                                    String::new()
+                                };
+                                let title = if let Some(v) = super::call(
+                                    "narrative/mission",
+                                    serde_json::json!({ "faction": faction, "index": last_index }),
+                                ) {
+                                    v["result"]["title"].as_str().unwrap_or("").to_string()
+                                } else {
+                                    String::new()
+                                };
+                                self.screen = Screen::Debrief { title, text: debrief_text, won };
+                                return;
+                            }
+                        }
+                    }
+                }
                 self.screen = Screen::Campaign;
             }
             (_, s) if s.starts_with("GameOver") => {
                 let won = s.contains("won");
                 let handler_unlocked = s.contains("handler_unlocked=true");
                 if !matches!(self.screen, Screen::GameOver { .. }) {
+                    if let Some(v) = super::call("narrative/finale", serde_json::json!({})) {
+                        self.snapshot.finale_text = v["result"]["text"].as_str().map(String::from);
+                    }
                     self.screen = Screen::GameOver { won, handler_unlocked };
                 }
             }
@@ -257,7 +294,9 @@ impl TuiApp {
             Screen::FactionPicker { selected } => self.handle_faction_picker(selected, key),
             Screen::LoadPicker { selected, slots } => self.handle_load_picker(selected, slots, key),
             Screen::Campaign => self.handle_campaign(key),
+            Screen::Briefing { .. } => self.handle_briefing(key),
             Screen::InMission => self.handle_in_mission(key),
+            Screen::Debrief { .. } => self.handle_debrief(key),
             Screen::GameOver { .. } => self.handle_game_over(key),
         }
     }
@@ -287,7 +326,11 @@ impl TuiApp {
     }
 
     fn handle_faction_picker(&mut self, selected: usize, key: KeyCode) {
-        let factions = ["combine", "ironborn"];
+        let factions: &[&str] = if self.snapshot.handler_unlocked {
+            &["combine", "ironborn", "architect"]
+        } else {
+            &["combine", "ironborn"]
+        };
         match key {
             KeyCode::Esc => self.screen = Screen::Title { selected: 0 },
             KeyCode::Up => {
@@ -343,11 +386,22 @@ impl TuiApp {
                 );
             }
             KeyCode::Enter => {
-                if self.snapshot.current_mission_type.is_some() {
-                    let _ = super::call(
-                        "mission/select",
-                        serde_json::json!({}),
-                    );
+                if let Some(mt) = self.snapshot.current_mission_type.clone() {
+                    let faction = self.snapshot.player.as_deref().unwrap_or("combine").to_string();
+                    let index = self.snapshot.current_mission_index.unwrap_or(0);
+                    let (title, briefing) = if let Some(v) = super::call(
+                        "narrative/mission",
+                        serde_json::json!({ "faction": faction, "index": index }),
+                    ) {
+                        let r = &v["result"];
+                        (
+                            r["title"].as_str().unwrap_or(&mt).to_string(),
+                            r["briefing"].as_str().unwrap_or("").to_string(),
+                        )
+                    } else {
+                        (mt.clone(), String::new())
+                    };
+                    self.screen = Screen::Briefing { title, briefing };
                 }
             }
             _ => {}
@@ -367,6 +421,26 @@ impl TuiApp {
                     serde_json::json!({ "paused": !self.snapshot.paused }),
                 );
             }
+            _ => {}
+        }
+    }
+
+    fn handle_briefing(&mut self, key: KeyCode) {
+        match key {
+            KeyCode::Char('q') => self.should_quit = true,
+            KeyCode::Esc => self.screen = Screen::Campaign,
+            KeyCode::Enter => {
+                let _ = super::call("mission/select", serde_json::json!({}));
+                self.screen = Screen::InMission;
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_debrief(&mut self, key: KeyCode) {
+        match key {
+            KeyCode::Char('q') => self.should_quit = true,
+            KeyCode::Enter | KeyCode::Esc => self.screen = Screen::Campaign,
             _ => {}
         }
     }
