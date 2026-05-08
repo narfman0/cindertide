@@ -19,6 +19,7 @@ mod campaign;
 mod beats;
 mod hollow;
 mod editor;
+mod save;
 mod ai;
 
 use map::{MapPlugin, GridPos, Faction, ControlPoint, ControlPointType};
@@ -37,6 +38,7 @@ use mission::{MissionPlugin, Mission, MissionStatus};
 use campaign::{CampaignState, default_state, apply_mission_outcome, spread_corruption, generate_mission_options};
 use beats::{BeatsPlugin, FiredBeats};
 use hollow::{HollowPlugin, HollowSpawner, HollowMode};
+use save::{SavePlugin, SaveSlots};
 
 fn main() {
     App::new()
@@ -70,6 +72,8 @@ fn main() {
                 .with_method("editor/set_tile", handle_editor_set_tile)
                 .with_method("editor/save_map", handle_editor_save_map)
                 .with_method("editor/load_map", handle_editor_load_map)
+                .with_method("save/write", handle_save_write)
+                .with_method("save/read", handle_save_read)
                 .with_method("production/enqueue", handle_production_enqueue)
                 .with_method("production/queue_status", handle_production_queue_status)
                 .with_method("hero/spawn", handle_hero_spawn)
@@ -94,6 +98,7 @@ fn main() {
         .add_plugins(MissionPlugin)
         .add_plugins(BeatsPlugin)
         .add_plugins(HollowPlugin)
+        .add_plugins(SavePlugin)
         .add_systems(Startup, on_startup)
         .run();
 }
@@ -1338,6 +1343,160 @@ fn handle_hero_ability_use(In(params): In<Option<Value>>, world: &mut World) -> 
     }
 
     Ok(serde_json::json!({ "fired": true }))
+}
+
+fn snapshot_world(world: &mut World) -> Value {
+    let mut tiles: Vec<Value> = Vec::new();
+    {
+        let mut q = world.query::<&map::Tile>();
+        for t in q.iter(world) {
+            tiles.push(serde_json::json!({
+                "x": t.pos.x, "y": t.pos.y,
+                "terrain": editor::terrain_name(&t.terrain_type),
+                "cover": editor::cover_name(&t.cover),
+            }));
+        }
+    }
+    let mut factions: Vec<Value> = Vec::new();
+    {
+        let mut q = world.query::<(&resources::FactionEntity, &resources::ResourcePool)>();
+        for (fe, pool) in q.iter(world) {
+            factions.push(serde_json::json!({
+                "faction": format!("{:?}", fe.faction),
+                "fuel": pool.fuel,
+                "scrap": pool.scrap,
+                "manpower": pool.manpower,
+            }));
+        }
+    }
+    let mut units: Vec<Value> = Vec::new();
+    {
+        let mut q = world.query::<(&units::UnitType, &units::UnitPos, &map::Faction, &Health)>();
+        for (ut, pos, faction, h) in q.iter(world) {
+            units.push(serde_json::json!({
+                "unit_type": format!("{:?}", ut),
+                "x": pos.pos.x, "y": pos.pos.y,
+                "faction": format!("{:?}", faction),
+                "health_current": h.current,
+                "health_max": h.max,
+            }));
+        }
+    }
+    serde_json::json!({
+        "tiles": tiles,
+        "factions": factions,
+        "units": units,
+    })
+}
+
+fn restore_world(world: &mut World, snapshot: &Value) -> Result<u32, BrpError> {
+    // Despawn current gameplay entities (use existing dev/reset logic).
+    let mut to_despawn: Vec<Entity> = Vec::new();
+    {
+        let mut q = world.query_filtered::<Entity, Or<(
+            With<resources::FactionEntity>,
+            With<units::UnitType>,
+            With<map::ControlPoint>,
+            With<BuildingType>,
+            With<Hero>,
+            With<map::Tile>,
+            With<Mission>,
+            With<HollowSpawner>,
+        )>>();
+        for e in q.iter(world) {
+            to_despawn.push(e);
+        }
+    }
+    for e in to_despawn {
+        world.despawn(e);
+    }
+    if let Some(mut fired) = world.get_resource_mut::<FiredBeats>() {
+        fired.0.clear();
+    }
+
+    let mut count = 0u32;
+
+    if let Some(tiles) = snapshot["tiles"].as_array() {
+        for t in tiles {
+            let x = t["x"].as_i64().unwrap_or(0) as i32;
+            let y = t["y"].as_i64().unwrap_or(0) as i32;
+            let terrain = editor::parse_terrain(t["terrain"].as_str().unwrap_or("Grass"))
+                .unwrap_or(map::TerrainType::Grass);
+            let cover = editor::parse_cover(t["cover"].as_str().unwrap_or("None"))
+                .unwrap_or(map::CoverDensity::None);
+            world.spawn(map::Tile { pos: GridPos { x, y }, terrain_type: terrain, cover });
+            count += 1;
+        }
+    }
+
+    if let Some(factions) = snapshot["factions"].as_array() {
+        for f in factions {
+            let faction_name = f["faction"].as_str().unwrap_or("Combine").to_lowercase();
+            let faction = parse_faction(&faction_name)?;
+            let id = world.spawn(FactionBundle::new(faction)).id();
+            if let Some(mut em) = world.get_entity_mut(id).ok() {
+                if let Some(mut pool) = em.get_mut::<resources::ResourcePool>() {
+                    pool.fuel = f["fuel"].as_f64().unwrap_or(0.0) as f32;
+                    pool.scrap = f["scrap"].as_f64().unwrap_or(0.0) as f32;
+                    pool.manpower = f["manpower"].as_f64().unwrap_or(0.0) as f32;
+                }
+            }
+            count += 1;
+        }
+    }
+
+    if let Some(units_arr) = snapshot["units"].as_array() {
+        for u in units_arr {
+            let x = u["x"].as_i64().unwrap_or(0) as i32;
+            let y = u["y"].as_i64().unwrap_or(0) as i32;
+            let faction_name = u["faction"].as_str().unwrap_or("Combine").to_lowercase();
+            let faction = parse_faction(&faction_name)?;
+            // For now, only Riflemen are restorable — extend per-type as needed.
+            let entity = world.spawn(RiflemanBundle::with_faction(x, y, faction)).id();
+            world.entity_mut(entity).insert(units::HomeBase { pos: GridPos { x, y } });
+            // Apply HP if present.
+            if let Some(hc) = u["health_current"].as_f64() {
+                if let Some(mut em) = world.get_entity_mut(entity).ok() {
+                    if let Some(mut h) = em.get_mut::<Health>() {
+                        h.current = hc as f32;
+                    }
+                }
+            }
+            count += 1;
+        }
+    }
+
+    Ok(count)
+}
+
+/// BRP handler for "save/write": { slot }
+fn handle_save_write(In(params): In<Option<Value>>, world: &mut World) -> BrpResult {
+    let params = params.ok_or_else(|| BrpError {
+        code: -32602, message: "missing params".into(), data: None,
+    })?;
+    let slot = params["slot"].as_str().unwrap_or("default").to_string();
+    let snapshot = snapshot_world(world);
+    let mut slots = world.get_resource_or_insert_with(SaveSlots::default);
+    slots.0.insert(slot.clone(), snapshot);
+    Ok(serde_json::json!({ "saved": slot }))
+}
+
+/// BRP handler for "save/read": { slot }
+fn handle_save_read(In(params): In<Option<Value>>, world: &mut World) -> BrpResult {
+    let params = params.ok_or_else(|| BrpError {
+        code: -32602, message: "missing params".into(), data: None,
+    })?;
+    let slot = params["slot"].as_str().unwrap_or("default").to_string();
+    let snapshot = {
+        let slots = world.get_resource::<SaveSlots>().ok_or_else(|| BrpError {
+            code: -32000, message: "no save slots".into(), data: None,
+        })?;
+        slots.0.get(&slot).cloned().ok_or_else(|| BrpError {
+            code: -32000, message: format!("no slot named {slot}"), data: None,
+        })?
+    };
+    let count = restore_world(world, &snapshot)?;
+    Ok(serde_json::json!({ "restored": count }))
 }
 
 /// BRP handler for "editor/set_tile": { x, y, terrain, cover? }

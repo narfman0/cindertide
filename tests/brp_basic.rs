@@ -206,6 +206,29 @@ fn spawn_unit(unit_type: &str, x: i32, y: i32) -> u64 {
 
 #[test]
 #[ignore = "requires a running Cindertide server on port 15703"]
+fn brp_save_write_read_roundtrip() {
+    let _g = lock_world();
+    let f = spawn_faction("combine");
+    spawn_rifleman_with_faction(50, 50, "combine");
+    spawn_rifleman_with_faction(60, 60, "combine");
+
+    // Save.
+    let r1 = post("save/write", serde_json::json!({ "slot": "test1" }));
+    assert!(r1.get("result").is_some(), "save: {r1}");
+
+    // Reset and confirm zero pop.
+    post("dev/reset", serde_json::json!({}));
+
+    // Read back.
+    let r2 = post("save/read", serde_json::json!({ "slot": "test1" }));
+    assert!(r2.get("result").is_some(), "read: {r2}");
+    let count = r2["result"]["restored"].as_u64().unwrap();
+    assert!(count >= 3, "expected >= 3 restored entities (1 faction + 2 units), got {count}");
+    let _ = f;
+}
+
+#[test]
+#[ignore = "requires a running Cindertide server on port 15703"]
 fn brp_editor_set_save_load_roundtrip() {
     let _g = lock_world();
     // Set three tiles via editor.
