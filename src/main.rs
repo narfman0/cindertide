@@ -10,7 +10,7 @@ mod ai;
 
 use map::{MapPlugin, GridPos};
 use units::{UnitPlugin, MoveTarget};
-use combat::{CombatPlugin, AttackTarget, Health};
+use combat::{CombatPlugin, AttackTarget, Health, Morale, morale_state};
 
 fn main() {
     App::new()
@@ -168,17 +168,24 @@ fn handle_combat_status(In(params): In<Option<Value>>, world: &mut World) -> Brp
 
     let is_dead = entity_ref.get::<combat::Dead>().is_some();
     let is_pinned = entity_ref.get::<combat::Pinned>().is_some();
+    let is_routing = entity_ref.get::<combat::Routing>().is_some();
     let supp = entity_ref.get::<combat::Suppression>();
     let in_cover = entity_ref.get::<combat::InCover>();
+    let morale = entity_ref.get::<Morale>();
+    let morale_st = morale.map(|m| morale_state(m));
 
     Ok(serde_json::json!({
         "health_current": health.current,
         "health_max": health.max,
         "is_dead": is_dead,
         "is_pinned": is_pinned,
+        "is_routing": is_routing,
         "suppression_current": supp.map(|s| s.current),
         "suppression_max": supp.map(|s| s.max),
         "cover": in_cover.map(|c| format!("{:?}", c.density)),
+        "morale_current": morale.map(|m| m.current),
+        "morale_max": morale.map(|m| m.max),
+        "morale_state": morale_st.map(|s| format!("{:?}", s)),
     }))
 }
 

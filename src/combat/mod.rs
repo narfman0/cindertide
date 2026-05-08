@@ -18,6 +18,7 @@ pub struct AttackRange {
 #[derive(Component, Debug, Clone)]
 pub struct AttackDamage {
     pub base: f32,
+    pub suppression_value: f32,
 }
 
 #[derive(Component, Debug, Clone)]
@@ -59,8 +60,18 @@ pub struct SuppressionContribution {
     pub per_attack: f32,
 }
 
-#[derive(Component, Debug)]
-pub struct Pinned;
+#[derive(Component, Debug)] pub struct Pinned;
+#[derive(Component, Debug)] pub struct Routing;
+#[derive(Component)] pub struct TookDamageThisFrame;
+
+#[derive(Component, Debug, Clone, PartialEq)]
+pub enum MoraleState { Steady, Shaken, Broken }
+
+#[derive(Component, Debug, Clone)]
+pub struct Morale {
+    pub current: f32,
+    pub max: f32,
+}
 
 /// Facing direction of a unit on the grid.
 #[derive(Component, Debug, Clone, PartialEq)]
@@ -208,6 +219,44 @@ pub fn suppression_after_cover(amount: f32, cover: Option<&InCover>) -> f32 {
     }
 }
 
+/// Movement penalty from suppression: 0.0 (none) to 0.8 (80% slower).
+pub fn suppression_movement_penalty(suppression: f32, max: f32) -> f32 {
+    let frac = (suppression / max).clamp(0.0, 1.0);
+    frac * 0.8
+}
+
+/// Accuracy penalty from suppression: 0.0 to 0.5 (50% reduction).
+pub fn suppression_accuracy_penalty(suppression: f32, max: f32) -> f32 {
+    let frac = (suppression / max).clamp(0.0, 1.0);
+    frac * 0.5
+}
+
+/// Derive morale state from Morale component.
+/// > 66% → Steady, 33–66% → Shaken, < 33% → Broken.
+pub fn morale_state(morale: &Morale) -> MoraleState {
+    let frac = morale.current / morale.max;
+    if frac > 0.66 {
+        MoraleState::Steady
+    } else if frac > 0.33 {
+        MoraleState::Shaken
+    } else {
+        MoraleState::Broken
+    }
+}
+
+/// Suppression gained per hit, reduced by cover.
+/// None=full, Light=75%, Heavy=50%.
+pub fn suppression_gain_per_hit(weapon_suppression: f32, cover: Option<&InCover>) -> f32 {
+    match cover {
+        None => weapon_suppression,
+        Some(c) => match c.density {
+            CoverDensity::None => weapon_suppression,
+            CoverDensity::Light => weapon_suppression * 0.75,
+            CoverDensity::Heavy => weapon_suppression * 0.50,
+        },
+    }
+}
+
 // --- Systems ---
 
 pub fn cooldown_system(time: Res<Time>, mut query: Query<&mut AttackCooldown>) {
@@ -252,10 +301,17 @@ pub fn attack_system(
                 let final_damage = effective_damage(damage.base, in_cover, angle) * attacker_mult;
                 let died = apply_damage(&mut health, final_damage);
 
-                if let (Some(contrib), Some(mut ts)) = (supp_contrib, target_supp) {
-                    let amount = suppression_after_cover(contrib.per_attack, in_cover) * attacker_mult;
-                    add_suppression(&mut ts, amount);
+                if final_damage > 0.0 {
+                    commands.entity(target_entity).insert(TookDamageThisFrame);
                 }
+
+                // Add suppression from weapon suppression_value
+                let supp_gain = suppression_gain_per_hit(damage.suppression_value, in_cover);
+                if let Some(mut ts) = target_supp {
+                    add_suppression(&mut ts, supp_gain * attacker_mult);
+                }
+
+                let _ = supp_contrib; // legacy field; suppression now handled via suppression_value
 
                 cooldown.remaining = 1.0 / speed.attacks_per_second;
                 if died {
@@ -367,6 +423,74 @@ pub fn update_facing_system(
     }
 }
 
+/// Each frame: for units that took damage (TookDamageThisFrame), add suppression.
+/// For units not under fire, decay suppression. Pin/unpin based on full suppression.
+pub fn suppression_system(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut query: Query<(Entity, &mut Suppression, Option<&TookDamageThisFrame>, Option<&Pinned>)>,
+) {
+    let dt = time.delta_secs();
+    for (entity, mut supp, took_damage, pinned) in &mut query {
+        if took_damage.is_some() {
+            // add_suppression already called at attack time; just ensure pin check happens
+        } else {
+            // No hit this frame: decay
+            let rate = supp.max * 0.1; // 10% of max per second default decay
+            supp.current = (supp.current - rate * dt).max(0.0);
+        }
+        let should_pin = supp.current >= supp.max;
+        match (should_pin, pinned.is_some()) {
+            (true, false) => { commands.entity(entity).insert(Pinned); }
+            (false, true) => { commands.entity(entity).remove::<Pinned>(); }
+            _ => {}
+        }
+    }
+}
+
+/// Update MoraleState; insert/remove Routing when Broken/recovered.
+pub fn morale_system(
+    mut commands: Commands,
+    query: Query<(Entity, &Morale, Option<&Routing>)>,
+) {
+    for (entity, morale, routing) in &query {
+        let state = morale_state(morale);
+        match (state, routing.is_some()) {
+            (MoraleState::Broken, false) => { commands.entity(entity).insert(Routing); }
+            (MoraleState::Steady, true) | (MoraleState::Shaken, true) => {
+                commands.entity(entity).remove::<Routing>();
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Morale slowly recovers (0.5/sec) when not Routing; decreases when Pinned (-2/sec).
+pub fn morale_decay_system(
+    time: Res<Time>,
+    mut query: Query<(&mut Morale, Option<&Routing>, Option<&Pinned>)>,
+) {
+    let dt = time.delta_secs();
+    for (mut morale, routing, pinned) in &mut query {
+        if routing.is_none() {
+            morale.current = (morale.current + 0.5 * dt).min(morale.max);
+        }
+        if pinned.is_some() {
+            morale.current = (morale.current - 2.0 * dt).max(0.0);
+        }
+    }
+}
+
+/// Clear TookDamageThisFrame marker each frame (cleanup system).
+pub fn clear_took_damage_system(
+    mut commands: Commands,
+    query: Query<Entity, With<TookDamageThisFrame>>,
+) {
+    for entity in &query {
+        commands.entity(entity).remove::<TookDamageThisFrame>();
+    }
+}
+
 // --- Plugin ---
 
 pub struct CombatPlugin;
@@ -376,12 +500,16 @@ impl Plugin for CombatPlugin {
         app.add_systems(
             Update,
             (
+                clear_took_damage_system,
                 update_cover_system,
                 update_facing_system,
                 suppression_decay_system,
+                suppression_system,
                 cooldown_system,
                 attack_system,
                 suppression_pin_system,
+                morale_system,
+                morale_decay_system,
                 death_system,
             )
                 .chain(),
@@ -700,5 +828,90 @@ mod tests {
         let cover = InCover { density: CoverDensity::Light };
         let result = effective_damage(100.0, Some(&cover), Some(AttackAngle::Front));
         assert_eq!(result, 75.0);
+    }
+
+    // --- Suppression penalty tests (step 7) ---
+
+    #[test]
+    fn test_suppression_movement_penalty_none() {
+        assert_eq!(suppression_movement_penalty(0.0, 100.0), 0.0);
+    }
+
+    #[test]
+    fn test_suppression_movement_penalty_full() {
+        assert_eq!(suppression_movement_penalty(100.0, 100.0), 0.8);
+    }
+
+    #[test]
+    fn test_suppression_movement_penalty_half() {
+        let penalty = suppression_movement_penalty(50.0, 100.0);
+        assert!((penalty - 0.4).abs() < 1e-6, "expected ~0.4, got {penalty}");
+    }
+
+    #[test]
+    fn test_suppression_accuracy_penalty_none() {
+        assert_eq!(suppression_accuracy_penalty(0.0, 100.0), 0.0);
+    }
+
+    #[test]
+    fn test_suppression_accuracy_penalty_full() {
+        assert_eq!(suppression_accuracy_penalty(100.0, 100.0), 0.5);
+    }
+
+    // --- Morale state tests ---
+
+    fn make_morale(current: f32, max: f32) -> Morale {
+        Morale { current, max }
+    }
+
+    #[test]
+    fn test_morale_state_steady() {
+        let m = make_morale(80.0, 100.0);
+        assert_eq!(morale_state(&m), MoraleState::Steady);
+    }
+
+    #[test]
+    fn test_morale_state_shaken() {
+        let m = make_morale(50.0, 100.0);
+        assert_eq!(morale_state(&m), MoraleState::Shaken);
+    }
+
+    #[test]
+    fn test_morale_state_broken() {
+        let m = make_morale(20.0, 100.0);
+        assert_eq!(morale_state(&m), MoraleState::Broken);
+    }
+
+    #[test]
+    fn test_morale_state_boundary_high() {
+        // 66/100 = 0.66, not > 0.66, so Shaken
+        let m = make_morale(66.0, 100.0);
+        assert_eq!(morale_state(&m), MoraleState::Shaken);
+    }
+
+    #[test]
+    fn test_morale_state_boundary_low() {
+        // 33/100 = 0.33, not > 0.33, so Broken
+        let m = make_morale(33.0, 100.0);
+        assert_eq!(morale_state(&m), MoraleState::Broken);
+    }
+
+    // --- suppression_gain_per_hit tests ---
+
+    #[test]
+    fn test_suppression_gain_no_cover() {
+        assert_eq!(suppression_gain_per_hit(20.0, None), 20.0);
+    }
+
+    #[test]
+    fn test_suppression_gain_light_cover() {
+        let c = InCover { density: CoverDensity::Light };
+        assert_eq!(suppression_gain_per_hit(20.0, Some(&c)), 15.0);
+    }
+
+    #[test]
+    fn test_suppression_gain_heavy_cover() {
+        let c = InCover { density: CoverDensity::Heavy };
+        assert_eq!(suppression_gain_per_hit(20.0, Some(&c)), 10.0);
     }
 }
