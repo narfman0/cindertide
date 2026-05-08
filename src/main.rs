@@ -8,9 +8,10 @@ mod combat;
 mod resources;
 mod ai;
 
-use map::{MapPlugin, GridPos};
+use map::{MapPlugin, GridPos, Faction};
 use units::{UnitPlugin, MoveTarget, UnitPos, RiflemanBundle};
 use combat::{CombatPlugin, AttackTarget, Health, Morale, Suppression, Facing, morale_state};
+use resources::{ResourcesPlugin, FactionBundle, ResourcePool, ResourceTrickle, ResourceCost, spend};
 
 fn main() {
     App::new()
@@ -22,11 +23,15 @@ fn main() {
                 .with_method("unit/status", handle_unit_status)
                 .with_method("combat/attack", handle_combat_attack)
                 .with_method("combat/status", handle_combat_status)
+                .with_method("faction/spawn", handle_faction_spawn)
+                .with_method("resources/status", handle_resources_status)
+                .with_method("resources/spend", handle_resources_spend)
         )
         .add_plugins(RemoteHttpPlugin::default().with_port(15703))
         .add_plugins(MapPlugin)
         .add_plugins(UnitPlugin)
         .add_plugins(CombatPlugin)
+        .add_plugins(ResourcesPlugin)
         .add_systems(Startup, on_startup)
         .run();
 }
@@ -299,6 +304,132 @@ fn handle_combat_status(In(params): In<Option<Value>>, world: &mut World) -> Brp
         "morale_max": morale.map(|m| m.max),
         "morale_state": morale_st.map(|s| format!("{:?}", s)),
     }))
+}
+
+/// BRP handler for "faction/spawn": { faction: "combine"|"covenant"|"ironborn"|"hollow" }
+/// Spawns a Faction entity with default ResourcePool/Caps/Trickle.
+fn handle_faction_spawn(In(params): In<Option<Value>>, world: &mut World) -> BrpResult {
+    let params = params.ok_or_else(|| BrpError {
+        code: -32602,
+        message: "missing params".into(),
+        data: None,
+    })?;
+
+    let name = params["faction"]
+        .as_str()
+        .ok_or_else(|| BrpError {
+            code: -32602,
+            message: "faction must be a string".into(),
+            data: None,
+        })?;
+
+    let faction = match name {
+        "combine" => Faction::Combine,
+        "covenant" => Faction::Covenant,
+        "ironborn" => Faction::Ironborn,
+        "hollow" => Faction::Hollow,
+        other => {
+            return Err(BrpError {
+                code: -32602,
+                message: format!("unknown faction: {other}"),
+                data: None,
+            });
+        }
+    };
+
+    let id = world.spawn(FactionBundle::new(faction)).id().to_bits();
+    Ok(serde_json::json!({ "entity_id": id }))
+}
+
+/// BRP handler for "resources/status": { entity }
+fn handle_resources_status(In(params): In<Option<Value>>, world: &mut World) -> BrpResult {
+    let params = params.ok_or_else(|| BrpError {
+        code: -32602,
+        message: "missing params".into(),
+        data: None,
+    })?;
+
+    let entity_id = params["entity"]
+        .as_u64()
+        .ok_or_else(|| BrpError {
+            code: -32602,
+            message: "entity must be a u64".into(),
+            data: None,
+        })?;
+
+    let entity = Entity::try_from_bits(entity_id).map_err(|_| BrpError {
+        code: -32602,
+        message: format!("entity {entity_id} not found"),
+        data: None,
+    })?;
+
+    let entity_ref = world.get_entity(entity).map_err(|_| BrpError {
+        code: -32602,
+        message: format!("entity {entity_id} not found"),
+        data: None,
+    })?;
+
+    let pool = entity_ref.get::<ResourcePool>().ok_or_else(|| BrpError {
+        code: -32602,
+        message: "entity has no ResourcePool".into(),
+        data: None,
+    })?;
+    let trickle = entity_ref.get::<ResourceTrickle>();
+
+    Ok(serde_json::json!({
+        "fuel": pool.fuel,
+        "scrap": pool.scrap,
+        "manpower": pool.manpower,
+        "fuel_trickle": trickle.map(|t| t.fuel_per_second),
+        "scrap_trickle": trickle.map(|t| t.scrap_per_second),
+        "manpower_trickle": trickle.map(|t| t.manpower_per_second),
+    }))
+}
+
+/// BRP handler for "resources/spend": { entity, fuel, scrap, manpower }
+/// Returns { success: bool }. Used primarily for tests; production will
+/// gate this behind building/research costs.
+fn handle_resources_spend(In(params): In<Option<Value>>, world: &mut World) -> BrpResult {
+    let params = params.ok_or_else(|| BrpError {
+        code: -32602,
+        message: "missing params".into(),
+        data: None,
+    })?;
+
+    let entity_id = params["entity"]
+        .as_u64()
+        .ok_or_else(|| BrpError {
+            code: -32602,
+            message: "entity must be a u64".into(),
+            data: None,
+        })?;
+
+    let cost = ResourceCost {
+        fuel: params["fuel"].as_f64().unwrap_or(0.0) as f32,
+        scrap: params["scrap"].as_f64().unwrap_or(0.0) as f32,
+        manpower: params["manpower"].as_f64().unwrap_or(0.0) as f32,
+    };
+
+    let entity = Entity::try_from_bits(entity_id).map_err(|_| BrpError {
+        code: -32602,
+        message: format!("entity {entity_id} not found"),
+        data: None,
+    })?;
+
+    let mut entity_mut = world.get_entity_mut(entity).map_err(|_| BrpError {
+        code: -32602,
+        message: format!("entity {entity_id} not found"),
+        data: None,
+    })?;
+
+    let mut pool = entity_mut.get_mut::<ResourcePool>().ok_or_else(|| BrpError {
+        code: -32602,
+        message: "entity has no ResourcePool".into(),
+        data: None,
+    })?;
+
+    let success = spend(&mut pool, &cost);
+    Ok(serde_json::json!({ "success": success }))
 }
 
 fn on_startup() {

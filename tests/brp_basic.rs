@@ -176,3 +176,69 @@ fn brp_unit_status_includes_facing_and_morale() {
     assert_eq!(s["pos_x"].as_i64().unwrap(), 5);
     assert_eq!(s["pos_y"].as_i64().unwrap(), 5);
 }
+
+fn spawn_faction(name: &str) -> u64 {
+    let resp = post("faction/spawn", serde_json::json!({ "faction": name }));
+    resp["result"]["entity_id"].as_u64().expect("entity_id u64")
+}
+
+fn resources_status(entity: u64) -> serde_json::Value {
+    let resp = post("resources/status", serde_json::json!({ "entity": entity }));
+    resp["result"].clone()
+}
+
+#[test]
+#[ignore = "requires a running Cindertide server on port 15703"]
+fn brp_faction_spawn_has_starting_resources() {
+    let id = spawn_faction("combine");
+    let s = resources_status(id);
+    assert_eq!(s["fuel"].as_f64().unwrap(), 200.0);
+    assert_eq!(s["scrap"].as_f64().unwrap(), 200.0);
+    let m = s["manpower"].as_f64().unwrap();
+    assert!(m >= 50.0 && m < 55.0, "manpower starts ~50, got {m}");
+}
+
+#[test]
+#[ignore = "requires a running Cindertide server on port 15703"]
+fn brp_resources_spend_deducts_when_affordable() {
+    let id = spawn_faction("ironborn");
+    let resp = post(
+        "resources/spend",
+        serde_json::json!({ "entity": id, "fuel": 50.0, "scrap": 30.0, "manpower": 10.0 }),
+    );
+    assert_eq!(resp["result"]["success"].as_bool().unwrap(), true);
+    let s = resources_status(id);
+    assert_eq!(s["fuel"].as_f64().unwrap(), 150.0);
+    assert_eq!(s["scrap"].as_f64().unwrap(), 170.0);
+    // manpower ticks up between spend and status query — bound the delta.
+    let m = s["manpower"].as_f64().unwrap();
+    assert!(m >= 40.0 && m < 45.0, "manpower ~40 after spend, got {m}");
+}
+
+#[test]
+#[ignore = "requires a running Cindertide server on port 15703"]
+fn brp_resources_spend_rejects_when_unaffordable() {
+    let id = spawn_faction("covenant");
+    let resp = post(
+        "resources/spend",
+        serde_json::json!({ "entity": id, "fuel": 99999.0 }),
+    );
+    assert_eq!(resp["result"]["success"].as_bool().unwrap(), false);
+    let s = resources_status(id);
+    assert_eq!(s["fuel"].as_f64().unwrap(), 200.0);
+}
+
+#[test]
+#[ignore = "requires a running Cindertide server on port 15703"]
+fn brp_manpower_trickles_over_time() {
+    let id = spawn_faction("hollow");
+    let before = resources_status(id);
+    let m_before = before["manpower"].as_f64().unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(1500));
+    let after = resources_status(id);
+    let m_after = after["manpower"].as_f64().unwrap();
+    assert!(
+        m_after > m_before,
+        "manpower should trickle: before={m_before} after={m_after}"
+    );
+}
