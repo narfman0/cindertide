@@ -20,6 +20,7 @@ mod beats;
 mod hollow;
 mod editor;
 mod save;
+mod game;
 #[cfg(feature = "render")]
 mod render;
 mod ai;
@@ -41,6 +42,7 @@ use campaign::{CampaignState, default_state, apply_mission_outcome, spread_corru
 use beats::{BeatsPlugin, FiredBeats};
 use hollow::{HollowPlugin, HollowSpawner, HollowMode};
 use save::{SavePlugin, SaveSlots};
+use game::{GamePlugin, GameState, CampaignRun, fire_exit};
 
 fn main() {
     let mut app = App::new();
@@ -79,6 +81,13 @@ fn main() {
                 .with_method("editor/load_map", handle_editor_load_map)
                 .with_method("save/write", handle_save_write)
                 .with_method("save/read", handle_save_read)
+                .with_method("game/state", handle_game_state)
+                .with_method("game/new", handle_game_new)
+                .with_method("game/load", handle_game_load)
+                .with_method("game/save", handle_game_save)
+                .with_method("game/exit", handle_game_exit)
+                .with_method("mission/select", handle_mission_select)
+                .with_method("mission/force_resolve", handle_mission_force_resolve)
                 .with_method("production/enqueue", handle_production_enqueue)
                 .with_method("production/queue_status", handle_production_queue_status)
                 .with_method("hero/spawn", handle_hero_spawn)
@@ -104,6 +113,7 @@ fn main() {
         .add_plugins(BeatsPlugin)
         .add_plugins(HollowPlugin)
         .add_plugins(SavePlugin)
+        .add_plugins(GamePlugin)
         .add_systems(Startup, on_startup)
         .run();
 }
@@ -1348,6 +1358,308 @@ fn handle_hero_ability_use(In(params): In<Option<Value>>, world: &mut World) -> 
     }
 
     Ok(serde_json::json!({ "fired": true }))
+}
+
+/// Despawn all gameplay entities and clear gameplay resources. Shared by
+/// dev/reset and game/new.
+fn wipe_world_entities(world: &mut World) {
+    let mut to_despawn: Vec<Entity> = Vec::new();
+    {
+        let mut q = world.query_filtered::<Entity, Or<(
+            With<resources::FactionEntity>,
+            With<units::UnitType>,
+            With<map::ControlPoint>,
+            With<BuildingType>,
+            With<Hero>,
+            With<map::Tile>,
+            With<Mission>,
+            With<HollowSpawner>,
+        )>>();
+        for e in q.iter(world) {
+            to_despawn.push(e);
+        }
+    }
+    for e in to_despawn {
+        world.despawn(e);
+    }
+    if let Some(mut fired) = world.get_resource_mut::<FiredBeats>() {
+        fired.0.clear();
+    }
+}
+
+fn game_state_json(world: &mut World) -> Value {
+    let state_str = match world.resource::<GameState>() {
+        GameState::Title => "Title".to_string(),
+        GameState::Campaign => "Campaign".to_string(),
+        GameState::InMission => "InMission".to_string(),
+        GameState::GameOver { won } => format!("GameOver({})", if *won { "won" } else { "lost" }),
+    };
+    let run = world.resource::<CampaignRun>().clone();
+    serde_json::json!({
+        "state": state_str,
+        "missions_won": run.missions_won,
+        "missions_lost": run.missions_lost,
+        "current_mission_zone": run.current_mission.map(|(_, z)| z),
+        "current_mission_entity": run.current_mission.map(|(e, _)| e.to_bits()),
+        "player": run.player.as_ref().map(|f| format!("{:?}", f)),
+    })
+}
+
+/// BRP handler for "game/state": current state machine + run progress.
+fn handle_game_state(In(_params): In<Option<Value>>, world: &mut World) -> BrpResult {
+    Ok(game_state_json(world))
+}
+
+/// BRP handler for "game/new": { player? }
+/// Wipes any current world, initializes a fresh CampaignState, sets
+/// GameState=Campaign, returns the new state snapshot.
+fn handle_game_new(In(params): In<Option<Value>>, world: &mut World) -> BrpResult {
+    let player_str = params
+        .as_ref()
+        .and_then(|p| p["player"].as_str())
+        .unwrap_or("combine")
+        .to_string();
+    let player = parse_faction(&player_str)?;
+
+    wipe_world_entities(world);
+    world.insert_resource(default_state());
+    world.insert_resource(CampaignRun {
+        player: Some(player.clone()),
+        ..Default::default()
+    });
+    *world.resource_mut::<GameState>() = GameState::Campaign;
+
+    // Spawn the player's faction entity so resource/build BRPs work.
+    world.spawn(FactionBundle::new(player));
+
+    Ok(game_state_json(world))
+}
+
+/// BRP handler for "game/save": { slot } — convenience wrapper around
+/// save/write that also persists the GameState + CampaignRun.
+fn handle_game_save(In(params): In<Option<Value>>, world: &mut World) -> BrpResult {
+    let params = params.ok_or_else(|| BrpError {
+        code: -32602, message: "missing params".into(), data: None,
+    })?;
+    let slot = params["slot"].as_str().unwrap_or("default").to_string();
+
+    let mut snapshot = snapshot_world(world);
+    // Append state + run + campaign into the snapshot.
+    let state_label = match world.resource::<GameState>() {
+        GameState::Title => "Title",
+        GameState::Campaign => "Campaign",
+        GameState::InMission => "InMission",
+        GameState::GameOver { won } if *won => "GameOver(won)",
+        GameState::GameOver { .. } => "GameOver(lost)",
+    };
+    let run = world.resource::<CampaignRun>().clone();
+    let campaign = world.get_resource::<crate::campaign::CampaignState>().cloned();
+    snapshot["game_state"] = serde_json::json!(state_label);
+    snapshot["run"] = serde_json::json!({
+        "player": run.player.as_ref().map(|f| format!("{:?}", f)),
+        "missions_won": run.missions_won,
+        "missions_lost": run.missions_lost,
+    });
+    snapshot["campaign"] = match campaign {
+        Some(c) => serde_json::json!({
+            "act": format!("{:?}", c.act),
+            "turn": c.turn,
+            "zones": c.zones.iter().map(|z| serde_json::json!({
+                "id": z.id, "name": z.name,
+                "owner": z.owner.as_ref().map(|f| format!("{:?}", f)),
+                "corruption": z.corruption,
+                "adjacent": z.adjacent,
+            })).collect::<Vec<_>>(),
+        }),
+        None => Value::Null,
+    };
+
+    let mut slots = world.get_resource_or_insert_with(SaveSlots::default);
+    slots.0.insert(slot.clone(), snapshot);
+    Ok(serde_json::json!({ "saved": slot }))
+}
+
+/// BRP handler for "game/load": { slot }
+fn handle_game_load(In(params): In<Option<Value>>, world: &mut World) -> BrpResult {
+    let params = params.ok_or_else(|| BrpError {
+        code: -32602, message: "missing params".into(), data: None,
+    })?;
+    let slot = params["slot"].as_str().unwrap_or("default").to_string();
+
+    let snapshot = {
+        let slots = world.get_resource::<SaveSlots>().ok_or_else(|| BrpError {
+            code: -32000, message: "no save slots".into(), data: None,
+        })?;
+        slots.0.get(&slot).cloned().ok_or_else(|| BrpError {
+            code: -32000, message: format!("no slot named {slot}"), data: None,
+        })?
+    };
+
+    let _restored = restore_world(world, &snapshot)?;
+
+    // Restore game/run/campaign resources from extra fields.
+    if let Some(s) = snapshot["game_state"].as_str() {
+        let new_state = match s {
+            "Title" => GameState::Title,
+            "Campaign" => GameState::Campaign,
+            "InMission" => GameState::InMission,
+            "GameOver(won)" => GameState::GameOver { won: true },
+            "GameOver(lost)" => GameState::GameOver { won: false },
+            _ => GameState::Title,
+        };
+        *world.resource_mut::<GameState>() = new_state;
+    }
+    if !snapshot["run"].is_null() {
+        let r = &snapshot["run"];
+        let player = r["player"]
+            .as_str()
+            .and_then(|s| parse_faction(&s.to_lowercase()).ok());
+        *world.resource_mut::<CampaignRun>() = CampaignRun {
+            player,
+            missions_won: r["missions_won"].as_u64().unwrap_or(0) as u32,
+            missions_lost: r["missions_lost"].as_u64().unwrap_or(0) as u32,
+            current_mission: None, // mission entity is gone after restore
+        };
+    }
+    if !snapshot["campaign"].is_null() {
+        let c = &snapshot["campaign"];
+        let act = match c["act"].as_str().unwrap_or("One") {
+            "Two" => crate::campaign::Act::Two,
+            "Three" => crate::campaign::Act::Three,
+            _ => crate::campaign::Act::One,
+        };
+        let zones = c["zones"]
+            .as_array()
+            .map(|arr| {
+                arr.iter()
+                    .map(|z| crate::campaign::Zone {
+                        id: z["id"].as_u64().unwrap_or(0) as u32,
+                        name: z["name"].as_str().unwrap_or("").to_string(),
+                        owner: z["owner"]
+                            .as_str()
+                            .and_then(|s| parse_faction(&s.to_lowercase()).ok()),
+                        corruption: z["corruption"].as_f64().unwrap_or(0.0) as f32,
+                        adjacent: z["adjacent"]
+                            .as_array()
+                            .map(|a| a.iter().filter_map(|n| n.as_u64()).map(|n| n as u32).collect())
+                            .unwrap_or_default(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        world.insert_resource(crate::campaign::CampaignState {
+            act,
+            turn: c["turn"].as_u64().unwrap_or(0) as u32,
+            zones,
+        });
+    }
+
+    Ok(game_state_json(world))
+}
+
+/// BRP handler for "game/exit": fires AppExit to terminate the process.
+fn handle_game_exit(In(_params): In<Option<Value>>, world: &mut World) -> BrpResult {
+    fire_exit(world);
+    Ok(serde_json::json!({ "exiting": true }))
+}
+
+/// BRP handler for "mission/force_resolve": { entity, won }
+/// Sets a Mission's status directly. Mainly for tests, but also a useful
+/// hook for narrative beats / scripted defeats.
+fn handle_mission_force_resolve(In(params): In<Option<Value>>, world: &mut World) -> BrpResult {
+    let params = params.ok_or_else(|| BrpError {
+        code: -32602, message: "missing params".into(), data: None,
+    })?;
+    let entity_id = params["entity"].as_u64().ok_or_else(|| BrpError {
+        code: -32602, message: "entity required".into(), data: None,
+    })?;
+    let won = params["won"].as_bool().unwrap_or(true);
+    let entity = Entity::try_from_bits(entity_id).map_err(|_| BrpError {
+        code: -32602,
+        message: format!("entity {entity_id} not found"),
+        data: None,
+    })?;
+    let mut em = world.get_entity_mut(entity).map_err(|_| BrpError {
+        code: -32602,
+        message: format!("entity {entity_id} not found"),
+        data: None,
+    })?;
+    let mut m = em.get_mut::<Mission>().ok_or_else(|| BrpError {
+        code: -32602,
+        message: "entity is not a Mission".into(),
+        data: None,
+    })?;
+    m.status = if won { MissionStatus::Won } else { MissionStatus::Lost };
+    Ok(serde_json::json!({ "resolved": format!("{:?}", m.status) }))
+}
+
+/// BRP handler for "mission/select": { zone_id }
+/// Spawns a Mission entity for the chosen option and transitions to InMission.
+fn handle_mission_select(In(params): In<Option<Value>>, world: &mut World) -> BrpResult {
+    let params = params.ok_or_else(|| BrpError {
+        code: -32602, message: "missing params".into(), data: None,
+    })?;
+    let zone_id = params["zone_id"].as_u64().ok_or_else(|| BrpError {
+        code: -32602, message: "zone_id required".into(), data: None,
+    })? as u32;
+
+    if *world.resource::<GameState>() != GameState::Campaign {
+        return Err(BrpError {
+            code: -32000,
+            message: "must be in Campaign state to select a mission".into(),
+            data: None,
+        });
+    }
+
+    let player = world
+        .resource::<CampaignRun>()
+        .player
+        .clone()
+        .ok_or_else(|| BrpError {
+            code: -32000,
+            message: "no player faction set".into(),
+            data: None,
+        })?;
+
+    let opt = {
+        let cs = world
+            .get_resource::<crate::campaign::CampaignState>()
+            .ok_or_else(|| BrpError {
+                code: -32000,
+                message: "no campaign state".into(),
+                data: None,
+            })?;
+        crate::campaign::generate_mission_options(cs, &player)
+            .into_iter()
+            .find(|o| o.zone_id == zone_id)
+            .ok_or_else(|| BrpError {
+                code: -32000,
+                message: format!("zone {zone_id} not in current options"),
+                data: None,
+            })?
+    };
+
+    let mission_entity = world
+        .spawn(Mission {
+            mission_type: opt.mission_type.clone(),
+            player_faction: player,
+            opponent_faction: opt.opponent.clone(),
+            status: MissionStatus::Active,
+            elapsed: 0.0,
+            deadline: 300.0,
+        })
+        .id();
+
+    world.resource_mut::<CampaignRun>().current_mission =
+        Some((mission_entity, zone_id));
+    *world.resource_mut::<GameState>() = GameState::InMission;
+
+    Ok(serde_json::json!({
+        "mission_entity": mission_entity.to_bits(),
+        "zone_id": zone_id,
+        "mission_type": format!("{:?}", opt.mission_type),
+        "opponent": format!("{:?}", opt.opponent),
+    }))
 }
 
 fn snapshot_world(world: &mut World) -> Value {

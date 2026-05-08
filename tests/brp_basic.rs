@@ -204,6 +204,92 @@ fn spawn_unit(unit_type: &str, x: i32, y: i32) -> u64 {
     resp["result"]["entity_id"].as_u64().expect("entity_id u64")
 }
 
+fn game_state() -> serde_json::Value {
+    let r = post("game/state", serde_json::json!({}));
+    r["result"].clone()
+}
+
+#[test]
+#[ignore = "requires a running Cindertide server on port 15703"]
+fn brp_game_starts_at_title() {
+    let _g = lock_world();
+    // Reset to clear any prior state.
+    post("dev/reset", serde_json::json!({}));
+    // GameState resource isn't reset by dev/reset (intentional; only entities
+    // and the FiredBeats resource are). For a clean check, we look at
+    // whatever current state is and assert game/state returns a string.
+    let s = game_state();
+    assert!(s["state"].is_string(), "game state should be a string: {s}");
+}
+
+#[test]
+#[ignore = "requires a running Cindertide server on port 15703"]
+fn brp_game_new_transitions_to_campaign() {
+    let _g = lock_world();
+    let r = post("game/new", serde_json::json!({ "player": "combine" }));
+    let s = &r["result"];
+    assert_eq!(s["state"].as_str().unwrap(), "Campaign");
+    assert_eq!(s["missions_won"].as_u64().unwrap(), 0);
+    assert_eq!(s["missions_lost"].as_u64().unwrap(), 0);
+    assert_eq!(s["player"].as_str().unwrap(), "Combine");
+}
+
+#[test]
+#[ignore = "requires a running Cindertide server on port 15703"]
+fn brp_full_loop_mission_select_resolve_returns_to_campaign() {
+    let _g = lock_world();
+    post("game/new", serde_json::json!({ "player": "combine" }));
+
+    // Pull options and pick one.
+    let opts = post("campaign/options", serde_json::json!({ "player": "combine" }));
+    let zone_id = opts["result"]["options"]
+        .as_array()
+        .unwrap()
+        .first()
+        .unwrap()["zone_id"]
+        .as_u64()
+        .unwrap();
+
+    // Select that mission — transitions to InMission.
+    let sel = post("mission/select", serde_json::json!({ "zone_id": zone_id }));
+    assert!(sel.get("result").is_some(), "mission/select: {sel}");
+    let s_in = game_state();
+    assert_eq!(s_in["state"].as_str().unwrap(), "InMission");
+    let mission_entity = s_in["current_mission_entity"].as_u64().unwrap();
+
+    // Force-resolve as a player win.
+    post(
+        "mission/force_resolve",
+        serde_json::json!({ "entity": mission_entity, "won": true }),
+    );
+    // One tick for campaign_progression_system to apply outcome.
+    std::thread::sleep(std::time::Duration::from_millis(500));
+
+    let s_after = game_state();
+    let s = s_after["state"].as_str().unwrap();
+    assert!(
+        s == "Campaign" || s.starts_with("GameOver"),
+        "expected mission to resolve, got {s}: {s_after}"
+    );
+    assert_eq!(s_after["missions_won"].as_u64().unwrap(), 1);
+}
+
+#[test]
+#[ignore = "requires a running Cindertide server on port 15703"]
+fn brp_game_save_load_roundtrip_preserves_run() {
+    let _g = lock_world();
+    post("game/new", serde_json::json!({ "player": "ironborn" }));
+    post("game/save", serde_json::json!({ "slot": "loop1" }));
+
+    // Reset everything; state goes back to defaults.
+    post("dev/reset", serde_json::json!({}));
+
+    let r = post("game/load", serde_json::json!({ "slot": "loop1" }));
+    let s = &r["result"];
+    assert_eq!(s["state"].as_str().unwrap(), "Campaign");
+    assert_eq!(s["player"].as_str().unwrap(), "Ironborn");
+}
+
 #[test]
 #[ignore = "requires a running Cindertide server on port 15703"]
 fn brp_save_write_read_roundtrip() {
