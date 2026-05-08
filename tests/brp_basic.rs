@@ -204,6 +204,56 @@ fn spawn_unit(unit_type: &str, x: i32, y: i32) -> u64 {
     resp["result"]["entity_id"].as_u64().expect("entity_id u64")
 }
 
+#[test]
+#[ignore = "requires a running Cindertide server on port 15703"]
+fn brp_world_list_factions_units_buildings() {
+    let _g = lock_world();
+    post("game/new", serde_json::json!({ "player": "combine" }));
+
+    // Pick first option to spawn the demo scenario (units + buildings).
+    let opts = post("campaign/options", serde_json::json!({ "player": "combine" }));
+    let zone_id = opts["result"]["options"]
+        .as_array()
+        .unwrap()
+        .first()
+        .unwrap()["zone_id"]
+        .as_u64()
+        .unwrap();
+    post("mission/select", serde_json::json!({ "zone_id": zone_id }));
+    std::thread::sleep(std::time::Duration::from_millis(200));
+
+    let factions = post("world/list", serde_json::json!({ "kind": "factions" }));
+    let f_items = factions["result"]["items"].as_array().unwrap();
+    assert!(f_items.len() >= 2, "expected player + opponent factions: {factions}");
+
+    let units = post("world/list", serde_json::json!({ "kind": "units" }));
+    let u_items = units["result"]["items"].as_array().unwrap();
+    assert!(u_items.len() >= 4, "expected at least Combine's 4 starting riflemen: {u_items:?}");
+    assert!(u_items.iter().any(|u| u["faction"] == "Combine"));
+
+    let buildings = post("world/list", serde_json::json!({ "kind": "buildings" }));
+    let b_items = buildings["result"]["items"].as_array().unwrap();
+    assert!(b_items.iter().any(|b| b["building_type"] == "CommandBunker"));
+    assert!(b_items.iter().any(|b| b["building_type"] == "Refinery"));
+    assert!(b_items.iter().any(|b| b["building_type"] == "Barracks"));
+
+    let tiles = post("world/list", serde_json::json!({ "kind": "tiles" }));
+    let t_items = tiles["result"]["items"].as_array().unwrap();
+    assert_eq!(t_items.len(), 40 * 25, "expected 40x25 generated map: got {}", t_items.len());
+}
+
+#[test]
+#[ignore = "requires a running Cindertide server on port 15703"]
+fn brp_game_pause_toggle() {
+    let _g = lock_world();
+    post("game/pause", serde_json::json!({ "paused": true }));
+    let s1 = post("game/pause_status", serde_json::json!({}));
+    assert_eq!(s1["result"]["paused"].as_bool().unwrap(), true);
+    post("game/pause", serde_json::json!({ "paused": false }));
+    let s2 = post("game/pause_status", serde_json::json!({}));
+    assert_eq!(s2["result"]["paused"].as_bool().unwrap(), false);
+}
+
 fn game_state() -> serde_json::Value {
     let r = post("game/state", serde_json::json!({}));
     r["result"].clone()

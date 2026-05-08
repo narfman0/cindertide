@@ -2,6 +2,9 @@
 name = "cindertide"
 version = "0.1.0"
 edition = "2021"
+# Default `cargo run` should launch the headless BRP server. Use
+# `cargo run --bin cindertide-play` to open the TUI client.
+default-run = "cindertide"
 
 [dependencies]
 bevy = { version = "0.16", default-features = false, features = [
@@ -16,6 +19,21 @@ bevy = { version = "0.16", default-features = false, features = [
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 uuid = { version = "1", features = ["serde", "v4"] }
+reqwest = { version = "0.12", features = ["blocking", "json"] }
+ratatui = "0.29"
+crossterm = "0.28"
+
+[lib]
+name = "cindertide"
+path = "src/lib.rs"
+
+[[bin]]
+name = "cindertide"
+path = "src/main.rs"
+
+[[bin]]
+name = "cindertide-play"
+path = "src/bin/play.rs"
 
 [features]
 default = []
@@ -24,4 +42,3 @@ default = []
 render = []
 
 [dev-dependencies]
-reqwest = { version = "0.12", features = ["blocking", "json"] }
