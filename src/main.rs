@@ -13,6 +13,7 @@ mod heroes;
 mod tech;
 mod unit_ai;
 mod repair;
+mod mapgen;
 mod ai;
 
 use map::{MapPlugin, GridPos, Faction, ControlPoint, ControlPointType};
@@ -48,6 +49,7 @@ fn main() {
                 .with_method("dev/reset", handle_dev_reset)
                 .with_method("dev/give_resources", handle_dev_give_resources)
                 .with_method("ai/enable", handle_ai_enable)
+                .with_method("map/generate", handle_map_generate)
                 .with_method("production/enqueue", handle_production_enqueue)
                 .with_method("production/queue_status", handle_production_queue_status)
                 .with_method("hero/spawn", handle_hero_spawn)
@@ -1315,6 +1317,51 @@ fn handle_hero_ability_use(In(params): In<Option<Value>>, world: &mut World) -> 
     Ok(serde_json::json!({ "fired": true }))
 }
 
+fn parse_mission_type(s: &str) -> Result<mapgen::MissionType, BrpError> {
+    match s {
+        "assault" => Ok(mapgen::MissionType::Assault),
+        "control" => Ok(mapgen::MissionType::Control),
+        "defense" => Ok(mapgen::MissionType::Defense),
+        "extraction" => Ok(mapgen::MissionType::Extraction),
+        "survival" => Ok(mapgen::MissionType::Survival),
+        other => Err(BrpError {
+            code: -32602,
+            message: format!("unknown mission_type: {other}"),
+            data: None,
+        }),
+    }
+}
+
+/// BRP handler for "map/generate": { width, height, seed, mission_type }
+/// Spawns tile entities for the generated map. Returns summary stats.
+fn handle_map_generate(In(params): In<Option<Value>>, world: &mut World) -> BrpResult {
+    let params = params.ok_or_else(|| BrpError {
+        code: -32602,
+        message: "missing params".into(),
+        data: None,
+    })?;
+    let width = params["width"].as_i64().unwrap_or(20) as i32;
+    let height = params["height"].as_i64().unwrap_or(20) as i32;
+    let seed = params["seed"].as_u64().unwrap_or(42);
+    let mission = parse_mission_type(params["mission_type"].as_str().unwrap_or("control"))?;
+
+    let m = mapgen::generate(width, height, seed, mission.clone());
+    let tile_count = m.tiles.len();
+    for t in &m.tiles {
+        world.spawn(map::Tile {
+            pos: t.pos.clone(),
+            terrain_type: t.terrain.clone(),
+            cover: t.cover.clone(),
+        });
+    }
+    Ok(serde_json::json!({
+        "tiles_spawned": tile_count,
+        "bases": m.bases.iter().map(|p| serde_json::json!({"x": p.x, "y": p.y})).collect::<Vec<_>>(),
+        "chokepoints": m.chokepoints.iter().map(|p| serde_json::json!({"x": p.x, "y": p.y})).collect::<Vec<_>>(),
+        "mission_type": format!("{:?}", mission),
+    }))
+}
+
 fn parse_doctrine(s: &str) -> Result<Doctrine, BrpError> {
     match s {
         "assault" => Ok(Doctrine::Assault),
@@ -1408,6 +1455,7 @@ fn handle_dev_reset(In(_params): In<Option<Value>>, world: &mut World) -> BrpRes
             With<map::ControlPoint>,
             With<BuildingType>,
             With<Hero>,
+            With<map::Tile>,
         )>>();
         for e in q.iter(world) {
             to_despawn.push(e);

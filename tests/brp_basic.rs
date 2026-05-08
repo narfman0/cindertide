@@ -206,6 +206,26 @@ fn spawn_unit(unit_type: &str, x: i32, y: i32) -> u64 {
 
 #[test]
 #[ignore = "requires a running Cindertide server on port 15703"]
+fn brp_map_generate_assault_layout() {
+    let _g = lock_world();
+    let resp = post(
+        "map/generate",
+        serde_json::json!({
+            "width": 20,
+            "height": 10,
+            "seed": 42,
+            "mission_type": "assault",
+        }),
+    );
+    let r = &resp["result"];
+    assert_eq!(r["tiles_spawned"].as_i64().unwrap(), 200);
+    assert_eq!(r["bases"].as_array().unwrap().len(), 2);
+    assert_eq!(r["chokepoints"].as_array().unwrap().len(), 1);
+    assert_eq!(r["mission_type"].as_str().unwrap(), "Assault");
+}
+
+#[test]
+#[ignore = "requires a running Cindertide server on port 15703"]
 fn brp_ai_economic_builds_refinery_first() {
     let _g = lock_world();
     let f = spawn_faction("combine");
