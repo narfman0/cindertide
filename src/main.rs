@@ -20,6 +20,8 @@ mod beats;
 mod hollow;
 mod editor;
 mod save;
+#[cfg(feature = "render")]
+mod render;
 mod ai;
 
 use map::{MapPlugin, GridPos, Faction, ControlPoint, ControlPointType};
@@ -41,8 +43,11 @@ use hollow::{HollowPlugin, HollowSpawner, HollowMode};
 use save::{SavePlugin, SaveSlots};
 
 fn main() {
-    App::new()
-        .add_plugins(MinimalPlugins)
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
+    #[cfg(feature = "render")]
+    app.add_plugins(render::RenderPlugin);
+    app
         .add_plugins(
             RemotePlugin::default()
                 .with_method("unit/move", handle_unit_move)

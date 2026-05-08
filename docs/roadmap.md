@@ -21,7 +21,26 @@ for the *what*; this roadmap defines the *order* and the *acceptance shape*.
 | 5 | Cover on units | `InCover` component, `update_cover_system` |
 | 6 | Flanking + facing | `Facing`, `AttackAngle`, cover bypass for rear/flank |
 | 7 | Suppression + morale | `Pinned`, `Routing`, `MoraleState` |
-| 7.5 | Integration polish | `RiflemanBundle`, `unit/spawn`/`unit/status` BRP, ParamSet fix, end-to-end live-fire test |
+| 7.5 | Integration polish | `RiflemanBundle`, `unit/spawn`/`unit/status` BRP, ParamSet fix |
+| 8 | Resources | Fuel/Scrap/Manpower per faction; trickle, cap, spend |
+| 9 | Control point capture | radius capture, contested rules, Combine/Ironborn trickle bonuses |
+| 10 | Buildings + grid placement | 16 building types, costs, construction progress, `dev/reset` |
+| 11 | Production queues | Per-building, cap 5, cost up-front |
+| 12 | Unit variety | HeavyWeapons / LightVehicle / HeavyArmor bundles |
+| 13 | Heroes | aura suppression-resist, charge meter, Rally / AreaDamage abilities |
+| 14 | Tech tree | Tier 1/2/3 + doctrine choice, ResearchInProgress |
+| 15 | Unit AI | threat response, routing retreat to HomeBase |
+| 16 | Repair Bay | passive heal of nearby allied vehicles, scrap-gated |
+| 17 | Pop cap | base 20 + 10 per Built SupplyDepot, gates production |
+| 18-22 | AI opponent | economic / production / tactical / hero / doctrine systems |
+| 23 | Procedural map gen | LCG seed, mission-shaped layout, base/chokepoint coords |
+| 24 | Missions + win conditions | per-type rules, terminal Won/Lost |
+| 25 | Campaign / living world | 4-zone state, mission outcome → territory shifts |
+| 26 | Authored beats | HeroGoesDown, LastStand, AncientUnification |
+| 27 | Hollow faction | corruption-zone spawners, Act-3 United Voice rate doubling |
+| 28 | Level editor | tile JSON save/load, dimension validation |
+| 29 | Save / load | in-memory slots, snapshot/restore of factions/units/tiles |
+| 30 | Render scaffolding | feature-gated `render` module; full pipeline pending Synty work |
 
 ---
 
