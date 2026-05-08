@@ -38,6 +38,11 @@ pub struct AttackTarget {
 #[derive(Component, Debug)]
 pub struct Dead;
 
+#[derive(Component, Debug, Clone)]
+pub struct InCover {
+    pub density: CoverDensity,
+}
+
 // --- Pure functions ---
 
 pub fn chebyshev_distance(a: &GridPos, b: &GridPos) -> f32 {
@@ -64,6 +69,14 @@ pub fn damage_after_cover(base_damage: f32, cover: &CoverDensity) -> f32 {
     base_damage * (1.0 - damage_reduction(cover))
 }
 
+/// Compute effective damage taking InCover component into account.
+pub fn effective_damage(base: f32, cover: Option<&InCover>) -> f32 {
+    match cover {
+        Some(c) => damage_after_cover(base, &c.density),
+        None => base,
+    }
+}
+
 // --- Systems ---
 
 pub fn cooldown_system(time: Res<Time>, mut query: Query<&mut AttackCooldown>) {
@@ -78,8 +91,7 @@ pub fn cooldown_system(time: Res<Time>, mut query: Query<&mut AttackCooldown>) {
 pub fn attack_system(
     mut commands: Commands,
     mut attackers: Query<(Entity, &AttackTarget, &AttackDamage, &mut AttackCooldown, &UnitPos, &AttackSpeed, &AttackRange)>,
-    mut targets: Query<(&mut Health, &UnitPos), Without<Dead>>,
-    tiles: Query<&Tile>,
+    mut targets: Query<(&mut Health, &UnitPos, Option<&InCover>), Without<Dead>>,
 ) {
     let mut to_remove_target: Vec<Entity> = Vec::new();
 
@@ -90,14 +102,9 @@ pub fn attack_system(
 
         let target_entity = attack_target.entity;
 
-        if let Ok((mut health, target_pos)) = targets.get_mut(target_entity) {
+        if let Ok((mut health, target_pos, in_cover)) = targets.get_mut(target_entity) {
             if is_in_range(&attacker_pos.pos, &target_pos.pos, range.tiles) {
-                let cover = tiles
-                    .iter()
-                    .find(|t| t.pos == target_pos.pos)
-                    .map(|t| t.cover.clone())
-                    .unwrap_or(CoverDensity::None);
-                let final_damage = damage_after_cover(damage.base, &cover);
+                let final_damage = effective_damage(damage.base, in_cover);
                 let died = apply_damage(&mut health, final_damage);
                 cooldown.remaining = 1.0 / speed.attacks_per_second;
                 if died {
@@ -128,13 +135,40 @@ pub fn death_system(
     }
 }
 
+/// Update the InCover component on each unit based on the tile they occupy.
+pub fn update_cover_system(
+    mut commands: Commands,
+    units: Query<(Entity, &UnitPos)>,
+    tiles: Query<&Tile>,
+) {
+    // Build a lookup map from GridPos -> CoverDensity
+    let cover_map: std::collections::HashMap<&GridPos, &CoverDensity> = tiles
+        .iter()
+        .map(|t| (&t.pos, &t.cover))
+        .collect();
+
+    for (entity, unit_pos) in &units {
+        match cover_map.get(&unit_pos.pos) {
+            Some(CoverDensity::Light) => {
+                commands.entity(entity).insert(InCover { density: CoverDensity::Light });
+            }
+            Some(CoverDensity::Heavy) => {
+                commands.entity(entity).insert(InCover { density: CoverDensity::Heavy });
+            }
+            _ => {
+                commands.entity(entity).remove::<InCover>();
+            }
+        }
+    }
+}
+
 // --- Plugin ---
 
 pub struct CombatPlugin;
 
 impl Plugin for CombatPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (cooldown_system, attack_system, death_system).chain());
+        app.add_systems(Update, (update_cover_system, cooldown_system, attack_system, death_system).chain());
     }
 }
 
@@ -229,5 +263,41 @@ mod tests {
     #[test]
     fn test_damage_after_heavy_cover_reduced_50pct() {
         assert_eq!(damage_after_cover(40.0, &CoverDensity::Heavy), 20.0);
+    }
+
+    // --- InCover / effective_damage tests ---
+
+    #[test]
+    fn test_cover_reduces_damage_light() {
+        let cover = InCover { density: CoverDensity::Light };
+        let result = effective_damage(100.0, Some(&cover));
+        assert_eq!(result, 75.0);
+    }
+
+    #[test]
+    fn test_cover_reduces_damage_heavy() {
+        let cover = InCover { density: CoverDensity::Heavy };
+        let result = effective_damage(100.0, Some(&cover));
+        assert_eq!(result, 50.0);
+    }
+
+    #[test]
+    fn test_no_cover_full_damage() {
+        let result = effective_damage(100.0, None);
+        assert_eq!(result, 100.0);
+    }
+
+    #[test]
+    fn test_cover_cannot_reduce_below_zero() {
+        let cover = InCover { density: CoverDensity::Heavy };
+        let result = effective_damage(0.0, Some(&cover));
+        assert_eq!(result, 0.0);
+    }
+
+    #[test]
+    fn test_effective_damage_calculation() {
+        let cover = InCover { density: CoverDensity::Heavy };
+        let result = effective_damage(100.0, Some(&cover));
+        assert_eq!(result, 50.0);
     }
 }
