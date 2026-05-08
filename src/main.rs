@@ -9,6 +9,7 @@ mod resources;
 mod control;
 mod buildings;
 mod production;
+mod heroes;
 mod ai;
 
 use map::{MapPlugin, GridPos, Faction, ControlPoint, ControlPointType};
@@ -18,6 +19,7 @@ use resources::{ResourcesPlugin, FactionBundle, ResourcePool, ResourceTrickle, R
 use control::ControlPlugin;
 use buildings::{BuildingsPlugin, BuildingType, BuildingBundle, BuildingPos, ConstructionProgress, building_cost, try_pay, can_place, Built, UnderConstruction};
 use production::{ProductionPlugin, ProductionQueue, building_produces, try_enqueue, EnqueueError};
+use heroes::{HeroPlugin, HeroBundle, Hero, AbilityKind, SignatureAbility, Aura, HeroDowned, is_charge_full, within_aura};
 
 fn main() {
     App::new()
@@ -39,6 +41,9 @@ fn main() {
                 .with_method("dev/reset", handle_dev_reset)
                 .with_method("production/enqueue", handle_production_enqueue)
                 .with_method("production/queue_status", handle_production_queue_status)
+                .with_method("hero/spawn", handle_hero_spawn)
+                .with_method("hero/status", handle_hero_status)
+                .with_method("hero/ability_use", handle_hero_ability_use)
         )
         .add_plugins(RemoteHttpPlugin::default().with_port(15703))
         .add_plugins(MapPlugin)
@@ -48,6 +53,7 @@ fn main() {
         .add_plugins(ControlPlugin)
         .add_plugins(BuildingsPlugin)
         .add_plugins(ProductionPlugin)
+        .add_plugins(HeroPlugin)
         .add_systems(Startup, on_startup)
         .run();
 }
@@ -930,6 +936,204 @@ fn handle_production_queue_status(In(params): In<Option<Value>>, world: &mut Wor
     }))
 }
 
+fn parse_ability_kind(s: &str) -> Result<AbilityKind, BrpError> {
+    match s {
+        "rally" => Ok(AbilityKind::Rally),
+        "area_damage" => Ok(AbilityKind::AreaDamage),
+        other => Err(BrpError {
+            code: -32602,
+            message: format!("unknown ability_kind: {other}"),
+            data: None,
+        }),
+    }
+}
+
+/// BRP handler for "hero/spawn": { name, faction, x, y, ability_kind? }
+fn handle_hero_spawn(In(params): In<Option<Value>>, world: &mut World) -> BrpResult {
+    let params = params.ok_or_else(|| BrpError {
+        code: -32602,
+        message: "missing params".into(),
+        data: None,
+    })?;
+    let name = params["name"].as_str().unwrap_or("Hero").to_string();
+    let faction = parse_faction(params["faction"].as_str().unwrap_or("combine"))?;
+    let x = params["x"].as_i64().unwrap_or(0) as i32;
+    let y = params["y"].as_i64().unwrap_or(0) as i32;
+    let kind = parse_ability_kind(params["ability_kind"].as_str().unwrap_or("rally"))?;
+    let id = world.spawn(HeroBundle::new(name, x, y, faction, kind)).id().to_bits();
+    Ok(serde_json::json!({ "entity_id": id }))
+}
+
+/// BRP handler for "hero/status": { entity }
+fn handle_hero_status(In(params): In<Option<Value>>, world: &mut World) -> BrpResult {
+    let params = params.ok_or_else(|| BrpError {
+        code: -32602,
+        message: "missing params".into(),
+        data: None,
+    })?;
+    let entity_id = params["entity"].as_u64().ok_or_else(|| BrpError {
+        code: -32602,
+        message: "entity required".into(),
+        data: None,
+    })?;
+    let entity = Entity::try_from_bits(entity_id).map_err(|_| BrpError {
+        code: -32602,
+        message: format!("entity {entity_id} not found"),
+        data: None,
+    })?;
+    let r = world.get_entity(entity).map_err(|_| BrpError {
+        code: -32602,
+        message: format!("entity {entity_id} not found"),
+        data: None,
+    })?;
+    let hero = r.get::<Hero>().ok_or_else(|| BrpError {
+        code: -32602,
+        message: "entity is not a hero".into(),
+        data: None,
+    })?;
+    let h = r.get::<Health>();
+    let s = r.get::<SignatureAbility>();
+    let a = r.get::<Aura>();
+    let downed = r.get::<HeroDowned>().is_some();
+    let pos = r.get::<units::UnitPos>();
+
+    Ok(serde_json::json!({
+        "name": hero.name,
+        "downed": downed,
+        "pos_x": pos.map(|p| p.pos.x),
+        "pos_y": pos.map(|p| p.pos.y),
+        "health_current": h.map(|h| h.current),
+        "health_max": h.map(|h| h.max),
+        "charge": s.map(|s| s.charge),
+        "max_charge": s.map(|s| s.max_charge),
+        "charge_full": s.map(is_charge_full),
+        "ability_kind": s.map(|s| format!("{:?}", s.kind)),
+        "aura_radius": a.map(|a| a.radius),
+        "aura_suppression_resist": a.map(|a| a.suppression_resist),
+    }))
+}
+
+/// BRP handler for "hero/ability_use": { entity }
+/// If charge is full, applies the ability and resets charge.
+fn handle_hero_ability_use(In(params): In<Option<Value>>, world: &mut World) -> BrpResult {
+    let params = params.ok_or_else(|| BrpError {
+        code: -32602,
+        message: "missing params".into(),
+        data: None,
+    })?;
+    let entity_id = params["entity"].as_u64().ok_or_else(|| BrpError {
+        code: -32602,
+        message: "entity required".into(),
+        data: None,
+    })?;
+    let entity = Entity::try_from_bits(entity_id).map_err(|_| BrpError {
+        code: -32602,
+        message: format!("entity {entity_id} not found"),
+        data: None,
+    })?;
+
+    let (kind, hero_pos, hero_faction, aura_radius) = {
+        let r = world.get_entity(entity).map_err(|_| BrpError {
+            code: -32602,
+            message: format!("entity {entity_id} not found"),
+            data: None,
+        })?;
+        if r.get::<Hero>().is_none() {
+            return Err(BrpError {
+                code: -32000,
+                message: "entity is not a hero".into(),
+                data: None,
+            });
+        }
+        if r.get::<HeroDowned>().is_some() {
+            return Err(BrpError {
+                code: -32000,
+                message: "hero is downed".into(),
+                data: None,
+            });
+        }
+        let s = r.get::<SignatureAbility>().ok_or_else(|| BrpError {
+            code: -32000,
+            message: "hero has no SignatureAbility".into(),
+            data: None,
+        })?;
+        if !is_charge_full(s) {
+            return Err(BrpError {
+                code: -32000,
+                message: format!("ability not ready: {}/{}", s.charge, s.max_charge),
+                data: None,
+            });
+        }
+        let pos = r
+            .get::<units::UnitPos>()
+            .map(|p| p.pos.clone())
+            .ok_or_else(|| BrpError {
+                code: -32000,
+                message: "hero has no UnitPos".into(),
+                data: None,
+            })?;
+        let faction = r
+            .get::<Faction>()
+            .cloned()
+            .ok_or_else(|| BrpError {
+                code: -32000,
+                message: "hero has no Faction".into(),
+                data: None,
+            })?;
+        let aura = r.get::<Aura>().map(|a| a.radius).unwrap_or(5.0);
+        (s.kind.clone(), pos, faction, aura)
+    };
+
+    match kind {
+        AbilityKind::Rally => {
+            // Clear suppression on allied units in aura radius.
+            let mut targets: Vec<Entity> = Vec::new();
+            {
+                let mut q = world.query::<(Entity, &units::UnitPos, &Faction, &Suppression)>();
+                for (e, p, f, _) in q.iter(world) {
+                    if f == &hero_faction && within_aura(&hero_pos, &p.pos, aura_radius) {
+                        targets.push(e);
+                    }
+                }
+            }
+            for t in &targets {
+                if let Ok(mut em) = world.get_entity_mut(*t) {
+                    if let Some(mut s) = em.get_mut::<Suppression>() {
+                        s.current = 0.0;
+                    }
+                }
+            }
+        }
+        AbilityKind::AreaDamage => {
+            let mut targets: Vec<Entity> = Vec::new();
+            {
+                let mut q = world.query::<(Entity, &units::UnitPos, &Faction, &Health)>();
+                for (e, p, f, _) in q.iter(world) {
+                    if f != &hero_faction && within_aura(&hero_pos, &p.pos, aura_radius) {
+                        targets.push(e);
+                    }
+                }
+            }
+            for t in &targets {
+                if let Ok(mut em) = world.get_entity_mut(*t) {
+                    if let Some(mut h) = em.get_mut::<Health>() {
+                        h.current = (h.current - 100.0).max(0.0);
+                    }
+                }
+            }
+        }
+    }
+
+    // Reset charge
+    if let Ok(mut em) = world.get_entity_mut(entity) {
+        if let Some(mut s) = em.get_mut::<SignatureAbility>() {
+            s.charge = 0.0;
+        }
+    }
+
+    Ok(serde_json::json!({ "fired": true }))
+}
+
 /// BRP handler for "dev/reset": despawns all gameplay entities (factions,
 /// units, buildings, control points). For tests so each run starts clean.
 fn handle_dev_reset(In(_params): In<Option<Value>>, world: &mut World) -> BrpResult {
@@ -940,6 +1144,7 @@ fn handle_dev_reset(In(_params): In<Option<Value>>, world: &mut World) -> BrpRes
             With<units::UnitType>,
             With<map::ControlPoint>,
             With<BuildingType>,
+            With<Hero>,
         )>>();
         for e in q.iter(world) {
             to_despawn.push(e);

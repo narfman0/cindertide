@@ -204,6 +204,109 @@ fn spawn_unit(unit_type: &str, x: i32, y: i32) -> u64 {
     resp["result"]["entity_id"].as_u64().expect("entity_id u64")
 }
 
+fn spawn_hero(name: &str, faction: &str, x: i32, y: i32, kind: &str) -> u64 {
+    let resp = post(
+        "hero/spawn",
+        serde_json::json!({
+            "name": name,
+            "faction": faction,
+            "x": x,
+            "y": y,
+            "ability_kind": kind,
+        }),
+    );
+    resp["result"]["entity_id"].as_u64().expect("entity_id u64")
+}
+
+fn hero_status(entity: u64) -> serde_json::Value {
+    let resp = post("hero/status", serde_json::json!({ "entity": entity }));
+    resp["result"].clone()
+}
+
+#[test]
+#[ignore = "requires a running Cindertide server on port 15703"]
+fn brp_hero_spawn_starts_zero_charge_full_health() {
+    let _g = lock_world();
+    let h = spawn_hero("Iron", "combine", 0, 0, "rally");
+    let s = hero_status(h);
+    assert_eq!(s["name"].as_str().unwrap(), "Iron");
+    // Charge starts at 0 and ticks at ~5/sec; allow a small accumulation
+    // for the time between spawn and status query.
+    let c = s["charge"].as_f64().unwrap();
+    assert!(c < 5.0, "expected charge near 0, got {c}");
+    assert_eq!(s["downed"].as_bool().unwrap(), false);
+    assert_eq!(
+        s["health_current"].as_f64().unwrap(),
+        s["health_max"].as_f64().unwrap()
+    );
+    assert!(s["aura_radius"].as_f64().unwrap() > 0.0);
+    assert!(s["aura_suppression_resist"].as_f64().unwrap() > 0.0);
+}
+
+#[test]
+#[ignore = "requires a running Cindertide server on port 15703"]
+fn brp_hero_charge_accumulates_over_time() {
+    let _g = lock_world();
+    let h = spawn_hero("Iron", "combine", 0, 0, "rally");
+    std::thread::sleep(std::time::Duration::from_millis(2000));
+    let s = hero_status(h);
+    let c = s["charge"].as_f64().unwrap();
+    assert!(c > 0.0, "expected charge > 0 after 2s, got {c}");
+}
+
+#[test]
+#[ignore = "requires a running Cindertide server on port 15703"]
+fn brp_ability_use_rejects_when_not_charged() {
+    let _g = lock_world();
+    let h = spawn_hero("Iron", "combine", 0, 0, "rally");
+    let r = post("hero/ability_use", serde_json::json!({ "entity": h }));
+    assert!(r.get("error").is_some(), "expected error: {r}");
+}
+
+#[test]
+#[ignore = "requires a running Cindertide server on port 15703"]
+fn brp_rally_clears_allied_suppression() {
+    let _g = lock_world();
+    let h = spawn_hero("Iron", "combine", 50, 50, "rally");
+    let ally = spawn_rifleman_with_faction(50, 51, "combine"); // within aura radius 5
+    let enemy = spawn_rifleman_with_faction(53, 50, "hollow"); // distance 3, in range
+
+    // Have enemy attack ally to build suppression.
+    post(
+        "combat/attack",
+        serde_json::json!({ "attacker_entity": enemy, "target_entity": ally }),
+    );
+
+    std::thread::sleep(std::time::Duration::from_millis(2500));
+
+    let before = combat_status(ally);
+    let supp_before = before["suppression_current"].as_f64().unwrap();
+    assert!(
+        supp_before > 0.0,
+        "expected ally to have suppression before rally: {before}"
+    );
+
+    // Force-charge the hero by waiting (5/sec, max 100 → ~20s) — too slow for
+    // tests. Cheat by calling ability_use repeatedly until it succeeds:
+    // the harness can wait for natural charge in a slower test, but here we
+    // assert the rejection branch separately and the rally effect by waiting
+    // ~21s for natural charge.
+    std::thread::sleep(std::time::Duration::from_millis(21_000));
+
+    let r = post("hero/ability_use", serde_json::json!({ "entity": h }));
+    assert!(r.get("result").is_some(), "rally should fire: {r}");
+
+    // Allow a frame for the change to be reflected.
+    std::thread::sleep(std::time::Duration::from_millis(500));
+
+    let after = combat_status(ally);
+    let supp_after = after["suppression_current"].as_f64().unwrap();
+    assert!(
+        supp_after < supp_before,
+        "rally should reduce suppression: before={supp_before} after={supp_after}"
+    );
+}
+
 #[test]
 #[ignore = "requires a running Cindertide server on port 15703"]
 fn brp_spawn_all_unit_types() {

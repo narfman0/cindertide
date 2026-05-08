@@ -293,7 +293,14 @@ pub fn attack_system(
             Option<&Suppression>,
         )>,
         Query<&mut AttackCooldown>,
-        Query<(&mut Health, &UnitPos, Option<&InCover>, Option<&mut Suppression>, Option<&Facing>), Without<Dead>>,
+        Query<(
+            &mut Health,
+            &UnitPos,
+            Option<&InCover>,
+            Option<&mut Suppression>,
+            Option<&Facing>,
+            Option<&crate::heroes::SuppressionResist>,
+        ), Without<Dead>>,
     )>,
 ) {
     // Phase 1: read attackers, collect actions; no mutation yet so the
@@ -325,7 +332,7 @@ pub fn attack_system(
         let mut targets = queries.p2();
         for p in &pending {
             match targets.get_mut(p.target) {
-                Ok((mut health, tpos, cover, tsupp, tfacing)) => {
+                Ok((mut health, tpos, cover, tsupp, tfacing, resist)) => {
                     if !is_in_range(&p.attacker_pos, &tpos.pos, p.range) {
                         continue;
                     }
@@ -335,7 +342,10 @@ pub fn attack_system(
                     if dmg > 0.0 {
                         took_damage.push(p.target);
                     }
-                    let supp_gain = suppression_gain_per_hit(p.suppression_value, cover) * p.attacker_mult;
+                    let mut supp_gain = suppression_gain_per_hit(p.suppression_value, cover) * p.attacker_mult;
+                    if let Some(r) = resist {
+                        supp_gain *= 1.0 - r.fraction.clamp(0.0, 1.0);
+                    }
                     if let Some(mut ts) = tsupp {
                         add_suppression(&mut ts, supp_gain);
                     }
@@ -403,7 +413,7 @@ pub fn suppression_pin_system(
 
 pub fn death_system(
     mut commands: Commands,
-    query: Query<(Entity, &Health), Without<Dead>>,
+    query: Query<(Entity, &Health), (Without<Dead>, Without<crate::heroes::Hero>)>,
 ) {
     for (entity, health) in &query {
         if health.current <= 0.0 {
