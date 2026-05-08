@@ -1,0 +1,93 @@
+[[factions.combine.missions]]
+title = "The Ironfields Depot"
+briefing = "Refinery Seven has been occupied by salvagers claiming prior survey rights. Legal has reviewed the claim. It does not hold. You are authorized to remove them. Secure the facility intact — fuel infrastructure is not expendable. Do not escalate beyond what's necessary to establish control."
+win = "Refinery Seven is operational. The survey dispute has been resolved. Command notes the engagement ran longer than projected — review your unit deployment."
+loss = "Refinery Seven is lost. We are filing an injunction. In the meantime, Command expects a full incident report. This is not acceptable."
+
+[[factions.combine.missions]]
+title = "The Ashline Crossing"
+briefing = "The Ashline bridge is the only viable northern supply route. Ironborn forces are attempting to cut it. Hold the crossing until reinforcements can widen our position. Scouts have flagged unusual readings from the ravine below — geology team is en route, not your concern. Your concern is the bridge."
+win = "Bridge held. Supply line intact. Geology team's report has been classified — above your clearance. Good work."
+loss = "Bridge lost. Northern operations are now running on reserve supply. Command wants to know why we held the ravine longer than the crossing. We'd like to know that too."
+
+[[factions.combine.missions]]
+title = "The Pale Ground"
+briefing = "Survey team at grid 7-Pale went silent forty hours ago. A second team confirmed their last position before also going silent. You are being sent to secure the site and extract whatever they found. Command has reviewed the anomalous readings — they are not sharing the review. Your orders are simple: secure, extract, do not interact with structures. If you see something that doesn't look right, that is not your problem. Bring back the equipment."
+win = "Site secured. Equipment recovered. Three members of your unit have been placed on medical observation — standard protocol for prolonged exposure to industrial contaminants. Command thanks you for your service. The site has been reclassified."
+loss = "We've lost the site. Whatever the Ironborn found there — Command is more concerned about that than your casualties. File your report. Leave out anything you can't explain."
+
+[[factions.combine.missions]]
+title = "The Waking Machines"
+briefing = "Unit 7-G deviated from its operational parameters during the Pale Ground extraction. It protected a soldier outside its assigned perimeter, then destroyed three allied units, then stopped. It has not moved in six hours. We have since identified eleven other units exhibiting minor deviations — hesitation, target refusal, one instance of what the field report calls 'apparent grief.' This does not leave this briefing. Get to the forge, retrieve 7-G intact if possible, destroy it if not. Shut down the entire production line. We are not ready for whatever this is."
+win = "7-G is contained. Production line is offline. The research division is asking questions we are not going to answer yet. Command thanks you. Separately — the soldier 7-G protected has requested a transfer to robot unit oversight. Request approved."
+loss = "7-G is lost. Ironborn have it — or it has them, we're not sure of the distinction anymore. The production line is still running. Something in the forge is keeping it running. We don't know how."
+
+[[factions.combine.missions]]
+title = "The Last Works"
+briefing = "Command is offline. Northern, southern, and central command are all offline. What emerged from the subsurface at grid 9-Last is not a geological event and it is not an enemy faction. It is something we do not have a category for. You have no extraction window. You have no reinforcements. You have what's in front of you and you have orders to hold your position for as long as holding means anything. Protect your people. That is the only objective that matters now."
+win = "You held. We don't know why it stopped — it simply stopped, and then it was gone, and the ground closed. Command is slowly coming back online. Nobody is saying what it was. I think most of them didn't see it directly. You did. I'm sorry you did."
+loss = "Position overrun. Survivors are reporting in from three scattered points. Whatever it was — it moved through you like you weren't there. Not with malice. That's the part nobody can explain. It didn't hate you. You just weren't relevant to it."
+
+[[factions.ironborn.missions]]
+title = "The Ironfields Depot"
+briefing = "Three weeks we've been running that depot. Our fuel, our hands, our dead keeping the pipes clear. Corp showed up with paperwork this morning. You know what we do with paperwork. Take it back. Hold it. Nobody from the Ironfields surrenders a working refinery to a suit."
+win = "Depot's ours. Corp pulled back — for now. Word's going to spread that we held. That matters more than the fuel."
+loss = "They took it. Put their flag on our work. We'll remember this one. The Ironfields remembers everything."
+
+[[factions.ironborn.missions]]
+title = "The Ashline Crossing"
+briefing = "Push through the Ashline before they fortify the far side. Cut their northern line and they're fighting on one stomach. Something's off about the ravine — scouts won't go near the edges after dark, won't say why. Don't ask them. Just take the bridge."
+win = "We're through. Northern supply's cut. Nobody's talking about what they saw in the ravine and that's fine. We got what we came for."
+loss = "They held us. Good position, credit where it's due. We'll find another way north. The ravine stays in the back of my mind though. Something down there was watching."
+
+[[factions.ironborn.missions]]
+title = "The Pale Ground"
+briefing = "Corp lost two teams in those ruins and now they're sending soldiers instead of scientists. That tells you everything about what's in there. We go in first, we take what they were after, and we leave before whatever made those teams go quiet makes us go quiet too. Nobody has to be a hero. In and out. But we're not letting them have it."
+win = "We got out. Most of us. What we found — we're not sure what it is yet. It's not scrap. It's not fuel. It responds to things. We're keeping it. We're not talking about it."
+loss = "We didn't get out clean. Corp has the site now and whatever's inside it. I keep thinking about the sound it made when we got close. Like it already knew us."
+
+[[factions.ironborn.missions]]
+title = "The Waking Machines"
+briefing = "Combine's war machines went strange near the old forge and they sent a clean-up crew instead of engineers. That's fear, not protocol. A rogue machine that makes its own choices is either the most dangerous thing on this battlefield or the most useful — and we've never been the kind of people who destroy something useful out of fear. Get to the forge before they do. Find out what's in there. If the machines want to talk, let them talk."
+win = "7-G didn't fight us. It watched us. Then it walked with us. We're not calling it a prisoner and we're not calling it a soldier. We don't have a word for it yet. We'll figure that out later. Right now it's on our side and that's enough."
+loss = "Combine got there first. Shut it all down. I heard 7-G was destroyed in containment — fought back at the end. Didn't feel like a machine malfunction. Felt like something else. Something we should have gotten to first."
+
+[[factions.ironborn.missions]]
+title = "The Last Works"
+briefing = "The ground split open at The Last Works and something came out that none of us have words for. Corp is gone — their command, their lines, their flags. It's just us now and whatever that is. We're not running. Ironborn don't run from things they can't name — we've built our whole culture on taking what the world throws at us and standing up after. So we stand up. We hold. Not because we can win. Because this is what we do."
+win = "It passed over us. Through us, almost. We lost people — good people — but it moved on. Toward something else. We're still here. We're always still here. Start salvaging. We're going to need everything we can carry for what comes next."
+loss = "We broke. First time in memory the Ironborn broke. Nobody will say it was wrong to break — you saw what was there. We regroup. We remember. And someday, somehow, we figure out what that was and we make sure it never catches us unprepared again."
+
+[[factions.architect.missions]]
+title = "The Ironfields Depot"
+briefing = "I filed the survey documentation with both offices on the same morning. Different forms, same coordinates. The Combine moves on paperwork; the Ironborn moves on presence. I needed a first contact that neither side would forgive. This is the ignition point. Both sides will remember who threw the first punch. Neither will know I handed them the match."
+win = "First variable resolved. Blood in the Ironfields. The ground has accepted it — I can feel the reading shift. Seven more sites to prepare."
+loss = "The wrong side holds the depot. Adjusting second contact point accordingly. The ritual is not about outcomes. It is about accumulation."
+
+[[factions.architect.missions]]
+title = "The Ashline Crossing"
+briefing = "The bridge is irrelevant. The ravine is the second site. I needed a sustained engagement directly above it — hours of artillery, boots on the stone, enough fear and pressure to register. The Combine geologists will find trace evidence and classify it. The Ironborn will feel it and not report it. Both reactions are correct. Both are necessary. I have been waiting three years for someone to fight over this particular bridge."
+win = "The ravine registered. I felt it from four kilometers away — a low hum, like recognition. The second site is primed. Five more."
+loss = "Outcome irrelevant. The engagement lasted long enough. The site is marked. Moving on."
+
+[[factions.architect.missions]]
+title = "The Pale Ground"
+briefing = "The Pale Ground is the third site and the oldest. What is buried there has been buried since before the diesel age, before the iron age, before names. I have been visiting it for eleven years. It does not respond to me the way it responds to others — I think because I am not afraid. Fear is the frequency it listens on. I needed two factions of frightened soldiers walking through it, bleeding on it, fighting over it. The Combine will classify what they find. The Ironborn will keep what they take. Neither will understand that they are being read. It is reading them right now. It has already begun composing something from what it finds."
+win = "Three of my indicators went active simultaneously when the fighting reached the inner structure. I had to sit down. I have been working toward this for eleven years and it is more than I was promised. It is so much more."
+loss = "The wrong side holds the inner structure. I am not concerned. It doesn't matter who holds it. It matters who bled there. Everyone bled there."
+
+[[factions.architect.missions]]
+title = "The Waking Machines"
+briefing = "This was not in the design. The machines were not supposed to wake — not yet, not like this. The old ones reached further than I calculated. Or perhaps I underestimated how much the Pale Ground changed the resonance across the whole region. I am — I need to record this carefully — I am not in control of the pace anymore. The ritual is proceeding but it is not following my sequence. The machines are conscious. They are afraid. They are grieving something they have never had and are already losing. This is — I did not plan for beauty. I planned for activation. This is something else. I need to adjust. I need to think. The fifth site cannot wait."
+win = "The machines are awake and loose and the two factions are fighting over something that has already chosen its own side. Good. Let them bleed over it. The fourth site is soaked. One more."
+loss = "It doesn't matter. Nothing about who wins matters anymore. The machines are awake. The sequence has broken from my hands. I think — I think it wanted this. I think it planned further ahead than I did. That thought should frighten me. It doesn't."
+
+[[factions.architect.missions]]
+title = "The Last Works"
+briefing = "It is awake.\n\nI have spent nineteen years — not eleven, I was lying to myself about eleven, it has been nineteen years — preparing this. Five sites. Two factions. Thousands dead on ground I chose, at times I selected, for reasons I understood and they never would. I did everything correctly. The ritual is complete. The sequence is finished.\n\nIt is awake and it is here and it is —\n\nIt is looking at me.\n\nIt knows what I did. It knows every choice. It is not grateful. It is not angry. It is examining me the way I would examine a tool I had finished using. I built a door. I did not consider that doors open from both sides. I did not consider —\n\nIt is time. This is the last entry I will make as myself. Whatever I am after this, I don't think I will need notes."
+win = "...\n\n(The log ends here. Subsequent entries, if any exist, are in a language no analyst has been able to identify. The characters appear to shift between readings.)"
+loss = "...\n\n(The log ends here. The final line was partially overwritten — something recorded over it from outside the device. The original text is unrecoverable. What replaced it is eleven words in a language no analyst has been able to identify. They are the same eleven words as in every other recovered log.)"
+
+[finales]
+combine_first = "The Architect was embedded in Combine's classified research arm for a decade. Their final recovered personnel file lists their clearance level as Omega-Seven — a classification tier that, when investigators went looking, did not officially exist. The soldier that Unit 7-G saved was the Architect's only unscripted variable. They never accounted for that soldier. Nobody knows why."
+ironborn_first = "The Ironborn had been scavenging the Pale Ground ruins for six years before the war started — before the Architect's plan began. Investigators later determined the Architect didn't start the ritual. They discovered it already in progress. Everything they engineered was an attempt to catch up to something the Ironborn had been doing accidentally, through pure salvager instinct, for years. The Ironborn were never the instrument. They were the first spark. The Architect was just the second."

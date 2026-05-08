@@ -25,6 +25,7 @@ pub mod game;
 pub mod render;
 pub mod ai;
 pub mod tui;
+pub mod narrative;
 
 use map::{MapPlugin, GridPos, Faction, ControlPoint, ControlPointType};
 use units::{UnitPlugin, MoveTarget, UnitPos, RiflemanBundle};
@@ -101,6 +102,8 @@ pub fn run_server() {
                 .with_method("game/pause_status", handle_game_pause_status)
                 .with_method("save/list", handle_save_list)
                 .with_method("game/abandon_mission", handle_game_abandon_mission)
+                .with_method("narrative/mission", handle_narrative_mission)
+                .with_method("narrative/debrief", handle_narrative_debrief)
         )
         .add_plugins(RemoteHttpPlugin::default().with_port(15703))
         .add_plugins(MapPlugin)
@@ -121,8 +124,21 @@ pub fn run_server() {
         .add_plugins(HollowPlugin)
         .add_plugins(SavePlugin)
         .add_plugins(GamePlugin)
-        .add_systems(Startup, on_startup)
-        .run();
+        .add_systems(Startup, on_startup);
+    // Load narrative data — path relative to working directory (project root when running via cargo)
+    let narrative = narrative::NarrativeData::load("assets/narrative.toml")
+        .unwrap_or_else(|e| {
+            eprintln!("Warning: could not load assets/narrative.toml: {e}");
+            narrative::NarrativeData {
+                factions: Default::default(),
+                finales: narrative::Finales {
+                    combine_first: String::new(),
+                    ironborn_first: String::new(),
+                },
+            }
+        });
+    app.insert_resource(narrative);
+    app.run();
 }
 
 /// BRP handler for "unit/move": accepts { entity_id, target_x, target_y }
@@ -2688,4 +2704,77 @@ fn setup_demo_scenario(world: &mut World, player: &Faction) {
             capture_progress: 0.0,
         });
     }
+}
+
+// =============================================================================
+// Narrative BRP handlers.
+// =============================================================================
+
+/// BRP handler for "narrative/mission": { faction: String, index: usize }
+/// Returns { title, briefing } for the requested mission.
+fn handle_narrative_mission(In(params): In<Option<Value>>, world: &mut World) -> BrpResult {
+    let params = params.ok_or_else(|| BrpError {
+        code: -32602,
+        message: "missing params".into(),
+        data: None,
+    })?;
+    let faction = params["faction"].as_str().ok_or_else(|| BrpError {
+        code: -32602,
+        message: "faction required".into(),
+        data: None,
+    })?;
+    let index = params["index"].as_u64().ok_or_else(|| BrpError {
+        code: -32602,
+        message: "index required".into(),
+        data: None,
+    })? as usize;
+
+    let narrative = world.get_resource::<narrative::NarrativeData>().ok_or_else(|| BrpError {
+        code: -32000,
+        message: "narrative data not loaded".into(),
+        data: None,
+    })?;
+    let mission = narrative.mission(faction, index).ok_or_else(|| BrpError {
+        code: -32000,
+        message: format!("no mission {index} for faction {faction}"),
+        data: None,
+    })?;
+    Ok(serde_json::json!({
+        "title": mission.title,
+        "briefing": mission.briefing,
+    }))
+}
+
+/// BRP handler for "narrative/debrief": { faction: String, index: usize, won: bool }
+/// Returns { text } with the win or loss debrief for the requested mission.
+fn handle_narrative_debrief(In(params): In<Option<Value>>, world: &mut World) -> BrpResult {
+    let params = params.ok_or_else(|| BrpError {
+        code: -32602,
+        message: "missing params".into(),
+        data: None,
+    })?;
+    let faction = params["faction"].as_str().ok_or_else(|| BrpError {
+        code: -32602,
+        message: "faction required".into(),
+        data: None,
+    })?;
+    let index = params["index"].as_u64().ok_or_else(|| BrpError {
+        code: -32602,
+        message: "index required".into(),
+        data: None,
+    })? as usize;
+    let won = params["won"].as_bool().unwrap_or(true);
+
+    let narrative = world.get_resource::<narrative::NarrativeData>().ok_or_else(|| BrpError {
+        code: -32000,
+        message: "narrative data not loaded".into(),
+        data: None,
+    })?;
+    let mission = narrative.mission(faction, index).ok_or_else(|| BrpError {
+        code: -32000,
+        message: format!("no mission {index} for faction {faction}"),
+        data: None,
+    })?;
+    let text = if won { &mission.win } else { &mission.loss };
+    Ok(serde_json::json!({ "text": text }))
 }
