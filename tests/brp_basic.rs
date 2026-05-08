@@ -206,6 +206,36 @@ fn spawn_unit(unit_type: &str, x: i32, y: i32) -> u64 {
 
 #[test]
 #[ignore = "requires a running Cindertide server on port 15703"]
+fn brp_editor_set_save_load_roundtrip() {
+    let _g = lock_world();
+    // Set three tiles via editor.
+    for (x, y, terrain) in &[(0, 0, "Road"), (1, 0, "Grass"), (2, 0, "Forest")] {
+        post(
+            "editor/set_tile",
+            serde_json::json!({ "x": x, "y": y, "terrain": terrain }),
+        );
+    }
+
+    let saved = post("editor/save_map", serde_json::json!({}));
+    let tiles = saved["result"]["tiles"].as_array().unwrap();
+    assert_eq!(tiles.len(), 3);
+
+    // Wipe via dev/reset, then reload from saved JSON.
+    post("dev/reset", serde_json::json!({}));
+
+    let loaded = post(
+        "editor/load_map",
+        serde_json::json!({ "tiles": tiles }),
+    );
+    assert_eq!(loaded["result"]["loaded"].as_u64().unwrap(), 3);
+
+    let after = post("editor/save_map", serde_json::json!({}));
+    let after_tiles = after["result"]["tiles"].as_array().unwrap();
+    assert_eq!(after_tiles.len(), 3);
+}
+
+#[test]
+#[ignore = "requires a running Cindertide server on port 15703"]
 fn brp_hollow_spawner_increases_pop_count() {
     let _g = lock_world();
     let hollow = spawn_faction("hollow");

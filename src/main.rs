@@ -18,6 +18,7 @@ mod mission;
 mod campaign;
 mod beats;
 mod hollow;
+mod editor;
 mod ai;
 
 use map::{MapPlugin, GridPos, Faction, ControlPoint, ControlPointType};
@@ -66,6 +67,9 @@ fn main() {
                 .with_method("campaign/options", handle_campaign_options)
                 .with_method("beats/fired", handle_beats_fired)
                 .with_method("hollow/spawn_point", handle_hollow_spawn_point)
+                .with_method("editor/set_tile", handle_editor_set_tile)
+                .with_method("editor/save_map", handle_editor_save_map)
+                .with_method("editor/load_map", handle_editor_load_map)
                 .with_method("production/enqueue", handle_production_enqueue)
                 .with_method("production/queue_status", handle_production_queue_status)
                 .with_method("hero/spawn", handle_hero_spawn)
@@ -1334,6 +1338,105 @@ fn handle_hero_ability_use(In(params): In<Option<Value>>, world: &mut World) -> 
     }
 
     Ok(serde_json::json!({ "fired": true }))
+}
+
+/// BRP handler for "editor/set_tile": { x, y, terrain, cover? }
+/// Replaces any existing Tile at (x,y) with the new one.
+fn handle_editor_set_tile(In(params): In<Option<Value>>, world: &mut World) -> BrpResult {
+    let params = params.ok_or_else(|| BrpError {
+        code: -32602,
+        message: "missing params".into(),
+        data: None,
+    })?;
+    let x = params["x"].as_i64().ok_or_else(|| BrpError {
+        code: -32602, message: "x required".into(), data: None,
+    })? as i32;
+    let y = params["y"].as_i64().ok_or_else(|| BrpError {
+        code: -32602, message: "y required".into(), data: None,
+    })? as i32;
+    let terrain = editor::parse_terrain(params["terrain"].as_str().unwrap_or("Grass"))
+        .ok_or_else(|| BrpError {
+            code: -32602, message: "unknown terrain".into(), data: None,
+        })?;
+    let cover = editor::parse_cover(params["cover"].as_str().unwrap_or("None"))
+        .ok_or_else(|| BrpError {
+            code: -32602, message: "unknown cover".into(), data: None,
+        })?;
+
+    // Despawn any existing Tile at that position.
+    let mut to_remove: Vec<Entity> = Vec::new();
+    {
+        let mut q = world.query::<(Entity, &map::Tile)>();
+        for (e, t) in q.iter(world) {
+            if t.pos.x == x && t.pos.y == y {
+                to_remove.push(e);
+            }
+        }
+    }
+    for e in to_remove {
+        world.despawn(e);
+    }
+    world.spawn(map::Tile {
+        pos: GridPos { x, y },
+        terrain_type: terrain,
+        cover,
+    });
+    Ok(serde_json::json!({ "success": true }))
+}
+
+/// BRP handler for "editor/save_map": returns all tiles as JSON.
+fn handle_editor_save_map(In(_params): In<Option<Value>>, world: &mut World) -> BrpResult {
+    let mut tiles: Vec<serde_json::Value> = Vec::new();
+    let mut q = world.query::<&map::Tile>();
+    for t in q.iter(world) {
+        tiles.push(serde_json::json!({
+            "x": t.pos.x,
+            "y": t.pos.y,
+            "terrain": editor::terrain_name(&t.terrain_type),
+            "cover": editor::cover_name(&t.cover),
+        }));
+    }
+    Ok(serde_json::json!({ "tiles": tiles }))
+}
+
+/// BRP handler for "editor/load_map": { tiles: [{x, y, terrain, cover}, ...] }
+/// Despawns existing tiles and spawns new ones.
+fn handle_editor_load_map(In(params): In<Option<Value>>, world: &mut World) -> BrpResult {
+    let params = params.ok_or_else(|| BrpError {
+        code: -32602, message: "missing params".into(), data: None,
+    })?;
+    let tiles = params["tiles"].as_array().ok_or_else(|| BrpError {
+        code: -32602, message: "tiles array required".into(), data: None,
+    })?;
+
+    // Despawn existing tiles.
+    let mut to_remove: Vec<Entity> = Vec::new();
+    {
+        let mut q = world.query_filtered::<Entity, With<map::Tile>>();
+        for e in q.iter(world) {
+            to_remove.push(e);
+        }
+    }
+    for e in to_remove {
+        world.despawn(e);
+    }
+
+    let mut spawned = 0;
+    for t in tiles {
+        let x = t["x"].as_i64().unwrap_or(0) as i32;
+        let y = t["y"].as_i64().unwrap_or(0) as i32;
+        let terrain = editor::parse_terrain(t["terrain"].as_str().unwrap_or("Grass"))
+            .unwrap_or(map::TerrainType::Grass);
+        let cover = editor::parse_cover(t["cover"].as_str().unwrap_or("None"))
+            .unwrap_or(map::CoverDensity::None);
+        world.spawn(map::Tile {
+            pos: GridPos { x, y },
+            terrain_type: terrain,
+            cover,
+        });
+        spawned += 1;
+    }
+    Ok(serde_json::json!({ "loaded": spawned }))
 }
 
 fn parse_hollow_mode(s: &str) -> Result<HollowMode, BrpError> {
