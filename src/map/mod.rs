@@ -1,5 +1,7 @@
 use bevy::prelude::*;
 
+pub mod pathfinding;
+
 // Terrain types matching docs/world.md
 #[derive(Debug, Clone, PartialEq)]
 pub enum TerrainType {
