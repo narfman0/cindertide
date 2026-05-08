@@ -39,11 +39,11 @@ use unit_ai::UnitAiPlugin;
 use repair::RepairPlugin;
 use ai::{AiPlugin, AiController};
 use mission::{MissionPlugin, Mission, MissionStatus};
-use campaign::{CampaignState, default_state, apply_mission_outcome, spread_corruption, generate_mission_options};
+use campaign::{CampaignPlugin, CampaignRun, GlobalProgress, PlayableFaction, next_mission_type};
 use beats::{BeatsPlugin, FiredBeats};
 use hollow::{HollowPlugin, HollowSpawner, HollowMode};
 use save::{SavePlugin, SaveSlots};
-use game::{GamePlugin, GameState, CampaignRun, fire_exit};
+use game::{GamePlugin, GameState, ActiveRun, fire_exit};
 
 pub fn run_server() {
     let mut app = App::new();
@@ -116,6 +116,7 @@ pub fn run_server() {
         .add_plugins(RepairPlugin)
         .add_plugins(AiPlugin)
         .add_plugins(MissionPlugin)
+        .add_plugins(CampaignPlugin)
         .add_plugins(BeatsPlugin)
         .add_plugins(HollowPlugin)
         .add_plugins(SavePlugin)
@@ -736,6 +737,27 @@ fn parse_faction(s: &str) -> Result<Faction, BrpError> {
             message: format!("unknown faction: {other}"),
             data: None,
         }),
+    }
+}
+
+fn parse_playable_faction(s: &str) -> Result<PlayableFaction, BrpError> {
+    match s {
+        "combine" => Ok(PlayableFaction::Combine),
+        "ironborn" => Ok(PlayableFaction::Ironborn),
+        "handler" => Ok(PlayableFaction::Handler),
+        other => Err(BrpError {
+            code: -32602,
+            message: format!("unknown playable faction: {other} (valid: combine, ironborn, handler)"),
+            data: None,
+        }),
+    }
+}
+
+fn playable_to_map_faction(f: &PlayableFaction) -> Faction {
+    match f {
+        PlayableFaction::Combine => Faction::Combine,
+        PlayableFaction::Ironborn => Faction::Ironborn,
+        PlayableFaction::Handler => Faction::Combine,
     }
 }
 
@@ -1398,16 +1420,23 @@ fn game_state_json(world: &mut World) -> Value {
         GameState::Title => "Title".to_string(),
         GameState::Campaign => "Campaign".to_string(),
         GameState::InMission => "InMission".to_string(),
-        GameState::GameOver { won } => format!("GameOver({})", if *won { "won" } else { "lost" }),
+        GameState::GameOver { won, handler_unlocked } => format!(
+            "GameOver({},handler_unlocked={})",
+            if *won { "won" } else { "lost" },
+            handler_unlocked,
+        ),
     };
-    let run = world.resource::<CampaignRun>().clone();
+    let active = world.resource::<ActiveRun>().clone();
+    let player_str = active.run.as_ref().map(|r| format!("{:?}", r.faction));
+    let current_mission_index = active.run.as_ref().map(|r| r.current_mission);
+    let current_mission_entity = active.current_mission_entity.map(|e| e.to_bits());
     serde_json::json!({
         "state": state_str,
-        "missions_won": run.missions_won,
-        "missions_lost": run.missions_lost,
-        "current_mission_zone": run.current_mission.map(|(_, z)| z),
-        "current_mission_entity": run.current_mission.map(|(e, _)| e.to_bits()),
-        "player": run.player.as_ref().map(|f| format!("{:?}", f)),
+        "missions_won": active.missions_won,
+        "missions_lost": active.missions_lost,
+        "current_mission_index": current_mission_index,
+        "current_mission_entity": current_mission_entity,
+        "player": player_str,
     })
 }
 
@@ -1416,33 +1445,38 @@ fn handle_game_state(In(_params): In<Option<Value>>, world: &mut World) -> BrpRe
     Ok(game_state_json(world))
 }
 
-/// BRP handler for "game/new": { player? }
-/// Wipes any current world, initializes a fresh CampaignState, sets
-/// GameState=Campaign, returns the new state snapshot.
+/// BRP handler for "game/new": { player }
+/// Wipes any current world, initializes a fresh CampaignRun for the chosen faction,
+/// sets GameState=Campaign, returns the new state snapshot.
 fn handle_game_new(In(params): In<Option<Value>>, world: &mut World) -> BrpResult {
     let player_str = params
         .as_ref()
         .and_then(|p| p["player"].as_str())
         .unwrap_or("combine")
         .to_string();
-    let player = parse_faction(&player_str)?;
+    let faction = parse_playable_faction(&player_str)?;
+    let map_faction = playable_to_map_faction(&faction);
 
     wipe_world_entities(world);
-    world.insert_resource(default_state());
-    world.insert_resource(CampaignRun {
-        player: Some(player.clone()),
-        ..Default::default()
-    });
+    *world.resource_mut::<ActiveRun>() = ActiveRun {
+        run: Some(CampaignRun {
+            faction,
+            current_mission: 0,
+            outcomes: Vec::new(),
+            complete: false,
+        }),
+        current_mission_entity: None,
+        missions_won: 0,
+        missions_lost: 0,
+    };
     *world.resource_mut::<GameState>() = GameState::Campaign;
 
-    // Spawn the player's faction entity so resource/build BRPs work.
-    world.spawn(FactionBundle::new(player));
+    world.spawn(FactionBundle::new(map_faction));
 
     Ok(game_state_json(world))
 }
 
-/// BRP handler for "game/save": { slot } — convenience wrapper around
-/// save/write that also persists the GameState + CampaignRun.
+/// BRP handler for "game/save": { slot } — persists GameState + ActiveRun + GlobalProgress.
 fn handle_game_save(In(params): In<Option<Value>>, world: &mut World) -> BrpResult {
     let params = params.ok_or_else(|| BrpError {
         code: -32602, message: "missing params".into(), data: None,
@@ -1450,35 +1484,40 @@ fn handle_game_save(In(params): In<Option<Value>>, world: &mut World) -> BrpResu
     let slot = params["slot"].as_str().unwrap_or("default").to_string();
 
     let mut snapshot = snapshot_world(world);
-    // Append state + run + campaign into the snapshot.
     let state_label = match world.resource::<GameState>() {
-        GameState::Title => "Title",
-        GameState::Campaign => "Campaign",
-        GameState::InMission => "InMission",
-        GameState::GameOver { won } if *won => "GameOver(won)",
-        GameState::GameOver { .. } => "GameOver(lost)",
+        GameState::Title => "Title".to_string(),
+        GameState::Campaign => "Campaign".to_string(),
+        GameState::InMission => "InMission".to_string(),
+        GameState::GameOver { won, handler_unlocked } => format!(
+            "GameOver({},{})",
+            if *won { "won" } else { "lost" },
+            handler_unlocked,
+        ),
     };
-    let run = world.resource::<CampaignRun>().clone();
-    let campaign = world.get_resource::<crate::campaign::CampaignState>().cloned();
+    let active = world.resource::<ActiveRun>().clone();
+    let progress = world.resource::<GlobalProgress>().clone();
     snapshot["game_state"] = serde_json::json!(state_label);
-    snapshot["run"] = serde_json::json!({
-        "player": run.player.as_ref().map(|f| format!("{:?}", f)),
-        "missions_won": run.missions_won,
-        "missions_lost": run.missions_lost,
-    });
-    snapshot["campaign"] = match campaign {
-        Some(c) => serde_json::json!({
-            "act": format!("{:?}", c.act),
-            "turn": c.turn,
-            "zones": c.zones.iter().map(|z| serde_json::json!({
-                "id": z.id, "name": z.name,
-                "owner": z.owner.as_ref().map(|f| format!("{:?}", f)),
-                "corruption": z.corruption,
-                "adjacent": z.adjacent,
+    snapshot["active_run"] = serde_json::json!({
+        "missions_won": active.missions_won,
+        "missions_lost": active.missions_lost,
+        "run": active.run.as_ref().map(|r| serde_json::json!({
+            "faction": format!("{:?}", r.faction),
+            "current_mission": r.current_mission,
+            "complete": r.complete,
+            "outcomes": r.outcomes.iter().map(|o| serde_json::json!({
+                "mission_index": o.mission_index,
+                "won": o.won,
+                "mission_type": format!("{:?}", o.mission_type),
             })).collect::<Vec<_>>(),
-        }),
-        None => Value::Null,
-    };
+        })),
+    });
+    snapshot["global_progress"] = serde_json::json!({
+        "combine_beaten": progress.combine_beaten,
+        "ironborn_beaten": progress.ironborn_beaten,
+        "handler_unlocked": progress.handler_unlocked,
+        "handler_beaten": progress.handler_beaten,
+        "first_beaten": progress.first_beaten.as_ref().map(|f| format!("{:?}", f)),
+    });
 
     let mut slots = world.get_resource_or_insert_with(SaveSlots::default);
     slots.0.insert(slot.clone(), snapshot);
@@ -1503,61 +1542,64 @@ fn handle_game_load(In(params): In<Option<Value>>, world: &mut World) -> BrpResu
 
     let _restored = restore_world(world, &snapshot)?;
 
-    // Restore game/run/campaign resources from extra fields.
     if let Some(s) = snapshot["game_state"].as_str() {
-        let new_state = match s {
-            "Title" => GameState::Title,
-            "Campaign" => GameState::Campaign,
-            "InMission" => GameState::InMission,
-            "GameOver(won)" => GameState::GameOver { won: true },
-            "GameOver(lost)" => GameState::GameOver { won: false },
-            _ => GameState::Title,
+        let new_state = if s.starts_with("GameOver") {
+            let won = s.contains("won");
+            let handler_unlocked = s.contains("true");
+            GameState::GameOver { won, handler_unlocked }
+        } else {
+            match s {
+                "Campaign" => GameState::Campaign,
+                "InMission" => GameState::Campaign,
+                _ => GameState::Title,
+            }
         };
         *world.resource_mut::<GameState>() = new_state;
     }
-    if !snapshot["run"].is_null() {
-        let r = &snapshot["run"];
-        let player = r["player"]
-            .as_str()
-            .and_then(|s| parse_faction(&s.to_lowercase()).ok());
-        *world.resource_mut::<CampaignRun>() = CampaignRun {
-            player,
-            missions_won: r["missions_won"].as_u64().unwrap_or(0) as u32,
-            missions_lost: r["missions_lost"].as_u64().unwrap_or(0) as u32,
-            current_mission: None, // mission entity is gone after restore
+    if !snapshot["active_run"].is_null() {
+        let ar = &snapshot["active_run"];
+        let run = if ar["run"].is_null() {
+            None
+        } else {
+            let r = &ar["run"];
+            let faction = parse_playable_faction(
+                &r["faction"].as_str().unwrap_or("combine").to_lowercase()
+            ).unwrap_or(PlayableFaction::Combine);
+            let outcomes = r["outcomes"]
+                .as_array()
+                .map(|arr| arr.iter().map(|o| campaign::MissionOutcome {
+                    mission_index: o["mission_index"].as_u64().unwrap_or(0) as usize,
+                    won: o["won"].as_bool().unwrap_or(false),
+                    mission_type: parse_mission_type(
+                        &o["mission_type"].as_str().unwrap_or("assault").to_lowercase()
+                    ).unwrap_or(crate::mapgen::MissionType::Assault),
+                }).collect())
+                .unwrap_or_default();
+            Some(CampaignRun {
+                faction,
+                current_mission: r["current_mission"].as_u64().unwrap_or(0) as usize,
+                complete: r["complete"].as_bool().unwrap_or(false),
+                outcomes,
+            })
+        };
+        *world.resource_mut::<ActiveRun>() = ActiveRun {
+            run,
+            current_mission_entity: None,
+            missions_won: ar["missions_won"].as_u64().unwrap_or(0) as u32,
+            missions_lost: ar["missions_lost"].as_u64().unwrap_or(0) as u32,
         };
     }
-    if !snapshot["campaign"].is_null() {
-        let c = &snapshot["campaign"];
-        let act = match c["act"].as_str().unwrap_or("One") {
-            "Two" => crate::campaign::Act::Two,
-            "Three" => crate::campaign::Act::Three,
-            _ => crate::campaign::Act::One,
+    if !snapshot["global_progress"].is_null() {
+        let gp = &snapshot["global_progress"];
+        let first_beaten = gp["first_beaten"].as_str()
+            .and_then(|s| parse_playable_faction(&s.to_lowercase()).ok());
+        *world.resource_mut::<GlobalProgress>() = GlobalProgress {
+            combine_beaten: gp["combine_beaten"].as_bool().unwrap_or(false),
+            ironborn_beaten: gp["ironborn_beaten"].as_bool().unwrap_or(false),
+            handler_unlocked: gp["handler_unlocked"].as_bool().unwrap_or(false),
+            handler_beaten: gp["handler_beaten"].as_bool().unwrap_or(false),
+            first_beaten,
         };
-        let zones = c["zones"]
-            .as_array()
-            .map(|arr| {
-                arr.iter()
-                    .map(|z| crate::campaign::Zone {
-                        id: z["id"].as_u64().unwrap_or(0) as u32,
-                        name: z["name"].as_str().unwrap_or("").to_string(),
-                        owner: z["owner"]
-                            .as_str()
-                            .and_then(|s| parse_faction(&s.to_lowercase()).ok()),
-                        corruption: z["corruption"].as_f64().unwrap_or(0.0) as f32,
-                        adjacent: z["adjacent"]
-                            .as_array()
-                            .map(|a| a.iter().filter_map(|n| n.as_u64()).map(|n| n as u32).collect())
-                            .unwrap_or_default(),
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        world.insert_resource(crate::campaign::CampaignState {
-            act,
-            turn: c["turn"].as_u64().unwrap_or(0) as u32,
-            zones,
-        });
     }
 
     Ok(game_state_json(world))
@@ -1599,15 +1641,11 @@ fn handle_mission_force_resolve(In(params): In<Option<Value>>, world: &mut World
     Ok(serde_json::json!({ "resolved": format!("{:?}", m.status) }))
 }
 
-/// BRP handler for "mission/select": { zone_id }
-/// Spawns a Mission entity for the chosen option and transitions to InMission.
+/// BRP handler for "mission/select": advances to the next mission in linear sequence.
+/// The zone_id parameter is accepted for API compatibility but the mission type is
+/// determined by the faction sequence, not zone choice.
 fn handle_mission_select(In(params): In<Option<Value>>, world: &mut World) -> BrpResult {
-    let params = params.ok_or_else(|| BrpError {
-        code: -32602, message: "missing params".into(), data: None,
-    })?;
-    let zone_id = params["zone_id"].as_u64().ok_or_else(|| BrpError {
-        code: -32602, message: "zone_id required".into(), data: None,
-    })? as u32;
+    let _params = params;
 
     if *world.resource::<GameState>() != GameState::Campaign {
         return Err(BrpError {
@@ -1617,59 +1655,48 @@ fn handle_mission_select(In(params): In<Option<Value>>, world: &mut World) -> Br
         });
     }
 
-    let player = world
-        .resource::<CampaignRun>()
-        .player
-        .clone()
-        .ok_or_else(|| BrpError {
+    let (mission_type, map_faction) = {
+        let active = world.resource::<ActiveRun>();
+        let run = active.run.as_ref().ok_or_else(|| BrpError {
             code: -32000,
-            message: "no player faction set".into(),
+            message: "no active campaign run".into(),
             data: None,
         })?;
+        let mt = next_mission_type(run).ok_or_else(|| BrpError {
+            code: -32000,
+            message: "campaign is already complete".into(),
+            data: None,
+        })?;
+        let mf = playable_to_map_faction(&run.faction);
+        (mt, mf)
+    };
 
-    let opt = {
-        let cs = world
-            .get_resource::<crate::campaign::CampaignState>()
-            .ok_or_else(|| BrpError {
-                code: -32000,
-                message: "no campaign state".into(),
-                data: None,
-            })?;
-        crate::campaign::generate_mission_options(cs, &player)
-            .into_iter()
-            .find(|o| o.zone_id == zone_id)
-            .ok_or_else(|| BrpError {
-                code: -32000,
-                message: format!("zone {zone_id} not in current options"),
-                data: None,
-            })?
+    let opponent = match map_faction {
+        Faction::Combine => Faction::Ironborn,
+        Faction::Ironborn => Faction::Combine,
+        _ => Faction::Hollow,
     };
 
     let mission_entity = world
         .spawn(Mission {
-            mission_type: opt.mission_type.clone(),
-            player_faction: player.clone(),
-            opponent_faction: opt.opponent.clone(),
+            mission_type: mission_type.clone(),
+            player_faction: map_faction.clone(),
+            opponent_faction: opponent.clone(),
             status: MissionStatus::Active,
             elapsed: 0.0,
             deadline: 300.0,
         })
         .id();
 
-    // Build a playable scenario for this mission: terrain, both factions'
-    // starting structures (Layer 1 asymmetric), neutral control points,
-    // and AI controllers on both sides so play happens autonomously.
-    setup_demo_scenario(world, &player);
+    setup_demo_scenario(world, &map_faction);
 
-    world.resource_mut::<CampaignRun>().current_mission =
-        Some((mission_entity, zone_id));
+    world.resource_mut::<ActiveRun>().current_mission_entity = Some(mission_entity);
     *world.resource_mut::<GameState>() = GameState::InMission;
 
     Ok(serde_json::json!({
         "mission_entity": mission_entity.to_bits(),
-        "zone_id": zone_id,
-        "mission_type": format!("{:?}", opt.mission_type),
-        "opponent": format!("{:?}", opt.opponent),
+        "mission_type": format!("{:?}", mission_type),
+        "opponent": format!("{:?}", opponent),
     }))
 }
 
@@ -1967,79 +1994,95 @@ fn handle_beats_fired(In(_params): In<Option<Value>>, world: &mut World) -> BrpR
     Ok(serde_json::json!({ "fired": fired }))
 }
 
-/// BRP handler for "campaign/init": initializes the default 4-zone campaign state.
+/// BRP handler for "campaign/init": starts a new combine campaign (legacy compat).
 fn handle_campaign_init(In(_params): In<Option<Value>>, world: &mut World) -> BrpResult {
-    world.insert_resource(default_state());
+    *world.resource_mut::<ActiveRun>() = ActiveRun {
+        run: Some(CampaignRun {
+            faction: PlayableFaction::Combine,
+            current_mission: 0,
+            outcomes: Vec::new(),
+            complete: false,
+        }),
+        current_mission_entity: None,
+        missions_won: 0,
+        missions_lost: 0,
+    };
     Ok(serde_json::json!({ "initialized": true }))
 }
 
-fn campaign_state_json(state: &CampaignState) -> serde_json::Value {
-    serde_json::json!({
-        "act": format!("{:?}", state.act),
-        "turn": state.turn,
-        "zones": state.zones.iter().map(|z| serde_json::json!({
-            "id": z.id,
-            "name": z.name,
-            "owner": z.owner.as_ref().map(|f| format!("{:?}", f)),
-            "corruption": z.corruption,
-        })).collect::<Vec<_>>(),
-    })
-}
-
 fn handle_campaign_state(In(_params): In<Option<Value>>, world: &mut World) -> BrpResult {
-    let state = world.get_resource::<CampaignState>().ok_or_else(|| BrpError {
+    let active = world.resource::<ActiveRun>();
+    let run = active.run.as_ref().ok_or_else(|| BrpError {
         code: -32000,
-        message: "campaign not initialized".into(),
+        message: "no active campaign run".into(),
         data: None,
     })?;
-    Ok(campaign_state_json(state))
+    Ok(serde_json::json!({
+        "faction": format!("{:?}", run.faction),
+        "current_mission": run.current_mission,
+        "complete": run.complete,
+        "missions_won": active.missions_won,
+        "missions_lost": active.missions_lost,
+        "outcomes": run.outcomes.iter().map(|o| serde_json::json!({
+            "mission_index": o.mission_index,
+            "won": o.won,
+            "mission_type": format!("{:?}", o.mission_type),
+        })).collect::<Vec<_>>(),
+    }))
 }
 
-/// BRP handler for "campaign/advance": { zone_id, winner, loser }
+/// BRP handler for "campaign/advance": applies a mission outcome to the active run.
+/// { won: bool } — advances the linear mission sequence.
 fn handle_campaign_advance(In(params): In<Option<Value>>, world: &mut World) -> BrpResult {
     let params = params.ok_or_else(|| BrpError {
         code: -32602,
         message: "missing params".into(),
         data: None,
     })?;
-    let zone_id = params["zone_id"].as_u64().ok_or_else(|| BrpError {
-        code: -32602,
-        message: "zone_id required".into(),
-        data: None,
-    })? as u32;
-    let winner = parse_faction(params["winner"].as_str().unwrap_or("combine"))?;
-    let loser = parse_faction(params["loser"].as_str().unwrap_or("hollow"))?;
+    let won = params["won"].as_bool().unwrap_or(true);
 
-    let mut state = world.get_resource_mut::<CampaignState>().ok_or_else(|| BrpError {
-        code: -32000,
-        message: "campaign not initialized".into(),
-        data: None,
-    })?;
-    apply_mission_outcome(&mut state, zone_id, winner, loser);
-    spread_corruption(&mut state);
-    Ok(campaign_state_json(&state))
+    let mission_type = {
+        let active = world.resource::<ActiveRun>();
+        let run = active.run.as_ref().ok_or_else(|| BrpError {
+            code: -32000, message: "no active campaign run".into(), data: None,
+        })?;
+        next_mission_type(run).ok_or_else(|| BrpError {
+            code: -32000, message: "campaign already complete".into(), data: None,
+        })?
+    };
+
+    // Extract a snapshot of progress, apply outcome to run, then merge back.
+    let mut progress_snapshot = world.resource::<GlobalProgress>().clone();
+    {
+        let mut active = world.resource_mut::<ActiveRun>();
+        let run = active.run.as_mut().unwrap();
+        campaign::apply_mission_outcome(run, &mut progress_snapshot, won, mission_type);
+    }
+    *world.resource_mut::<GlobalProgress>() = progress_snapshot;
+
+    let active = world.resource::<ActiveRun>();
+    let run = active.run.as_ref().unwrap();
+    Ok(serde_json::json!({
+        "current_mission": run.current_mission,
+        "complete": run.complete,
+    }))
 }
 
 fn handle_campaign_options(In(params): In<Option<Value>>, world: &mut World) -> BrpResult {
-    let params = params.ok_or_else(|| BrpError {
-        code: -32602,
-        message: "missing params".into(),
-        data: None,
+    let _params = params;
+    let active = world.resource::<ActiveRun>();
+    let run = active.run.as_ref().ok_or_else(|| BrpError {
+        code: -32000, message: "no active campaign run".into(), data: None,
     })?;
-    let player = parse_faction(params["player"].as_str().unwrap_or("combine"))?;
-    let state = world.get_resource::<CampaignState>().ok_or_else(|| BrpError {
-        code: -32000,
-        message: "campaign not initialized".into(),
-        data: None,
-    })?;
-    let opts = generate_mission_options(state, &player);
-    Ok(serde_json::json!({
-        "options": opts.iter().map(|o| serde_json::json!({
-            "zone_id": o.zone_id,
-            "mission_type": format!("{:?}", o.mission_type),
-            "opponent": format!("{:?}", o.opponent),
-        })).collect::<Vec<_>>(),
-    }))
+    let next = next_mission_type(run);
+    let opts: Vec<Value> = match next {
+        Some(mt) => vec![serde_json::json!({
+            "mission_type": format!("{:?}", mt),
+            "mission_index": run.current_mission,
+        })],
+        None => vec![],
+    };
+    Ok(serde_json::json!({ "options": opts }))
 }
 
 /// BRP handler for "mission/start": { mission_type, player, opponent, deadline? }
@@ -2259,7 +2302,6 @@ fn handle_dev_reset(In(_params): In<Option<Value>>, world: &mut World) -> BrpRes
     if let Some(mut fired) = world.get_resource_mut::<FiredBeats>() {
         fired.0.clear();
     }
-    world.remove_resource::<CampaignState>();
     Ok(serde_json::json!({ "despawned": count }))
 }
 
@@ -2471,16 +2513,12 @@ fn handle_save_list(In(_params): In<Option<Value>>, world: &mut World) -> BrpRes
     Ok(serde_json::json!({ "slots": slots }))
 }
 
-/// BRP handler for "game/abandon_mission": force-resolves the active mission
-/// as a loss, returning to Campaign.
+/// BRP handler for "game/abandon_mission": force-resolves the active mission as a loss.
 fn handle_game_abandon_mission(
     In(_params): In<Option<Value>>,
     world: &mut World,
 ) -> BrpResult {
-    let mission_entity = world
-        .resource::<CampaignRun>()
-        .current_mission
-        .map(|(e, _)| e);
+    let mission_entity = world.resource::<ActiveRun>().current_mission_entity;
     let Some(entity) = mission_entity else {
         return Err(BrpError {
             code: -32000,

@@ -1,11 +1,7 @@
-// Authored beats — narrative moments that fire once when their trigger
-// conditions are met. See `agents.md` and `campaign.md`.
-
 use bevy::prelude::*;
 use crate::combat::{Health, Dead};
 use crate::heroes::{Hero, HeroDowned};
 use crate::buildings::{BuildingType, BuildingPos};
-use crate::campaign::{CampaignState, Act};
 use crate::map::Faction;
 use std::collections::HashSet;
 
@@ -19,8 +15,6 @@ pub enum BeatId {
 #[derive(Resource, Debug, Default)]
 pub struct FiredBeats(pub HashSet<BeatId>);
 
-// --- Pure trigger logic ---
-
 pub fn should_fire_hero_goes_down(any_downed: bool, already_fired: bool) -> bool {
     any_downed && !already_fired
 }
@@ -32,28 +26,15 @@ pub fn should_fire_last_stand(
     min_command_hp_fraction < 0.30 && !already_fired
 }
 
-pub fn should_fire_ancient_unification(
-    act: Act,
-    pale_corruption: f32,
-    already_fired: bool,
-) -> bool {
-    matches!(act, Act::Three) && pale_corruption >= 0.95 && !already_fired
-}
-
-// --- System ---
-
 pub fn beat_check_system(
     mut fired: ResMut<FiredBeats>,
     heroes: Query<&Hero, With<HeroDowned>>,
     bunkers: Query<(&BuildingType, &Health, &BuildingPos), Without<Dead>>,
-    campaign: Option<Res<CampaignState>>,
 ) {
-    // 1. Hero goes down
     if should_fire_hero_goes_down(!heroes.is_empty(), fired.0.contains(&BeatId::HeroGoesDown)) {
         fired.0.insert(BeatId::HeroGoesDown);
     }
 
-    // 2. Last stand: any CommandBunker below 30% HP.
     let mut min_frac: f32 = 1.0;
     for (bt, h, _) in &bunkers {
         if matches!(bt, BuildingType::CommandBunker) && h.max > 0.0 {
@@ -67,15 +48,7 @@ pub fn beat_check_system(
         fired.0.insert(BeatId::LastStand);
     }
 
-    // 3. Ancient unification.
-    if let Some(c) = &campaign {
-        let pale = c.zones.iter().find(|z| z.id == 2).map(|z| z.corruption).unwrap_or(0.0);
-        if should_fire_ancient_unification(c.act, pale, fired.0.contains(&BeatId::AncientUnification)) {
-            fired.0.insert(BeatId::AncientUnification);
-        }
-    }
-
-    let _: Option<Faction> = None; // suppress unused-import warning
+    let _: Option<Faction> = None;
 }
 
 pub struct BeatsPlugin;
@@ -119,12 +92,5 @@ mod tests {
     #[test]
     fn last_stand_no_refire() {
         assert!(!should_fire_last_stand(0.10, true));
-    }
-
-    #[test]
-    fn ancient_unification_requires_act_three_and_full_corruption() {
-        assert!(should_fire_ancient_unification(Act::Three, 0.96, false));
-        assert!(!should_fire_ancient_unification(Act::Two, 0.99, false));
-        assert!(!should_fire_ancient_unification(Act::Three, 0.5, false));
     }
 }

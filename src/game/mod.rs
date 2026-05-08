@@ -1,10 +1,6 @@
-// Game — top-level state machine (title / campaign / in-mission / over),
-// the campaign run progression loop, and victory/defeat resolution.
-
 use bevy::prelude::*;
 use bevy::app::AppExit;
-use crate::map::Faction;
-use crate::campaign::CampaignState;
+use crate::campaign::{CampaignRun, GlobalProgress, PlayableFaction, apply_mission_outcome};
 use crate::mission::{Mission, MissionStatus};
 
 #[derive(Resource, Debug, Clone, PartialEq)]
@@ -12,7 +8,7 @@ pub enum GameState {
     Title,
     Campaign,
     InMission,
-    GameOver { won: bool },
+    GameOver { won: bool, handler_unlocked: bool },
 }
 
 impl Default for GameState {
@@ -20,52 +16,28 @@ impl Default for GameState {
 }
 
 #[derive(Resource, Debug, Default, Clone)]
-pub struct CampaignRun {
-    pub player: Option<Faction>,
+pub struct ActiveRun {
+    pub run: Option<CampaignRun>,
+    pub current_mission_entity: Option<Entity>,
     pub missions_won: u32,
     pub missions_lost: u32,
-    /// (Mission entity, zone id the mission is contesting)
-    pub current_mission: Option<(Entity, u32)>,
 }
 
-// --- Pure rules ---
-
-/// Compute the campaign outcome from current zone ownership.
-pub fn campaign_outcome(zones: &[crate::campaign::Zone], player: &Faction) -> Option<bool> {
-    if zones.is_empty() {
-        return None;
-    }
-    let owned = zones.iter().filter(|z| z.owner.as_ref() == Some(player)).count();
-    if owned == zones.len() {
-        Some(true) // victory
-    } else if owned == 0 {
-        Some(false) // defeat
-    } else {
-        None // continue
-    }
-}
-
-// --- System ---
-
-/// Watches the active mission for resolution; on Won/Lost applies the
-/// campaign outcome (zone ownership shift) and returns to Campaign state,
-/// or to GameOver when victory/defeat conditions are met.
 pub fn campaign_progression_system(
     mut commands: Commands,
     mut state: ResMut<GameState>,
-    mut run: ResMut<CampaignRun>,
-    mut campaign: Option<ResMut<CampaignState>>,
+    mut active: ResMut<ActiveRun>,
+    mut progress: ResMut<GlobalProgress>,
     missions: Query<&Mission>,
 ) {
     if *state != GameState::InMission {
         return;
     }
-    let Some((mission_entity, zone_id)) = run.current_mission else {
+    let Some(mission_entity) = active.current_mission_entity else {
         return;
     };
     let Ok(m) = missions.get(mission_entity) else {
-        // Mission entity is gone — clean up.
-        run.current_mission = None;
+        active.current_mission_entity = None;
         return;
     };
     if m.status == MissionStatus::Active {
@@ -73,29 +45,17 @@ pub fn campaign_progression_system(
     }
 
     let won = m.status == MissionStatus::Won;
-    if won {
-        run.missions_won += 1;
-    } else {
-        run.missions_lost += 1;
-    }
+    if won { active.missions_won += 1; } else { active.missions_lost += 1; }
 
-    if let Some(ref mut cs) = campaign {
-        let (winner, loser) = if won {
-            (m.player_faction.clone(), m.opponent_faction.clone())
-        } else {
-            (m.opponent_faction.clone(), m.player_faction.clone())
-        };
-        crate::campaign::apply_mission_outcome(cs, zone_id, winner, loser);
-        crate::campaign::spread_corruption(cs);
-    }
-
+    let mission_type = m.mission_type.clone();
     commands.entity(mission_entity).despawn();
-    run.current_mission = None;
+    active.current_mission_entity = None;
 
-    // Victory / defeat check.
-    if let (Some(cs), Some(player)) = (campaign.as_ref(), run.player.as_ref()) {
-        if let Some(victory) = campaign_outcome(&cs.zones, player) {
-            *state = GameState::GameOver { won: victory };
+    if let Some(ref mut run) = active.run {
+        apply_mission_outcome(run, &mut progress, won, mission_type);
+        if run.complete {
+            let handler_unlocked = progress.handler_unlocked;
+            *state = GameState::GameOver { won: true, handler_unlocked };
             return;
         }
     }
@@ -103,7 +63,6 @@ pub fn campaign_progression_system(
     *state = GameState::Campaign;
 }
 
-/// Sends an AppExit event to terminate the process. Used by game/exit.
 pub fn fire_exit(world: &mut World) {
     world.send_event(AppExit::Success);
 }
@@ -113,7 +72,7 @@ pub struct GamePlugin;
 impl Plugin for GamePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<GameState>();
-        app.init_resource::<CampaignRun>();
+        app.init_resource::<ActiveRun>();
         app.add_systems(Update, campaign_progression_system);
     }
 }
@@ -121,47 +80,7 @@ impl Plugin for GamePlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::campaign::Zone;
-
-    fn zone(id: u32, owner: Option<Faction>) -> Zone {
-        Zone { id, name: format!("Z{id}"), owner, corruption: 0.0, adjacent: vec![] }
-    }
-
-    #[test]
-    fn outcome_victory_when_all_zones_player_owned() {
-        let zs = vec![
-            zone(0, Some(Faction::Combine)),
-            zone(1, Some(Faction::Combine)),
-        ];
-        assert_eq!(campaign_outcome(&zs, &Faction::Combine), Some(true));
-    }
-
-    #[test]
-    fn outcome_defeat_when_zero_zones_player_owned() {
-        let zs = vec![
-            zone(0, Some(Faction::Hollow)),
-            zone(1, None),
-        ];
-        assert_eq!(campaign_outcome(&zs, &Faction::Combine), Some(false));
-    }
-
-    #[test]
-    fn outcome_continue_when_mixed() {
-        let zs = vec![
-            zone(0, Some(Faction::Combine)),
-            zone(1, Some(Faction::Hollow)),
-        ];
-        assert_eq!(campaign_outcome(&zs, &Faction::Combine), None);
-    }
-
-    #[test]
-    fn outcome_continue_with_neutral_zones() {
-        let zs = vec![
-            zone(0, Some(Faction::Combine)),
-            zone(1, None),
-        ];
-        assert_eq!(campaign_outcome(&zs, &Faction::Combine), None);
-    }
+    use crate::campaign::PlayableFaction;
 
     #[test]
     fn default_state_is_title() {
@@ -169,11 +88,33 @@ mod tests {
     }
 
     #[test]
-    fn default_run_is_empty() {
-        let r = CampaignRun::default();
-        assert!(r.player.is_none());
-        assert!(r.current_mission.is_none());
+    fn active_run_default_is_empty() {
+        let r = ActiveRun::default();
+        assert!(r.run.is_none());
+        assert!(r.current_mission_entity.is_none());
         assert_eq!(r.missions_won, 0);
         assert_eq!(r.missions_lost, 0);
+    }
+
+    #[test]
+    fn game_over_carries_handler_flag() {
+        let s = GameState::GameOver { won: true, handler_unlocked: true };
+        if let GameState::GameOver { handler_unlocked, .. } = s {
+            assert!(handler_unlocked);
+        } else {
+            panic!("expected GameOver");
+        }
+    }
+
+    #[test]
+    fn new_run_for_combine_starts_at_mission_zero() {
+        let run = CampaignRun {
+            faction: PlayableFaction::Combine,
+            current_mission: 0,
+            outcomes: Vec::new(),
+            complete: false,
+        };
+        assert_eq!(run.current_mission, 0);
+        assert!(!run.complete);
     }
 }

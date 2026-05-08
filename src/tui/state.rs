@@ -5,12 +5,12 @@ use serde_json::Value;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Screen {
-    Title { selected: usize },          // 0=Single Player, 1=Load Game, 2=Exit
-    FactionPicker { selected: usize },  // 0=Combine, 1=Covenant, 2=Ironborn
+    Title { selected: usize },
+    FactionPicker { selected: usize },  // 0=Combine, 1=Ironborn
     LoadPicker { selected: usize, slots: Vec<String> },
-    Campaign { selected_option: usize },
+    Campaign,
     InMission,
-    GameOver { won: bool },
+    GameOver { won: bool, handler_unlocked: bool },
 }
 
 #[derive(Debug, Default, Clone)]
@@ -20,11 +20,12 @@ pub struct ServerSnapshot {
     pub player: Option<String>,
     pub missions_won: u32,
     pub missions_lost: u32,
-    pub current_mission_zone: Option<u32>,
+    pub current_mission_index: Option<usize>,
+    pub handler_unlocked: bool,
 
     /// Campaign view data
-    pub zones: Vec<ZoneSummary>,
-    pub options: Vec<MissionOption>,
+    pub current_mission_type: Option<String>,
+    pub past_outcomes: Vec<OutcomeSummary>,
 
     /// Mission view data
     pub mission: Option<MissionSummary>,
@@ -35,18 +36,16 @@ pub struct ServerSnapshot {
 }
 
 #[derive(Debug, Clone)]
-pub struct ZoneSummary {
-    pub id: u32,
-    pub name: String,
-    pub owner: Option<String>,
-    pub corruption: f32,
+pub struct OutcomeSummary {
+    pub mission_index: usize,
+    pub won: bool,
+    pub mission_type: String,
 }
 
 #[derive(Debug, Clone)]
 pub struct MissionOption {
-    pub zone_id: u32,
     pub mission_type: String,
-    pub opponent: String,
+    pub mission_index: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -121,32 +120,32 @@ impl TuiApp {
 
     /// Single poll tick — fetches whatever data the current screen needs.
     pub fn poll(&mut self) {
-        // Always refresh game/state.
         if let Some(v) = super::call("game/state", serde_json::json!({})) {
             if let Some(r) = v.get("result") {
                 self.snapshot.state_label = r["state"].as_str().unwrap_or("?").to_string();
                 self.snapshot.player = r["player"].as_str().map(String::from);
                 self.snapshot.missions_won = r["missions_won"].as_u64().unwrap_or(0) as u32;
                 self.snapshot.missions_lost = r["missions_lost"].as_u64().unwrap_or(0) as u32;
-                self.snapshot.current_mission_zone = r["current_mission_zone"].as_u64().map(|n| n as u32);
+                self.snapshot.current_mission_index = r["current_mission_index"].as_u64().map(|n| n as usize);
+                self.snapshot.handler_unlocked = self.snapshot.state_label.contains("handler_unlocked=true");
             }
         }
 
-        // Auto-transition based on server state.
         match (&self.screen, self.snapshot.state_label.as_str()) {
             (Screen::FactionPicker { .. }, "Campaign") => {
-                self.screen = Screen::Campaign { selected_option: 0 };
+                self.screen = Screen::Campaign;
             }
-            (Screen::Campaign { .. }, "InMission") => {
+            (Screen::Campaign, "InMission") => {
                 self.screen = Screen::InMission;
             }
             (Screen::InMission, "Campaign") => {
-                self.screen = Screen::Campaign { selected_option: 0 };
+                self.screen = Screen::Campaign;
             }
             (_, s) if s.starts_with("GameOver") => {
                 let won = s.contains("won");
+                let handler_unlocked = s.contains("handler_unlocked=true");
                 if !matches!(self.screen, Screen::GameOver { .. }) {
-                    self.screen = Screen::GameOver { won };
+                    self.screen = Screen::GameOver { won, handler_unlocked };
                 }
             }
             _ => {}
@@ -160,7 +159,7 @@ impl TuiApp {
         }
 
         match &self.screen {
-            Screen::Campaign { .. } => {
+            Screen::Campaign => {
                 self.refresh_campaign();
             }
             Screen::InMission => {
@@ -173,45 +172,31 @@ impl TuiApp {
     fn refresh_campaign(&mut self) {
         if let Some(v) = super::call("campaign/state", serde_json::json!({})) {
             if let Some(r) = v.get("result") {
-                self.snapshot.zones.clear();
-                if let Some(zones) = r["zones"].as_array() {
-                    for z in zones {
-                        self.snapshot.zones.push(ZoneSummary {
-                            id: z["id"].as_u64().unwrap_or(0) as u32,
-                            name: z["name"].as_str().unwrap_or("").to_string(),
-                            owner: z["owner"].as_str().map(String::from),
-                            corruption: z["corruption"].as_f64().unwrap_or(0.0) as f32,
+                self.snapshot.past_outcomes.clear();
+                if let Some(outcomes) = r["outcomes"].as_array() {
+                    for o in outcomes {
+                        self.snapshot.past_outcomes.push(OutcomeSummary {
+                            mission_index: o["mission_index"].as_u64().unwrap_or(0) as usize,
+                            won: o["won"].as_bool().unwrap_or(false),
+                            mission_type: o["mission_type"].as_str().unwrap_or("").to_string(),
                         });
                     }
                 }
             }
         }
-        if let Some(player) = self.snapshot.player.clone() {
-            let player_lower = player.to_lowercase();
-            if let Some(v) = super::call(
-                "campaign/options",
-                serde_json::json!({ "player": player_lower }),
-            ) {
-                if let Some(r) = v.get("result") {
-                    self.snapshot.options.clear();
-                    if let Some(opts) = r["options"].as_array() {
-                        for o in opts {
-                            self.snapshot.options.push(MissionOption {
-                                zone_id: o["zone_id"].as_u64().unwrap_or(0) as u32,
-                                mission_type: o["mission_type"].as_str().unwrap_or("").to_string(),
-                                opponent: o["opponent"].as_str().unwrap_or("").to_string(),
-                            });
-                        }
-                    }
-                }
+        if let Some(v) = super::call("campaign/options", serde_json::json!({})) {
+            if let Some(r) = v.get("result") {
+                self.snapshot.current_mission_type = r["options"]
+                    .as_array()
+                    .and_then(|opts| opts.first())
+                    .and_then(|o| o["mission_type"].as_str())
+                    .map(String::from);
             }
         }
     }
 
     fn refresh_mission(&mut self) {
-        // Mission status
-        if let Some(zone) = self.snapshot.current_mission_zone {
-            // Find mission via world/list
+        if self.snapshot.current_mission_index.is_some() {
             if let Some(v) = super::call(
                 "world/list",
                 serde_json::json!({ "kind": "missions" }),
@@ -229,7 +214,6 @@ impl TuiApp {
                     }
                 }
             }
-            let _ = zone;
         }
 
         // Player faction resources
@@ -272,7 +256,7 @@ impl TuiApp {
             Screen::Title { selected } => self.handle_title(selected, key),
             Screen::FactionPicker { selected } => self.handle_faction_picker(selected, key),
             Screen::LoadPicker { selected, slots } => self.handle_load_picker(selected, slots, key),
-            Screen::Campaign { selected_option } => self.handle_campaign(selected_option, key),
+            Screen::Campaign => self.handle_campaign(key),
             Screen::InMission => self.handle_in_mission(key),
             Screen::GameOver { .. } => self.handle_game_over(key),
         }
@@ -303,7 +287,7 @@ impl TuiApp {
     }
 
     fn handle_faction_picker(&mut self, selected: usize, key: KeyCode) {
-        let factions = ["combine", "covenant", "ironborn"];
+        let factions = ["combine", "ironborn"];
         match key {
             KeyCode::Esc => self.screen = Screen::Title { selected: 0 },
             KeyCode::Up => {
@@ -321,7 +305,6 @@ impl TuiApp {
                     "game/new",
                     serde_json::json!({ "player": player }),
                 );
-                // Auto-transition handled by poll() when state goes Campaign.
             }
             _ => {}
         }
@@ -349,7 +332,7 @@ impl TuiApp {
         }
     }
 
-    fn handle_campaign(&mut self, selected: usize, key: KeyCode) {
+    fn handle_campaign(&mut self, key: KeyCode) {
         match key {
             KeyCode::Char('q') => self.should_quit = true,
             KeyCode::Esc => self.screen = Screen::Title { selected: 0 },
@@ -359,20 +342,11 @@ impl TuiApp {
                     serde_json::json!({ "slot": "default" }),
                 );
             }
-            KeyCode::Up if !self.snapshot.options.is_empty() => {
-                let n = self.snapshot.options.len();
-                let new = if selected == 0 { n - 1 } else { selected - 1 };
-                self.screen = Screen::Campaign { selected_option: new };
-            }
-            KeyCode::Down if !self.snapshot.options.is_empty() => {
-                let n = self.snapshot.options.len();
-                self.screen = Screen::Campaign { selected_option: (selected + 1) % n };
-            }
             KeyCode::Enter => {
-                if let Some(opt) = self.snapshot.options.get(selected) {
+                if self.snapshot.current_mission_type.is_some() {
                     let _ = super::call(
                         "mission/select",
-                        serde_json::json!({ "zone_id": opt.zone_id }),
+                        serde_json::json!({}),
                     );
                 }
             }

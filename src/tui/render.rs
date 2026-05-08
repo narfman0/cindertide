@@ -13,9 +13,9 @@ pub fn draw(f: &mut Frame, app: &TuiApp) {
         Screen::Title { selected } => draw_title(f, *selected),
         Screen::FactionPicker { selected } => draw_faction_picker(f, *selected),
         Screen::LoadPicker { selected, slots } => draw_load_picker(f, *selected, slots),
-        Screen::Campaign { selected_option } => draw_campaign(f, app, *selected_option),
+        Screen::Campaign => draw_campaign(f, app),
         Screen::InMission => draw_in_mission(f, app),
-        Screen::GameOver { won } => draw_game_over(f, *won),
+        Screen::GameOver { won, handler_unlocked } => draw_game_over(f, *won, *handler_unlocked),
     }
 }
 
@@ -68,7 +68,6 @@ fn draw_faction_picker(f: &mut Frame, selected: usize) {
 
     let factions = [
         ("Combine",  "Industrial expansion: 1 Bunker, 1 Refinery, 1 Barracks, 4 Riflemen", Color::Yellow),
-        ("Covenant", "Defensive turtle: 1 Cathedral (Bunker), 2 outposts, 3 Riflemen",     Color::Blue),
         ("Ironborn", "Aggressive salvage: 1 Foundry, 5 Riflemen",                          Color::Gray),
     ];
     let mut lines: Vec<Line> = vec![Line::from("")];
@@ -126,13 +125,15 @@ fn draw_load_picker(f: &mut Frame, selected: usize, slots: &[String]) {
     f.render_widget(Paragraph::new(lines), inner);
 }
 
-fn draw_campaign(f: &mut Frame, app: &TuiApp, selected: usize) {
+fn draw_campaign(f: &mut Frame, app: &TuiApp) {
     let area = f.area();
+    let current = app.snapshot.current_mission_index.unwrap_or(0);
     let block = Block::default()
         .borders(Borders::ALL)
         .title(format!(
-            " Campaign — {}   Won: {}   Lost: {} ",
+            " Campaign — {}   Mission {} / 5   Won: {}   Lost: {} ",
             app.snapshot.player.as_deref().unwrap_or("?"),
+            current,
             app.snapshot.missions_won,
             app.snapshot.missions_lost,
         ));
@@ -141,69 +142,55 @@ fn draw_campaign(f: &mut Frame, app: &TuiApp, selected: usize) {
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(8), Constraint::Min(8), Constraint::Length(2)])
+        .constraints([Constraint::Min(8), Constraint::Min(4), Constraint::Length(2)])
         .split(inner);
 
-    // Zones
-    let mut zone_lines: Vec<Line> = vec![Line::from(Span::styled(
-        " Territory:",
+    // Past mission outcomes
+    let mut history_lines: Vec<Line> = vec![Line::from(Span::styled(
+        " Mission History:",
         Style::default().add_modifier(Modifier::BOLD),
     ))];
-    for z in &app.snapshot.zones {
-        let owner_str = z.owner.clone().unwrap_or_else(|| "—".to_string());
-        let owner_color = faction_color(&owner_str);
-        let line = Line::from(vec![
-            Span::raw(format!("  [{}] {:<18} ", z.id, z.name)),
-            Span::styled(format!("{:<10}", owner_str), Style::default().fg(owner_color)),
-            Span::styled(
-                format!(" corruption {}%", (z.corruption * 100.0) as u32),
-                Style::default().fg(Color::Magenta),
-            ),
-        ]);
-        zone_lines.push(line);
-    }
-    f.render_widget(Paragraph::new(zone_lines), chunks[0]);
-
-    // Options
-    let mut opt_lines: Vec<Line> = vec![Line::from(Span::styled(
-        " Mission options:",
-        Style::default().add_modifier(Modifier::BOLD),
-    ))];
-    if app.snapshot.options.is_empty() {
-        opt_lines.push(Line::from(Span::styled(
-            "  (none — you control every zone)",
+    if app.snapshot.past_outcomes.is_empty() {
+        history_lines.push(Line::from(Span::styled(
+            "  (no missions completed yet)",
             Style::default().fg(Color::DarkGray),
         )));
     } else {
-        for (i, o) in app.snapshot.options.iter().enumerate() {
-            let prefix = if i == selected { "> " } else { "  " };
-            let style = if i == selected {
-                Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(Color::Gray)
-            };
-            let zone_name = app
-                .snapshot
-                .zones
-                .iter()
-                .find(|z| z.id == o.zone_id)
-                .map(|z| z.name.clone())
-                .unwrap_or_default();
-            opt_lines.push(Line::from(Span::styled(
-                format!(
-                    "{}{} on {:<16} {:<10} vs {}",
-                    prefix, " ", zone_name, o.mission_type, o.opponent
-                ),
-                style,
+        for o in &app.snapshot.past_outcomes {
+            let result_str = if o.won { "WON" } else { "LOST" };
+            let result_color = if o.won { Color::Green } else { Color::Red };
+            history_lines.push(Line::from(vec![
+                Span::raw(format!("  Mission {} — {:<12} ", o.mission_index + 1, o.mission_type)),
+                Span::styled(result_str, Style::default().fg(result_color).add_modifier(Modifier::BOLD)),
+            ]));
+        }
+    }
+    f.render_widget(Paragraph::new(history_lines), chunks[0]);
+
+    // Next mission
+    let mut next_lines: Vec<Line> = vec![Line::from(Span::styled(
+        " Next Mission:",
+        Style::default().add_modifier(Modifier::BOLD),
+    ))];
+    match &app.snapshot.current_mission_type {
+        Some(mt) => {
+            next_lines.push(Line::from(Span::styled(
+                format!("  > Mission {} — {}   (Enter to start)", current + 1, mt),
+                Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+            )));
+        }
+        None => {
+            next_lines.push(Line::from(Span::styled(
+                "  Campaign complete!",
+                Style::default().fg(Color::Green),
             )));
         }
     }
-    f.render_widget(Paragraph::new(opt_lines), chunks[1]);
+    f.render_widget(Paragraph::new(next_lines), chunks[1]);
 
-    // Controls
     f.render_widget(
         Paragraph::new(Line::from(Span::styled(
-            " ↑/↓ select   Enter start mission   s save   Esc title   q quit",
+            " Enter start mission   s save   Esc title   q quit",
             Style::default().fg(Color::DarkGray),
         ))),
         chunks[2],
@@ -388,7 +375,7 @@ fn draw_mission_map(f: &mut Frame, app: &TuiApp, area: Rect) {
     f.render_widget(Paragraph::new(lines), area);
 }
 
-fn draw_game_over(f: &mut Frame, won: bool) {
+fn draw_game_over(f: &mut Frame, won: bool, handler_unlocked: bool) {
     let area = f.area();
     let title = if won { " Victory " } else { " Defeat " };
     let color = if won { Color::Green } else { Color::Red };
@@ -396,8 +383,8 @@ fn draw_game_over(f: &mut Frame, won: bool) {
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    let text = if won { "VICTORY" } else { "DEFEAT" };
-    let lines = vec![
+    let text = if won { "CAMPAIGN COMPLETE" } else { "DEFEAT" };
+    let mut lines = vec![
         Line::from(""),
         Line::from(""),
         Line::from(Span::styled(
@@ -405,11 +392,18 @@ fn draw_game_over(f: &mut Frame, won: bool) {
             Style::default().fg(color).add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
-        Line::from(Span::styled(
-            "    Enter / Esc — title screen",
-            Style::default().fg(Color::DarkGray),
-        )),
     ];
+    if handler_unlocked {
+        lines.push(Line::from(Span::styled(
+            "    *** HANDLER UNLOCKED — a new perspective awaits ***",
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        )));
+        lines.push(Line::from(""));
+    }
+    lines.push(Line::from(Span::styled(
+        "    Enter / Esc — title screen",
+        Style::default().fg(Color::DarkGray),
+    )));
     f.render_widget(Paragraph::new(lines), inner);
 }
 
