@@ -41,6 +41,25 @@ for the *what*; this roadmap defines the *order* and the *acceptance shape*.
 | 28 | Level editor | tile JSON save/load, dimension validation |
 | 29 | Save / load | in-memory slots, snapshot/restore of factions/units/tiles |
 | 30 | Render scaffolding | feature-gated `render` module; full pipeline pending Synty work |
+| 31 | Campaign MVP loop | `GameState` + `CampaignRun`; title menu BRP (`game/new/load/save/exit`); `mission/select` + auto-resolve back to Campaign; victory = all zones, defeat = none |
+
+---
+
+## Phase 6 — Playable surface (steps 32–34)
+
+### Step 32 — TUI client + faction-asymmetric scenario
+- Crate becomes lib + bin; `cindertide-play` binary spawns server thread + runs ratatui TUI on main thread (single-command boot)
+- New BRP: `world/list { kind }`, `game/pause`
+- TUI screens: Title (Single Player → faction picker / Load / Exit), Campaign (zone table + mission options), In-mission (resources strip, ASCII tile grid centerpiece, unit/building list, mission timer)
+- Default "New Game" scenario: 40×25 generated map, both factions AI-controlled, faction-specific starting structures per `factions.md` Layer 1
+- Space toggles `Paused` resource; observational only (no orders yet)
+
+### Step 33 — Faction asymmetry Layer 2 (economic bottlenecks)
+- Combine fuel-radius supply; Ironborn raw-scrap conversion via Foundry; Covenant morale aura damage modifier; Hollow corruption-scaled trickle
+- Each gated by a Cargo or runtime flag during balance tuning
+
+### Step 34 — Faction asymmetry Layer 3 (hero recruitment)
+- Per-faction acquisition path per `factions.md` Layer 3
 
 ---
 

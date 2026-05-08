@@ -44,6 +44,54 @@ The United Voice has *intent* now. It knows what humans and robots are, and it h
 
 ---
 
+## Faction Asymmetry
+
+Factions in Cindertide are not skin-deep reskins. Three layers of mechanical
+differentiation, applied incrementally so balancing stays tractable:
+
+### Layer 1 — Starting structure loadouts (implemented)
+
+The first mission of any campaign run starts with a faction-specific
+loadout instead of "everyone gets the same construction yard." Hollow is
+the proof — they don't build at all — and that asymmetry extends to the
+others.
+
+| Faction  | Starting structures                                    | Starting units          | Flavor              |
+|----------|--------------------------------------------------------|-------------------------|---------------------|
+| Combine  | 1 Command Bunker, 1 Refinery, 1 Barracks               | 4 Riflemen              | Industrial expansion |
+| Covenant | 1 Command Bunker (Cathedral), 2 Pillboxes (outposts)   | 3 Riflemen              | Defensive turtle     |
+| Ironborn | 1 Foundry (combined HQ + production)                   | 5 Riflemen              | Aggressive salvage   |
+| Hollow   | 1 Hive Heart (HollowSpawner)                           | 0 (Heart spawns over time) | Spread-based     |
+
+Roughly equal *power* at start, very different *texture*.
+
+### Layer 2 — Economic bottlenecks (deferred)
+
+Each faction's economy will eventually have a different limiting factor
+beyond raw resources:
+
+- **Combine — fuel logistics:** refineries supply fuel only within a radius;
+  expansion requires forward refineries.
+- **Ironborn — scrap conversion:** kills drop *raw* scrap that must be
+  hauled to a Foundry to become spendable. Rewards aggression.
+- **Covenant — morale supply:** units outside a Cathedral aura attack at
+  reduced damage. Forces them to advance in slow, supported waves.
+- **Hollow — corruption density:** spawn rate scales with map corruption %.
+  Spreading corruption *is* their economy. (The base mechanic exists —
+  see `hollow_spawn_system` and Act-3 United Voice rate doubling.)
+
+### Layer 3 — Hero recruitment paths (deferred)
+
+Each faction acquires heroes differently:
+
+- **Combine** — pay resources at Tier 2.
+- **Ironborn** — any Rifleman that survives N kills auto-promotes.
+- **Covenant** — hero appears when a ritual objective on a control point
+  is completed.
+- **Hollow** — a "voice" emerges automatically once map corruption ≥ 80%.
+
+---
+
 ## Faction Visual Language
 
 ### Human Factions
