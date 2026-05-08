@@ -42,24 +42,15 @@ for the *what*; this roadmap defines the *order* and the *acceptance shape*.
 | 29 | Save / load | in-memory slots, snapshot/restore of factions/units/tiles |
 | 30 | Render scaffolding | feature-gated `render` module; full pipeline pending Synty work |
 | 31 | Campaign MVP loop | `GameState` + `CampaignRun`; title menu BRP (`game/new/load/save/exit`); `mission/select` + auto-resolve back to Campaign; victory = all zones, defeat = none |
+| 32 | TUI client | `cindertide-play` binary; ratatui TUI with briefing/debrief/finale screens; single-command boot (server thread + TUI on main thread) |
+| 33 | Linear faction campaign | Replaced territory system with 5-mission linear structure; Combine/Ironborn/Architect factions; `GlobalProgress` tracking; Architect handler unlock after either base campaign |
+| 34 | Narrative content | `assets/narrative.toml` data file with all mission briefings and debriefs; BRP endpoints `narrative/mission`, `narrative/debrief`, `narrative/finale` |
 
 ---
 
 ## Phase 6 — Playable surface (steps 32–34)
 
-### Step 32 — TUI client + faction-asymmetric scenario
-- Crate becomes lib + bin; `cindertide-play` binary spawns server thread + runs ratatui TUI on main thread (single-command boot)
-- New BRP: `world/list { kind }`, `game/pause`
-- TUI screens: Title (Single Player → faction picker / Load / Exit), Campaign (zone table + mission options), In-mission (resources strip, ASCII tile grid centerpiece, unit/building list, mission timer)
-- Default "New Game" scenario: 40×25 generated map, both factions AI-controlled, faction-specific starting structures per `factions.md` Layer 1
-- Space toggles `Paused` resource; observational only (no orders yet)
-
-### Step 33 — Faction asymmetry Layer 2 (economic bottlenecks)
-- Combine fuel-radius supply; Ironborn raw-scrap conversion via Foundry; Covenant morale aura damage modifier; Hollow corruption-scaled trickle
-- Each gated by a Cargo or runtime flag during balance tuning
-
-### Step 34 — Faction asymmetry Layer 3 (hero recruitment)
-- Per-faction acquisition path per `factions.md` Layer 3
+_Steps 32–34 completed. See Completed table above._
 
 ---
 
@@ -221,6 +212,23 @@ decisions and faster reactions.
 - Tests stay on `MinimalPlugins`
 - Synty assets per `world.md`
 - This is the *only* step that requires non-headless work
+
+---
+
+## Phase 7 — Player agency (steps 35–37)
+
+### Step 35 — In-mission player controls
+- Unit selection, move/attack orders, and building construction via TUI
+- Player can issue commands to their faction; AI continues to drive the opponent
+
+### Step 36 — Faction asymmetry
+- Combine fuel-radius supply system
+- Ironborn scrap recycling via Foundry
+- Covenant morale aura damage modifier
+
+### Step 37 — Hero recruitment and abilities
+- Per-faction acquisition paths
+- Signature abilities per hero
 
 ---
 

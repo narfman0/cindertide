@@ -53,6 +53,8 @@ A dieselpunk world — 1940s-adjacent industrial aesthetics, proto-mechs, tesla 
 ---
 
 ## Campaign Structure
+Two factions are playable at the start (Combine and Ironborn), each with 5 linear missions that tell the same 5 world events from opposite sides. Completing either campaign unlocks The Architect — a third faction whose 5-mission campaign reveals the war was engineered as a blood ritual to awaken ancient horrors. Mission outcomes are recorded; finale text adapts based on which faction was beaten first and the player's win/loss history.
+
 See: [campaign.md](campaign.md)
 
 ---

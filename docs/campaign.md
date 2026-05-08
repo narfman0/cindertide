@@ -47,34 +47,39 @@
 
 ---
 
-## Procedural Campaign System
+## Campaign Structure
 
-### What is authored:
-- The three-act arc
-- The beat types (betrayal, last stand, loss, reversal, unification)
-- The emotional shape of each act
+Two factions are available at the start: **Combine** and **Ironborn**. Each has 5 linear missions played in order — no zone territory control, no branching selection. Both factions experience the same 5 world events from opposite perspectives, with mission type varying per faction.
 
-### What is procedural:
-- Which human faction betrays you
-- Which territory each mission is set on
-- Which hero gets the spotlight moment
-- Which ancient flavor dominates each region
-- Starting resources and map layout
+After completing either faction campaign, **The Architect** unlocks — a third campaign of 5 missions told from the POV of the person who engineered the war as a blood ritual to awaken Lovecraftian horrors.
 
-### How beats fire:
-Beats adapt to current game state rather than triggering on fixed conditions:
-- Lost the battle? The beat fires as a desperate retreat
-- Won easily? The beat fires as an ambush on your way home
-- The world reacts to your state, not to a script
+Each mission records its outcome (won/lost). The finale text varies based on which faction the player beat first and their mission outcomes. The Architect finale adapts accordingly:
+- If Combine beaten first: reveals The Architect was embedded in Combine's research division
+- If Ironborn beaten first: reveals the Ironborn were already unknowingly performing the ritual for years
 
 ---
 
-## Between Missions
-- Living world map showing faction territories shifting from mission outcomes
-- Choose next mission from 2–3 options with different rewards and risks
-- Brief hero conversations — text-based, character development
-- Spend resources to reinforce, upgrade, or recruit
-- Starting state of next mission reflects choices made here
+## The 5 World Events
+
+| # | Mission | Notes |
+|---|---|---|
+| 1 | **The Ironfields Depot** | First contact over a fuel refinery |
+| 2 | **The Ashline Crossing** | Bridge/chokepoint; something wrong in the ravine below |
+| 3 | **The Pale Ground** | Pre-civilization ruins; units behave strangely, something reads the soldiers |
+| 4 | **The Waking Machines** | A robot unit deviates; the old forge; machines waking up |
+| 5 | **The Last Works** | Something comes out of the ground; command collapses; final stand |
+
+---
+
+## Mission Sequences by Faction
+
+| # | Combine | Ironborn | Architect |
+|---|---|---|---|
+| 1 | Assault | Defense | Extraction |
+| 2 | Control | Assault | Survival |
+| 3 | Defense | Control | Extraction |
+| 4 | Control | Assault | Survival |
+| 5 | Assault | Defense | Assault |
 
 ---
 
