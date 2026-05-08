@@ -34,7 +34,7 @@ impl NarrativeData {
     }
 
     pub fn mission(&self, faction: &str, index: usize) -> Option<&MissionNarrative> {
-        self.factions.get(faction)?.missions.get(index)
+        self.factions.get(&faction.to_lowercase())?.missions.get(index)
     }
 
     pub fn finale(&self, combine_beaten_first: bool) -> &str {
