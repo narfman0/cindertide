@@ -12,6 +12,7 @@ mod production;
 mod heroes;
 mod tech;
 mod unit_ai;
+mod repair;
 mod ai;
 
 use map::{MapPlugin, GridPos, Faction, ControlPoint, ControlPointType};
@@ -24,6 +25,7 @@ use production::{ProductionPlugin, ProductionQueue, building_produces, try_enque
 use heroes::{HeroPlugin, HeroBundle, Hero, AbilityKind, SignatureAbility, Aura, HeroDowned, is_charge_full, within_aura};
 use tech::{TechPlugin, Tech, Tier, Doctrine, ResearchTarget, ResearchInProgress, start_research};
 use unit_ai::UnitAiPlugin;
+use repair::RepairPlugin;
 
 fn main() {
     App::new()
@@ -43,6 +45,7 @@ fn main() {
                 .with_method("building/place", handle_building_place)
                 .with_method("building/status", handle_building_status)
                 .with_method("dev/reset", handle_dev_reset)
+                .with_method("dev/give_resources", handle_dev_give_resources)
                 .with_method("production/enqueue", handle_production_enqueue)
                 .with_method("production/queue_status", handle_production_queue_status)
                 .with_method("hero/spawn", handle_hero_spawn)
@@ -62,6 +65,7 @@ fn main() {
         .add_plugins(HeroPlugin)
         .add_plugins(TechPlugin)
         .add_plugins(UnitAiPlugin)
+        .add_plugins(RepairPlugin)
         .add_systems(Startup, on_startup)
         .run();
 }
@@ -1259,6 +1263,44 @@ fn handle_hero_ability_use(In(params): In<Option<Value>>, world: &mut World) -> 
     }
 
     Ok(serde_json::json!({ "fired": true }))
+}
+
+/// BRP handler for "dev/give_resources": { entity, fuel?, scrap?, manpower? }
+/// Adds the given amounts to the faction's pool. For tests only.
+fn handle_dev_give_resources(In(params): In<Option<Value>>, world: &mut World) -> BrpResult {
+    let params = params.ok_or_else(|| BrpError {
+        code: -32602,
+        message: "missing params".into(),
+        data: None,
+    })?;
+    let entity_id = params["entity"].as_u64().ok_or_else(|| BrpError {
+        code: -32602,
+        message: "entity required".into(),
+        data: None,
+    })?;
+    let fuel = params["fuel"].as_f64().unwrap_or(0.0) as f32;
+    let scrap = params["scrap"].as_f64().unwrap_or(0.0) as f32;
+    let manpower = params["manpower"].as_f64().unwrap_or(0.0) as f32;
+
+    let entity = Entity::try_from_bits(entity_id).map_err(|_| BrpError {
+        code: -32602,
+        message: format!("entity {entity_id} not found"),
+        data: None,
+    })?;
+    let mut em = world.get_entity_mut(entity).map_err(|_| BrpError {
+        code: -32602,
+        message: format!("entity {entity_id} not found"),
+        data: None,
+    })?;
+    let mut pool = em.get_mut::<resources::ResourcePool>().ok_or_else(|| BrpError {
+        code: -32602,
+        message: "entity has no ResourcePool".into(),
+        data: None,
+    })?;
+    pool.fuel += fuel;
+    pool.scrap += scrap;
+    pool.manpower += manpower;
+    Ok(serde_json::json!({ "success": true }))
 }
 
 /// BRP handler for "dev/reset": despawns all gameplay entities (factions,

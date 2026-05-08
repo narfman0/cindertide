@@ -206,6 +206,58 @@ fn spawn_unit(unit_type: &str, x: i32, y: i32) -> u64 {
 
 #[test]
 #[ignore = "requires a running Cindertide server on port 15703"]
+fn brp_repair_bay_heals_damaged_vehicle() {
+    let _g = lock_world();
+    let faction = spawn_faction("combine");
+
+    // Top up resources so faction has scrap for the bay AND repair budget.
+    post(
+        "dev/give_resources",
+        serde_json::json!({ "entity": faction, "fuel": 500.0, "scrap": 500.0 }),
+    );
+
+    // Place a repair bay (RepairBay: 100 fuel, 200 scrap, 25s build)
+    let resp = place_building(faction, "repair_bay", 200, 200);
+    let _bay = resp["result"]["entity_id"].as_u64().expect("bay id");
+
+    // Spawn a light vehicle nearby (within REPAIR_RADIUS=4).
+    let veh = spawn_unit("light_vehicle", 200, 202);
+
+    // Damage the vehicle: hit it via combat to drop HP.
+    let enemy = spawn_rifleman_with_faction(199, 202, "hollow");
+    post(
+        "combat/attack",
+        serde_json::json!({ "attacker_entity": enemy, "target_entity": veh }),
+    );
+
+    // Wait through bay construction (~25s) plus a couple seconds for damage
+    // and repair to start.
+    std::thread::sleep(std::time::Duration::from_millis(28_000));
+
+    let s_mid = post("combat/status", serde_json::json!({ "entity": veh }));
+    let mid_hp = s_mid["result"]["health_current"].as_f64().unwrap();
+    assert!(
+        mid_hp < 120.0,
+        "expected vehicle damaged by enemy fire: {s_mid:?}"
+    );
+
+    // Kill the enemy so damage stops, leaving only repair active.
+    post(
+        "combat/attack",
+        serde_json::json!({ "attacker_entity": veh, "target_entity": enemy }),
+    );
+    std::thread::sleep(std::time::Duration::from_millis(10_000));
+
+    let s_end = post("combat/status", serde_json::json!({ "entity": veh }));
+    let end_hp = s_end["result"]["health_current"].as_f64().unwrap();
+    assert!(
+        end_hp > mid_hp,
+        "expected vehicle to repair after enemy down: mid={mid_hp} end={end_hp}"
+    );
+}
+
+#[test]
+#[ignore = "requires a running Cindertide server on port 15703"]
 fn brp_threat_response_returns_fire() {
     let _g = lock_world();
     // Two riflemen in mutual range. Order one to attack the other and let
