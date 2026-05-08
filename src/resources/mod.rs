@@ -49,6 +49,7 @@ pub struct FactionBundle {
     pub pool: ResourcePool,
     pub caps: ResourceCaps,
     pub trickle: ResourceTrickle,
+    pub tech: crate::tech::Tech,
 }
 
 impl FactionBundle {
@@ -58,6 +59,7 @@ impl FactionBundle {
             pool: ResourcePool { fuel: 200.0, scrap: 200.0, manpower: 50.0 },
             caps: ResourceCaps { fuel: 2000.0, scrap: 2000.0, manpower: 200.0 },
             trickle: ResourceTrickle { fuel_per_second: 0.0, scrap_per_second: 0.0, manpower_per_second: 1.0 },
+            tech: crate::tech::Tech::default(),
         }
     }
 }

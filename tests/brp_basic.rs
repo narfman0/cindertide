@@ -204,6 +204,87 @@ fn spawn_unit(unit_type: &str, x: i32, y: i32) -> u64 {
     resp["result"]["entity_id"].as_u64().expect("entity_id u64")
 }
 
+fn tech_status(faction: u64) -> serde_json::Value {
+    let resp = post(
+        "tech/status",
+        serde_json::json!({ "faction_entity": faction }),
+    );
+    resp["result"].clone()
+}
+
+#[test]
+#[ignore = "requires a running Cindertide server on port 15703"]
+fn brp_faction_starts_at_tier_one_no_doctrine() {
+    let _g = lock_world();
+    let f = spawn_faction("combine");
+    let s = tech_status(f);
+    assert_eq!(s["tier"].as_str().unwrap(), "One");
+    assert!(s["doctrine"].is_null());
+}
+
+#[test]
+#[ignore = "requires a running Cindertide server on port 15703"]
+fn brp_tech_research_skip_tier_rejected() {
+    let _g = lock_world();
+    let f = spawn_faction("combine");
+    let r = post(
+        "tech/research",
+        serde_json::json!({ "faction_entity": f, "target": "tier_3" }),
+    );
+    assert!(r.get("error").is_some(), "expected SkipsTier error: {r}");
+}
+
+#[test]
+#[ignore = "requires a running Cindertide server on port 15703"]
+fn brp_tech_research_unaffordable_rejected() {
+    let _g = lock_world();
+    let f = spawn_faction("combine");
+    // Drain resources.
+    post("resources/spend", serde_json::json!({
+        "entity": f, "fuel": 200.0, "scrap": 200.0
+    }));
+    let r = post(
+        "tech/research",
+        serde_json::json!({ "faction_entity": f, "target": "tier_2" }),
+    );
+    assert!(r.get("error").is_some(), "expected Unaffordable: {r}");
+}
+
+#[test]
+#[ignore = "requires a running Cindertide server on port 15703"]
+fn brp_tech_research_starts_and_marks_in_progress() {
+    let _g = lock_world();
+    let f = spawn_faction("combine");
+    let r = post(
+        "tech/research",
+        serde_json::json!({ "faction_entity": f, "target": "tier_2" }),
+    );
+    assert!(r.get("result").is_some(), "expected start: {r}");
+    let s = tech_status(f);
+    assert!(!s["researching"].is_null());
+    assert_eq!(s["tier"].as_str().unwrap(), "One"); // not yet applied
+}
+
+#[test]
+#[ignore = "requires a running Cindertide server on port 15703"]
+fn brp_doctrine_research_completes_after_wait() {
+    let _g = lock_world();
+    let f = spawn_faction("combine");
+    // Doctrine research is 45s, costs 100 fuel + 150 scrap. Start it, wait,
+    // verify applied.
+    let r = post(
+        "tech/research",
+        serde_json::json!({ "faction_entity": f, "target": "doctrine_assault" }),
+    );
+    assert!(r.get("result").is_some(), "expected start: {r}");
+
+    std::thread::sleep(std::time::Duration::from_millis(46_000));
+
+    let s = tech_status(f);
+    assert_eq!(s["doctrine"].as_str().unwrap(), "Assault", "expected applied: {s}");
+    assert!(s["researching"].is_null());
+}
+
 fn spawn_hero(name: &str, faction: &str, x: i32, y: i32, kind: &str) -> u64 {
     let resp = post(
         "hero/spawn",

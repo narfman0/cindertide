@@ -10,6 +10,7 @@ mod control;
 mod buildings;
 mod production;
 mod heroes;
+mod tech;
 mod ai;
 
 use map::{MapPlugin, GridPos, Faction, ControlPoint, ControlPointType};
@@ -20,6 +21,7 @@ use control::ControlPlugin;
 use buildings::{BuildingsPlugin, BuildingType, BuildingBundle, BuildingPos, ConstructionProgress, building_cost, try_pay, can_place, Built, UnderConstruction};
 use production::{ProductionPlugin, ProductionQueue, building_produces, try_enqueue, EnqueueError};
 use heroes::{HeroPlugin, HeroBundle, Hero, AbilityKind, SignatureAbility, Aura, HeroDowned, is_charge_full, within_aura};
+use tech::{TechPlugin, Tech, Tier, Doctrine, ResearchTarget, ResearchInProgress, start_research};
 
 fn main() {
     App::new()
@@ -44,6 +46,8 @@ fn main() {
                 .with_method("hero/spawn", handle_hero_spawn)
                 .with_method("hero/status", handle_hero_status)
                 .with_method("hero/ability_use", handle_hero_ability_use)
+                .with_method("tech/research", handle_tech_research)
+                .with_method("tech/status", handle_tech_status)
         )
         .add_plugins(RemoteHttpPlugin::default().with_port(15703))
         .add_plugins(MapPlugin)
@@ -54,6 +58,7 @@ fn main() {
         .add_plugins(BuildingsPlugin)
         .add_plugins(ProductionPlugin)
         .add_plugins(HeroPlugin)
+        .add_plugins(TechPlugin)
         .add_systems(Startup, on_startup)
         .run();
 }
@@ -933,6 +938,119 @@ fn handle_production_queue_status(In(params): In<Option<Value>>, world: &mut Wor
         "jobs": jobs,
         "progress": q.progress,
         "head_total": q.jobs.first().map(|u| production::unit_production_seconds(u)),
+    }))
+}
+
+fn parse_research_target(target: &str) -> Result<ResearchTarget, BrpError> {
+    match target {
+        "tier_2" => Ok(ResearchTarget::Tier(Tier::Two)),
+        "tier_3" => Ok(ResearchTarget::Tier(Tier::Three)),
+        "doctrine_assault" => Ok(ResearchTarget::Doctrine(Doctrine::Assault)),
+        "doctrine_fortification" => Ok(ResearchTarget::Doctrine(Doctrine::Fortification)),
+        "doctrine_salvage" => Ok(ResearchTarget::Doctrine(Doctrine::Salvage)),
+        other => Err(BrpError {
+            code: -32602,
+            message: format!("unknown tech target: {other}"),
+            data: None,
+        }),
+    }
+}
+
+/// BRP handler for "tech/research": { faction_entity, target }
+fn handle_tech_research(In(params): In<Option<Value>>, world: &mut World) -> BrpResult {
+    let params = params.ok_or_else(|| BrpError {
+        code: -32602,
+        message: "missing params".into(),
+        data: None,
+    })?;
+    let faction_id = params["faction_entity"].as_u64().ok_or_else(|| BrpError {
+        code: -32602,
+        message: "faction_entity required".into(),
+        data: None,
+    })?;
+    let target = parse_research_target(params["target"].as_str().ok_or_else(|| BrpError {
+        code: -32602,
+        message: "target required".into(),
+        data: None,
+    })?)?;
+
+    let faction_entity = Entity::try_from_bits(faction_id).map_err(|_| BrpError {
+        code: -32602,
+        message: format!("faction entity {faction_id} not found"),
+        data: None,
+    })?;
+
+    // Snapshot tech and in_progress flag.
+    let (tech_snapshot, in_progress) = {
+        let r = world.get_entity(faction_entity).map_err(|_| BrpError {
+            code: -32602,
+            message: format!("faction entity {faction_id} not found"),
+            data: None,
+        })?;
+        let t = r.get::<Tech>().cloned().ok_or_else(|| BrpError {
+            code: -32602,
+            message: "entity has no Tech".into(),
+            data: None,
+        })?;
+        (t, r.get::<ResearchInProgress>().is_some())
+    };
+
+    let rip = {
+        let mut em = world.get_entity_mut(faction_entity).map_err(|_| BrpError {
+            code: -32602,
+            message: format!("faction entity {faction_id} not found"),
+            data: None,
+        })?;
+        let mut pool = em.get_mut::<resources::ResourcePool>().ok_or_else(|| BrpError {
+            code: -32602,
+            message: "entity has no ResourcePool".into(),
+            data: None,
+        })?;
+        start_research(&mut pool, &tech_snapshot, in_progress, target).map_err(|e| BrpError {
+            code: -32000,
+            message: format!("{:?}", e),
+            data: None,
+        })?
+    };
+    world.entity_mut(faction_entity).insert(rip);
+    Ok(serde_json::json!({ "started": true }))
+}
+
+/// BRP handler for "tech/status": { faction_entity }
+fn handle_tech_status(In(params): In<Option<Value>>, world: &mut World) -> BrpResult {
+    let params = params.ok_or_else(|| BrpError {
+        code: -32602,
+        message: "missing params".into(),
+        data: None,
+    })?;
+    let faction_id = params["faction_entity"].as_u64().ok_or_else(|| BrpError {
+        code: -32602,
+        message: "faction_entity required".into(),
+        data: None,
+    })?;
+    let entity = Entity::try_from_bits(faction_id).map_err(|_| BrpError {
+        code: -32602,
+        message: format!("faction entity {faction_id} not found"),
+        data: None,
+    })?;
+    let r = world.get_entity(entity).map_err(|_| BrpError {
+        code: -32602,
+        message: format!("faction entity {faction_id} not found"),
+        data: None,
+    })?;
+    let tech = r.get::<Tech>().ok_or_else(|| BrpError {
+        code: -32602,
+        message: "entity has no Tech".into(),
+        data: None,
+    })?;
+    let rip = r.get::<ResearchInProgress>();
+
+    Ok(serde_json::json!({
+        "tier": format!("{:?}", tech.tier),
+        "doctrine": tech.doctrine.map(|d| format!("{:?}", d)),
+        "researching": rip.map(|r| format!("{:?}", r.target)),
+        "research_elapsed": rip.map(|r| r.elapsed),
+        "research_total": rip.map(|r| r.total),
     }))
 }
 
