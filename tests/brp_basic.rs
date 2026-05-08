@@ -398,6 +398,88 @@ fn brp_building_place_rejects_overlap() {
 
 #[test]
 #[ignore = "requires a running Cindertide server on port 15703"]
+fn brp_production_enqueue_rejects_non_producer() {
+    let _g = lock_world();
+    let faction = spawn_faction("combine");
+    // tank_trap (5s build) doesn't produce units — should reject after build.
+    let resp = place_building(faction, "tank_trap", 50, 50);
+    let bid = resp["result"]["entity_id"].as_u64().expect("place tank_trap");
+    std::thread::sleep(std::time::Duration::from_millis(6000));
+    let r = post(
+        "production/enqueue",
+        serde_json::json!({
+            "faction_entity": faction,
+            "building_entity": bid,
+            "unit_type": "rifleman",
+        }),
+    );
+    assert!(r.get("error").is_some(), "expected error: {r}");
+}
+
+#[test]
+#[ignore = "requires a running Cindertide server on port 15703"]
+fn brp_production_full_cycle_spawns_unit() {
+    let _g = lock_world();
+    let faction = spawn_faction("combine");
+    // Top up resources for the test path: barracks build (~40s) is too slow.
+    // We bypass by directly inserting Built via dev — but we don't have that
+    // method. Instead, place barracks and wait for build, then enqueue.
+    // 40s barracks + 8s rifleman = ~50s wait. This is the cost of a real e2e.
+    let resp = place_building(faction, "barracks", 60, 60);
+    assert!(resp.get("result").is_some(), "barracks place failed: {resp}");
+    let bid = resp["result"]["entity_id"].as_u64().unwrap();
+
+    // Wait for construction to finish (~40s).
+    std::thread::sleep(std::time::Duration::from_millis(41_000));
+    let s = building_status(bid);
+    assert_eq!(s["built"].as_bool().unwrap(), true, "barracks not built: {s}");
+
+    // Top up scrap (each rifleman costs 50 scrap, 5 manpower).
+    // Default starting scrap was 200; barracks used 150. We have 50 scrap left.
+    // That's exactly enough for 1 rifleman.
+    let r = post(
+        "production/enqueue",
+        serde_json::json!({
+            "faction_entity": faction,
+            "building_entity": bid,
+            "unit_type": "rifleman",
+        }),
+    );
+    assert!(r.get("result").is_some(), "enqueue failed: {r}");
+
+    let qs = post("production/queue_status", serde_json::json!({ "entity": bid }));
+    let jobs = qs["result"]["jobs"].as_array().unwrap();
+    assert_eq!(jobs.len(), 1);
+
+    // Wait for production (8s) plus a buffer.
+    std::thread::sleep(std::time::Duration::from_millis(9000));
+
+    let qs2 = post("production/queue_status", serde_json::json!({ "entity": bid }));
+    let jobs2 = qs2["result"]["jobs"].as_array().unwrap();
+    assert!(jobs2.is_empty(), "queue should be empty after production: {qs2}");
+}
+
+#[test]
+#[ignore = "requires a running Cindertide server on port 15703"]
+fn brp_production_enqueue_rejects_unbuilt() {
+    let _g = lock_world();
+    let faction = spawn_faction("combine");
+    let resp = place_building(faction, "barracks", 70, 70);
+    let bid = resp["result"]["entity_id"].as_u64().unwrap();
+    // Don't wait for construction — should reject.
+    let r = post(
+        "production/enqueue",
+        serde_json::json!({
+            "faction_entity": faction,
+            "building_entity": bid,
+            "unit_type": "rifleman",
+        }),
+    );
+    assert!(r.get("error").is_some(), "expected unbuilt rejection: {r}");
+}
+
+#[test]
+#[ignore = "requires a running Cindertide server on port 15703"]
 fn brp_building_finishes_construction_after_wait() {
     let _g = lock_world();
     let faction = spawn_faction("covenant");

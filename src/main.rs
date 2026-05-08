@@ -8,6 +8,7 @@ mod combat;
 mod resources;
 mod control;
 mod buildings;
+mod production;
 mod ai;
 
 use map::{MapPlugin, GridPos, Faction, ControlPoint, ControlPointType};
@@ -16,6 +17,7 @@ use combat::{CombatPlugin, AttackTarget, Health, Morale, Suppression, Facing, mo
 use resources::{ResourcesPlugin, FactionBundle, ResourcePool, ResourceTrickle, ResourceCost, spend};
 use control::ControlPlugin;
 use buildings::{BuildingsPlugin, BuildingType, BuildingBundle, BuildingPos, ConstructionProgress, building_cost, try_pay, can_place, Built, UnderConstruction};
+use production::{ProductionPlugin, ProductionQueue, building_produces, try_enqueue, EnqueueError};
 
 fn main() {
     App::new()
@@ -35,6 +37,8 @@ fn main() {
                 .with_method("building/place", handle_building_place)
                 .with_method("building/status", handle_building_status)
                 .with_method("dev/reset", handle_dev_reset)
+                .with_method("production/enqueue", handle_production_enqueue)
+                .with_method("production/queue_status", handle_production_queue_status)
         )
         .add_plugins(RemoteHttpPlugin::default().with_port(15703))
         .add_plugins(MapPlugin)
@@ -43,6 +47,7 @@ fn main() {
         .add_plugins(ResourcesPlugin)
         .add_plugins(ControlPlugin)
         .add_plugins(BuildingsPlugin)
+        .add_plugins(ProductionPlugin)
         .add_systems(Startup, on_startup)
         .run();
 }
@@ -581,12 +586,16 @@ fn handle_building_place(In(params): In<Option<Value>>, world: &mut World) -> Br
         })?;
     }
 
-    let id = world
+    let bt_for_query = building_type.clone();
+    let entity = world
         .spawn(BuildingBundle::new(building_type, faction, x, y))
-        .id()
-        .to_bits();
+        .id();
 
-    Ok(serde_json::json!({ "entity_id": id }))
+    if !building_produces(&bt_for_query).is_empty() {
+        world.entity_mut(entity).insert(ProductionQueue::default());
+    }
+
+    Ok(serde_json::json!({ "entity_id": entity.to_bits() }))
 }
 
 /// BRP handler for "building/status": { entity }
@@ -747,6 +756,175 @@ fn handle_point_status(In(params): In<Option<Value>>, world: &mut World) -> BrpR
         "owner": cp.owner.as_ref().map(|f| format!("{:?}", f)),
         "contesting": cp.contesting.as_ref().map(|f| format!("{:?}", f)),
         "capture_progress": cp.capture_progress,
+    }))
+}
+
+fn parse_unit_type(s: &str) -> Result<units::UnitType, BrpError> {
+    match s {
+        "rifleman" | "riflemen" => Ok(units::UnitType::Riflemen),
+        other => Err(BrpError {
+            code: -32602,
+            message: format!("unknown unit_type: {other}"),
+            data: None,
+        }),
+    }
+}
+
+/// BRP handler for "production/enqueue": { faction_entity, building_entity, unit_type }
+fn handle_production_enqueue(In(params): In<Option<Value>>, world: &mut World) -> BrpResult {
+    let params = params.ok_or_else(|| BrpError {
+        code: -32602,
+        message: "missing params".into(),
+        data: None,
+    })?;
+
+    let faction_id = params["faction_entity"].as_u64().ok_or_else(|| BrpError {
+        code: -32602,
+        message: "faction_entity required".into(),
+        data: None,
+    })?;
+    let building_id = params["building_entity"].as_u64().ok_or_else(|| BrpError {
+        code: -32602,
+        message: "building_entity required".into(),
+        data: None,
+    })?;
+    let unit_type = parse_unit_type(params["unit_type"].as_str().ok_or_else(|| BrpError {
+        code: -32602,
+        message: "unit_type required".into(),
+        data: None,
+    })?)?;
+
+    let faction_entity = Entity::try_from_bits(faction_id).map_err(|_| BrpError {
+        code: -32602,
+        message: format!("faction entity {faction_id} not found"),
+        data: None,
+    })?;
+    let building_entity = Entity::try_from_bits(building_id).map_err(|_| BrpError {
+        code: -32602,
+        message: format!("building entity {building_id} not found"),
+        data: None,
+    })?;
+
+    // Snapshot building state.
+    let (bt, is_built) = {
+        let r = world.get_entity(building_entity).map_err(|_| BrpError {
+            code: -32602,
+            message: format!("building entity {building_id} not found"),
+            data: None,
+        })?;
+        let bt = r.get::<BuildingType>().cloned().ok_or_else(|| BrpError {
+            code: -32602,
+            message: "entity is not a building".into(),
+            data: None,
+        })?;
+        let is_built = r.get::<Built>().is_some();
+        (bt, is_built)
+    };
+
+    // Pay from faction pool, then enqueue on building.
+    let cost = production::unit_production_cost(&unit_type);
+    {
+        let mut fm = world.get_entity_mut(faction_entity).map_err(|_| BrpError {
+            code: -32602,
+            message: format!("faction entity {faction_id} not found"),
+            data: None,
+        })?;
+        let mut pool = fm.get_mut::<resources::ResourcePool>().ok_or_else(|| BrpError {
+            code: -32602,
+            message: "faction has no ResourcePool".into(),
+            data: None,
+        })?;
+        // Reuse the pure path with a temp queue check first.
+        if !is_built {
+            return Err(BrpError {
+                code: -32000,
+                message: "building not finished".into(),
+                data: None,
+            });
+        }
+        if !building_produces(&bt).contains(&unit_type) {
+            return Err(BrpError {
+                code: -32000,
+                message: format!("{:?} cannot produce {:?}", bt, unit_type),
+                data: None,
+            });
+        }
+        if !resources::can_afford(&pool, &cost) {
+            return Err(BrpError {
+                code: -32000,
+                message: "insufficient resources".into(),
+                data: None,
+            });
+        }
+        resources::spend(&mut pool, &cost);
+    }
+
+    // Append to queue.
+    let mut bm = world.get_entity_mut(building_entity).map_err(|_| BrpError {
+        code: -32602,
+        message: format!("building entity {building_id} not found"),
+        data: None,
+    })?;
+    let mut queue = bm.get_mut::<ProductionQueue>().ok_or_else(|| BrpError {
+        code: -32000,
+        message: "building has no ProductionQueue".into(),
+        data: None,
+    })?;
+    if queue.jobs.len() >= production::QUEUE_CAP {
+        // Refund.
+        drop(queue);
+        let mut fm = world.entity_mut(faction_entity);
+        if let Some(mut pool) = fm.get_mut::<resources::ResourcePool>() {
+            resources::refund(&mut pool, &cost);
+        }
+        return Err(BrpError {
+            code: -32000,
+            message: "queue is full".into(),
+            data: None,
+        });
+    }
+    queue.jobs.push(unit_type);
+
+    // Suppress unused-import warning when EnqueueError isn't matched here.
+    let _: Option<EnqueueError> = None;
+    let _ = try_enqueue;
+
+    Ok(serde_json::json!({ "queued": queue.jobs.len() }))
+}
+
+/// BRP handler for "production/queue_status": { entity }
+fn handle_production_queue_status(In(params): In<Option<Value>>, world: &mut World) -> BrpResult {
+    let params = params.ok_or_else(|| BrpError {
+        code: -32602,
+        message: "missing params".into(),
+        data: None,
+    })?;
+    let entity_id = params["entity"].as_u64().ok_or_else(|| BrpError {
+        code: -32602,
+        message: "entity required".into(),
+        data: None,
+    })?;
+    let entity = Entity::try_from_bits(entity_id).map_err(|_| BrpError {
+        code: -32602,
+        message: format!("entity {entity_id} not found"),
+        data: None,
+    })?;
+    let r = world.get_entity(entity).map_err(|_| BrpError {
+        code: -32602,
+        message: format!("entity {entity_id} not found"),
+        data: None,
+    })?;
+    let q = r.get::<ProductionQueue>().ok_or_else(|| BrpError {
+        code: -32000,
+        message: "entity has no ProductionQueue".into(),
+        data: None,
+    })?;
+
+    let jobs: Vec<String> = q.jobs.iter().map(|u| format!("{:?}", u)).collect();
+    Ok(serde_json::json!({
+        "jobs": jobs,
+        "progress": q.progress,
+        "head_total": q.jobs.first().map(|u| production::unit_production_seconds(u)),
     }))
 }
 
