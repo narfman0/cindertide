@@ -24,6 +24,17 @@ pub struct ResourceTrickle {
     pub manpower_per_second: f32,
 }
 
+/// Per-faction population cap. Heroes are not counted toward `current`.
+/// `max` is recomputed from a base + each Built Supply Depot.
+#[derive(Component, Debug, Clone)]
+pub struct PopCap {
+    pub current: u32,
+    pub max: u32,
+}
+
+pub const BASE_POP_CAP: u32 = 20;
+pub const POP_PER_SUPPLY_DEPOT: u32 = 10;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ResourceCost {
     pub fuel: f32,
@@ -50,6 +61,7 @@ pub struct FactionBundle {
     pub caps: ResourceCaps,
     pub trickle: ResourceTrickle,
     pub tech: crate::tech::Tech,
+    pub pop_cap: PopCap,
 }
 
 impl FactionBundle {
@@ -60,6 +72,7 @@ impl FactionBundle {
             caps: ResourceCaps { fuel: 2000.0, scrap: 2000.0, manpower: 200.0 },
             trickle: ResourceTrickle { fuel_per_second: 0.0, scrap_per_second: 0.0, manpower_per_second: 1.0 },
             tech: crate::tech::Tech::default(),
+            pop_cap: PopCap { current: 0, max: BASE_POP_CAP },
         }
     }
 }
@@ -107,11 +120,39 @@ pub fn resource_trickle_system(
     }
 }
 
+/// Recomputes per-faction PopCap each frame from current units (non-hero)
+/// and Built Supply Depots.
+pub fn pop_cap_system(
+    mut factions: Query<(&FactionEntity, &mut PopCap)>,
+    units: Query<&Faction, (With<crate::units::UnitType>, Without<crate::heroes::Hero>)>,
+    depots: Query<(&Faction, &crate::buildings::BuildingType), With<crate::buildings::Built>>,
+) {
+    use std::collections::HashMap;
+
+    let mut counts: HashMap<Faction, u32> = HashMap::new();
+    for f in &units {
+        *counts.entry(f.clone()).or_insert(0) += 1;
+    }
+
+    let mut depot_counts: HashMap<Faction, u32> = HashMap::new();
+    for (f, bt) in &depots {
+        if matches!(bt, crate::buildings::BuildingType::SupplyDepot) {
+            *depot_counts.entry(f.clone()).or_insert(0) += 1;
+        }
+    }
+
+    for (fe, mut cap) in &mut factions {
+        cap.current = counts.get(&fe.faction).copied().unwrap_or(0);
+        let depots = depot_counts.get(&fe.faction).copied().unwrap_or(0);
+        cap.max = BASE_POP_CAP + depots * POP_PER_SUPPLY_DEPOT;
+    }
+}
+
 pub struct ResourcesPlugin;
 
 impl Plugin for ResourcesPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, resource_trickle_system);
+        app.add_systems(Update, (resource_trickle_system, pop_cap_system));
     }
 }
 
@@ -203,5 +244,12 @@ mod tests {
         assert_eq!(b.pool.scrap, 200.0);
         assert_eq!(b.pool.manpower, 50.0);
         assert_eq!(b.faction.faction, Faction::Combine);
+    }
+
+    #[test]
+    fn faction_bundle_pop_cap_starts_at_base() {
+        let b = FactionBundle::new(Faction::Combine);
+        assert_eq!(b.pop_cap.current, 0);
+        assert_eq!(b.pop_cap.max, BASE_POP_CAP);
     }
 }

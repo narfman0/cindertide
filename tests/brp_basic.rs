@@ -206,6 +206,26 @@ fn spawn_unit(unit_type: &str, x: i32, y: i32) -> u64 {
 
 #[test]
 #[ignore = "requires a running Cindertide server on port 15703"]
+fn brp_pop_cap_tracks_unit_count() {
+    let _g = lock_world();
+    let f = spawn_faction("combine");
+    // Wait one tick for pop_cap_system to recompute.
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    let s0 = resources_status(f);
+    assert_eq!(s0["pop_current"].as_u64().unwrap(), 0);
+    assert!(s0["pop_max"].as_u64().unwrap() >= 20);
+
+    // Spawn 3 riflemen and confirm count rises.
+    for i in 0..3 {
+        spawn_rifleman_with_faction(400 + i, 400, "combine");
+    }
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    let s1 = resources_status(f);
+    assert_eq!(s1["pop_current"].as_u64().unwrap(), 3);
+}
+
+#[test]
+#[ignore = "requires a running Cindertide server on port 15703"]
 fn brp_repair_bay_heals_damaged_vehicle() {
     let _g = lock_world();
     let faction = spawn_faction("combine");

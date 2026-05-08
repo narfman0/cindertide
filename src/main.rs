@@ -426,6 +426,8 @@ fn handle_resources_status(In(params): In<Option<Value>>, world: &mut World) -> 
     })?;
     let trickle = entity_ref.get::<ResourceTrickle>();
 
+    let pop = entity_ref.get::<resources::PopCap>();
+
     Ok(serde_json::json!({
         "fuel": pool.fuel,
         "scrap": pool.scrap,
@@ -433,6 +435,8 @@ fn handle_resources_status(In(params): In<Option<Value>>, world: &mut World) -> 
         "fuel_trickle": trickle.map(|t| t.fuel_per_second),
         "scrap_trickle": trickle.map(|t| t.scrap_per_second),
         "manpower_trickle": trickle.map(|t| t.manpower_per_second),
+        "pop_current": pop.map(|p| p.current),
+        "pop_max": pop.map(|p| p.max),
     }))
 }
 
@@ -879,6 +883,49 @@ fn handle_production_enqueue(In(params): In<Option<Value>>, world: &mut World) -
                 data: None,
             });
         }
+        // Pop cap check: deny if current + already-queued >= max.
+        // Note: 'current' lags by one frame relative to spawned units, so
+        // we conservatively also count this faction's queued jobs across
+        // its buildings.
+        let pop = fm.get::<resources::PopCap>().cloned();
+        drop(fm);
+        if let Some(pc) = pop {
+            // Tally queued jobs across all this faction's buildings.
+            let mut queued_total: u32 = 0;
+            let mut bq = world.query::<(&map::Faction, &ProductionQueue)>();
+            for (bf, q) in bq.iter(world) {
+                // We don't know the requesting faction's enum without re-fetching;
+                // if this entity matches the request via faction_entity comparison
+                // by enum, count it.
+                let target_faction_enum = {
+                    let r = world.get_entity(faction_entity).map_err(|_| BrpError {
+                        code: -32602, message: "faction lost".into(), data: None,
+                    })?;
+                    r.get::<resources::FactionEntity>().map(|fe| fe.faction.clone()).unwrap_or(bf.clone())
+                };
+                if bf == &target_faction_enum {
+                    queued_total += q.jobs.len() as u32;
+                }
+            }
+            if pc.current + queued_total >= pc.max {
+                return Err(BrpError {
+                    code: -32000,
+                    message: format!(
+                        "pop cap reached: {}/{}",
+                        pc.current + queued_total,
+                        pc.max
+                    ),
+                    data: None,
+                });
+            }
+        }
+        // Re-acquire faction mut for spend.
+        let mut fm = world.get_entity_mut(faction_entity).map_err(|_| BrpError {
+            code: -32602, message: "faction lost".into(), data: None,
+        })?;
+        let mut pool = fm.get_mut::<resources::ResourcePool>().ok_or_else(|| BrpError {
+            code: -32000, message: "no pool".into(), data: None,
+        })?;
         resources::spend(&mut pool, &cost);
     }
 
