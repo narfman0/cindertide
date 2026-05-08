@@ -15,6 +15,7 @@ mod unit_ai;
 mod repair;
 mod mapgen;
 mod mission;
+mod campaign;
 mod ai;
 
 use map::{MapPlugin, GridPos, Faction, ControlPoint, ControlPointType};
@@ -30,6 +31,7 @@ use unit_ai::UnitAiPlugin;
 use repair::RepairPlugin;
 use ai::{AiPlugin, AiController};
 use mission::{MissionPlugin, Mission, MissionStatus};
+use campaign::{CampaignState, default_state, apply_mission_outcome, spread_corruption, generate_mission_options};
 
 fn main() {
     App::new()
@@ -54,6 +56,10 @@ fn main() {
                 .with_method("map/generate", handle_map_generate)
                 .with_method("mission/start", handle_mission_start)
                 .with_method("mission/status", handle_mission_status)
+                .with_method("campaign/init", handle_campaign_init)
+                .with_method("campaign/state", handle_campaign_state)
+                .with_method("campaign/advance", handle_campaign_advance)
+                .with_method("campaign/options", handle_campaign_options)
                 .with_method("production/enqueue", handle_production_enqueue)
                 .with_method("production/queue_status", handle_production_queue_status)
                 .with_method("hero/spawn", handle_hero_spawn)
@@ -1320,6 +1326,81 @@ fn handle_hero_ability_use(In(params): In<Option<Value>>, world: &mut World) -> 
     }
 
     Ok(serde_json::json!({ "fired": true }))
+}
+
+/// BRP handler for "campaign/init": initializes the default 4-zone campaign state.
+fn handle_campaign_init(In(_params): In<Option<Value>>, world: &mut World) -> BrpResult {
+    world.insert_resource(default_state());
+    Ok(serde_json::json!({ "initialized": true }))
+}
+
+fn campaign_state_json(state: &CampaignState) -> serde_json::Value {
+    serde_json::json!({
+        "act": format!("{:?}", state.act),
+        "turn": state.turn,
+        "zones": state.zones.iter().map(|z| serde_json::json!({
+            "id": z.id,
+            "name": z.name,
+            "owner": z.owner.as_ref().map(|f| format!("{:?}", f)),
+            "corruption": z.corruption,
+        })).collect::<Vec<_>>(),
+    })
+}
+
+fn handle_campaign_state(In(_params): In<Option<Value>>, world: &mut World) -> BrpResult {
+    let state = world.get_resource::<CampaignState>().ok_or_else(|| BrpError {
+        code: -32000,
+        message: "campaign not initialized".into(),
+        data: None,
+    })?;
+    Ok(campaign_state_json(state))
+}
+
+/// BRP handler for "campaign/advance": { zone_id, winner, loser }
+fn handle_campaign_advance(In(params): In<Option<Value>>, world: &mut World) -> BrpResult {
+    let params = params.ok_or_else(|| BrpError {
+        code: -32602,
+        message: "missing params".into(),
+        data: None,
+    })?;
+    let zone_id = params["zone_id"].as_u64().ok_or_else(|| BrpError {
+        code: -32602,
+        message: "zone_id required".into(),
+        data: None,
+    })? as u32;
+    let winner = parse_faction(params["winner"].as_str().unwrap_or("combine"))?;
+    let loser = parse_faction(params["loser"].as_str().unwrap_or("hollow"))?;
+
+    let mut state = world.get_resource_mut::<CampaignState>().ok_or_else(|| BrpError {
+        code: -32000,
+        message: "campaign not initialized".into(),
+        data: None,
+    })?;
+    apply_mission_outcome(&mut state, zone_id, winner, loser);
+    spread_corruption(&mut state);
+    Ok(campaign_state_json(&state))
+}
+
+fn handle_campaign_options(In(params): In<Option<Value>>, world: &mut World) -> BrpResult {
+    let params = params.ok_or_else(|| BrpError {
+        code: -32602,
+        message: "missing params".into(),
+        data: None,
+    })?;
+    let player = parse_faction(params["player"].as_str().unwrap_or("combine"))?;
+    let state = world.get_resource::<CampaignState>().ok_or_else(|| BrpError {
+        code: -32000,
+        message: "campaign not initialized".into(),
+        data: None,
+    })?;
+    let opts = generate_mission_options(state, &player);
+    Ok(serde_json::json!({
+        "options": opts.iter().map(|o| serde_json::json!({
+            "zone_id": o.zone_id,
+            "mission_type": format!("{:?}", o.mission_type),
+            "opponent": format!("{:?}", o.opponent),
+        })).collect::<Vec<_>>(),
+    }))
 }
 
 /// BRP handler for "mission/start": { mission_type, player, opponent, deadline? }

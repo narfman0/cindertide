@@ -206,6 +206,45 @@ fn spawn_unit(unit_type: &str, x: i32, y: i32) -> u64 {
 
 #[test]
 #[ignore = "requires a running Cindertide server on port 15703"]
+fn brp_campaign_init_and_advance_changes_zone_owner() {
+    let _g = lock_world();
+    post("campaign/init", serde_json::json!({}));
+    let s0 = post("campaign/state", serde_json::json!({}));
+    let zones0 = s0["result"]["zones"].as_array().unwrap();
+    let pale_before = zones0.iter().find(|z| z["id"].as_u64() == Some(2)).unwrap();
+    assert_eq!(pale_before["owner"].as_str().unwrap(), "Hollow");
+
+    let _ = post(
+        "campaign/advance",
+        serde_json::json!({
+            "zone_id": 2,
+            "winner": "combine",
+            "loser": "hollow",
+        }),
+    );
+
+    let s1 = post("campaign/state", serde_json::json!({}));
+    let zones1 = s1["result"]["zones"].as_array().unwrap();
+    let pale_after = zones1.iter().find(|z| z["id"].as_u64() == Some(2)).unwrap();
+    assert_eq!(pale_after["owner"].as_str().unwrap(), "Combine");
+    assert_eq!(s1["result"]["turn"].as_u64().unwrap(), 1);
+}
+
+#[test]
+#[ignore = "requires a running Cindertide server on port 15703"]
+fn brp_campaign_options_excludes_player_zones() {
+    let _g = lock_world();
+    post("campaign/init", serde_json::json!({}));
+    let r = post("campaign/options", serde_json::json!({ "player": "combine" }));
+    let opts = r["result"]["options"].as_array().unwrap();
+    // Combine owns zone 0; options should not include it.
+    for o in opts {
+        assert_ne!(o["zone_id"].as_u64().unwrap(), 0);
+    }
+}
+
+#[test]
+#[ignore = "requires a running Cindertide server on port 15703"]
 fn brp_mission_starts_active() {
     let _g = lock_world();
     let resp = post(
