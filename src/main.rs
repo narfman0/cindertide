@@ -17,6 +17,7 @@ mod mapgen;
 mod mission;
 mod campaign;
 mod beats;
+mod hollow;
 mod ai;
 
 use map::{MapPlugin, GridPos, Faction, ControlPoint, ControlPointType};
@@ -34,6 +35,7 @@ use ai::{AiPlugin, AiController};
 use mission::{MissionPlugin, Mission, MissionStatus};
 use campaign::{CampaignState, default_state, apply_mission_outcome, spread_corruption, generate_mission_options};
 use beats::{BeatsPlugin, FiredBeats};
+use hollow::{HollowPlugin, HollowSpawner, HollowMode};
 
 fn main() {
     App::new()
@@ -63,6 +65,7 @@ fn main() {
                 .with_method("campaign/advance", handle_campaign_advance)
                 .with_method("campaign/options", handle_campaign_options)
                 .with_method("beats/fired", handle_beats_fired)
+                .with_method("hollow/spawn_point", handle_hollow_spawn_point)
                 .with_method("production/enqueue", handle_production_enqueue)
                 .with_method("production/queue_status", handle_production_queue_status)
                 .with_method("hero/spawn", handle_hero_spawn)
@@ -86,6 +89,7 @@ fn main() {
         .add_plugins(AiPlugin)
         .add_plugins(MissionPlugin)
         .add_plugins(BeatsPlugin)
+        .add_plugins(HollowPlugin)
         .add_systems(Startup, on_startup)
         .run();
 }
@@ -1332,6 +1336,33 @@ fn handle_hero_ability_use(In(params): In<Option<Value>>, world: &mut World) -> 
     Ok(serde_json::json!({ "fired": true }))
 }
 
+fn parse_hollow_mode(s: &str) -> Result<HollowMode, BrpError> {
+    match s {
+        "consuming" => Ok(HollowMode::Consuming),
+        "subsuming" => Ok(HollowMode::Subsuming),
+        "indifferent" => Ok(HollowMode::Indifferent),
+        other => Err(BrpError {
+            code: -32602,
+            message: format!("unknown hollow mode: {other}"),
+            data: None,
+        }),
+    }
+}
+
+/// BRP handler for "hollow/spawn_point": { x, y, mode }
+fn handle_hollow_spawn_point(In(params): In<Option<Value>>, world: &mut World) -> BrpResult {
+    let params = params.ok_or_else(|| BrpError {
+        code: -32602,
+        message: "missing params".into(),
+        data: None,
+    })?;
+    let x = params["x"].as_i64().unwrap_or(0) as i32;
+    let y = params["y"].as_i64().unwrap_or(0) as i32;
+    let mode = parse_hollow_mode(params["mode"].as_str().unwrap_or("consuming"))?;
+    let id = world.spawn(HollowSpawner::new(mode, x, y)).id().to_bits();
+    Ok(serde_json::json!({ "entity_id": id }))
+}
+
 /// BRP handler for "beats/fired": returns the set of authored beats that
 /// have triggered so far.
 fn handle_beats_fired(In(_params): In<Option<Value>>, world: &mut World) -> BrpResult {
@@ -1624,6 +1655,7 @@ fn handle_dev_reset(In(_params): In<Option<Value>>, world: &mut World) -> BrpRes
             With<Hero>,
             With<map::Tile>,
             With<Mission>,
+            With<HollowSpawner>,
         )>>();
         for e in q.iter(world) {
             to_despawn.push(e);

@@ -206,6 +206,23 @@ fn spawn_unit(unit_type: &str, x: i32, y: i32) -> u64 {
 
 #[test]
 #[ignore = "requires a running Cindertide server on port 15703"]
+fn brp_hollow_spawner_increases_pop_count() {
+    let _g = lock_world();
+    let hollow = spawn_faction("hollow");
+    // Hollow spawner at consuming mode (6s interval).
+    post(
+        "hollow/spawn_point",
+        serde_json::json!({ "x": 700, "y": 700, "mode": "consuming" }),
+    );
+    // Wait ~7s for first spawn + tick for pop_cap_system.
+    std::thread::sleep(std::time::Duration::from_millis(7500));
+    let s = resources_status(hollow);
+    let pop = s["pop_current"].as_u64().unwrap();
+    assert!(pop >= 1, "expected hollow population > 0: {s}");
+}
+
+#[test]
+#[ignore = "requires a running Cindertide server on port 15703"]
 fn brp_beats_fired_starts_empty_and_records_hero_down() {
     let _g = lock_world();
     let r0 = post("beats/fired", serde_json::json!({}));
