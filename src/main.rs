@@ -111,7 +111,7 @@ fn handle_unit_spawn(In(params): In<Option<Value>>, world: &mut World) -> BrpRes
         data: None,
     })?;
 
-    let unit_type = params["unit_type"]
+    let unit_type_str = params["unit_type"]
         .as_str()
         .ok_or_else(|| BrpError {
             code: -32602,
@@ -119,13 +119,7 @@ fn handle_unit_spawn(In(params): In<Option<Value>>, world: &mut World) -> BrpRes
             data: None,
         })?;
 
-    if unit_type != "rifleman" {
-        return Err(BrpError {
-            code: -32602,
-            message: format!("unknown unit_type: {unit_type}"),
-            data: None,
-        });
-    }
+    let unit_type = parse_unit_type(unit_type_str)?;
 
     let x = params["x"]
         .as_i64()
@@ -157,7 +151,12 @@ fn handle_unit_spawn(In(params): In<Option<Value>>, world: &mut World) -> BrpRes
         }
     };
 
-    let entity = world.spawn(RiflemanBundle::with_faction(x, y, faction)).id();
+    let entity = match unit_type {
+        units::UnitType::Riflemen => world.spawn(RiflemanBundle::with_faction(x, y, faction)).id(),
+        units::UnitType::HeavyWeapons => world.spawn(units::HeavyWeaponsBundle::with_faction(x, y, faction)).id(),
+        units::UnitType::LightVehicle => world.spawn(units::LightVehicleBundle::with_faction(x, y, faction)).id(),
+        units::UnitType::HeavyArmor => world.spawn(units::HeavyArmorBundle::with_faction(x, y, faction)).id(),
+    };
     let entity_id = entity.to_bits();
 
     Ok(serde_json::json!({ "entity_id": entity_id }))
@@ -762,6 +761,9 @@ fn handle_point_status(In(params): In<Option<Value>>, world: &mut World) -> BrpR
 fn parse_unit_type(s: &str) -> Result<units::UnitType, BrpError> {
     match s {
         "rifleman" | "riflemen" => Ok(units::UnitType::Riflemen),
+        "heavy_weapons" => Ok(units::UnitType::HeavyWeapons),
+        "light_vehicle" => Ok(units::UnitType::LightVehicle),
+        "heavy_armor" => Ok(units::UnitType::HeavyArmor),
         other => Err(BrpError {
             code: -32602,
             message: format!("unknown unit_type: {other}"),

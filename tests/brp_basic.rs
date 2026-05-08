@@ -191,6 +191,34 @@ fn brp_unit_status_includes_facing_and_morale() {
     assert_eq!(s["pos_y"].as_i64().unwrap(), 5);
 }
 
+fn spawn_unit(unit_type: &str, x: i32, y: i32) -> u64 {
+    let resp = post(
+        "unit/spawn",
+        serde_json::json!({
+            "unit_type": unit_type,
+            "x": x,
+            "y": y,
+            "faction": "combine",
+        }),
+    );
+    resp["result"]["entity_id"].as_u64().expect("entity_id u64")
+}
+
+#[test]
+#[ignore = "requires a running Cindertide server on port 15703"]
+fn brp_spawn_all_unit_types() {
+    let _g = lock_world();
+    for t in &["rifleman", "heavy_weapons", "light_vehicle", "heavy_armor"] {
+        let id = spawn_unit(t, 0, 0);
+        let s = unit_status(id);
+        assert_eq!(
+            s["health_current"].as_f64().unwrap(),
+            s["health_max"].as_f64().unwrap(),
+            "{t} should spawn at full health"
+        );
+    }
+}
+
 fn spawn_faction(name: &str) -> u64 {
     let resp = post("faction/spawn", serde_json::json!({ "faction": name }));
     resp["result"]["entity_id"].as_u64().expect("entity_id u64")

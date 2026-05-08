@@ -2,7 +2,7 @@
 
 use bevy::prelude::*;
 use crate::map::{Faction, GridPos};
-use crate::units::{UnitType, RiflemanBundle};
+use crate::units::{UnitType, RiflemanBundle, HeavyWeaponsBundle, LightVehicleBundle, HeavyArmorBundle};
 use crate::buildings::{BuildingPos, BuildingType, Built};
 use crate::resources::{ResourcePool, ResourceCost, FactionEntity, can_afford, spend, refund};
 
@@ -19,19 +19,26 @@ pub struct ProductionQueue {
 pub fn unit_production_seconds(ut: &UnitType) -> f32 {
     match ut {
         UnitType::Riflemen => 8.0,
+        UnitType::HeavyWeapons => 14.0,
+        UnitType::LightVehicle => 18.0,
+        UnitType::HeavyArmor => 35.0,
     }
 }
 
 pub fn unit_production_cost(ut: &UnitType) -> ResourceCost {
     match ut {
         UnitType::Riflemen => ResourceCost { fuel: 0.0, scrap: 50.0, manpower: 5.0 },
+        UnitType::HeavyWeapons => ResourceCost { fuel: 10.0, scrap: 80.0, manpower: 5.0 },
+        UnitType::LightVehicle => ResourceCost { fuel: 80.0, scrap: 60.0, manpower: 3.0 },
+        UnitType::HeavyArmor => ResourceCost { fuel: 250.0, scrap: 200.0, manpower: 5.0 },
     }
 }
 
 /// Which unit categories does this building produce?
 pub fn building_produces(bt: &BuildingType) -> &'static [UnitType] {
     match bt {
-        BuildingType::Barracks => &[UnitType::Riflemen],
+        BuildingType::Barracks => &[UnitType::Riflemen, UnitType::HeavyWeapons],
+        BuildingType::MotorPool => &[UnitType::LightVehicle, UnitType::HeavyArmor],
         _ => &[],
     }
 }
@@ -95,14 +102,12 @@ pub fn production_system(
     let dt = time.delta_secs();
     for (pos, faction, mut queue) in &mut buildings {
         if let Some(unit_type) = step_progress(&mut queue, dt) {
+            let (x, y, f) = (pos.pos.x, pos.pos.y, faction.clone());
             match unit_type {
-                UnitType::Riflemen => {
-                    commands.spawn(RiflemanBundle::with_faction(
-                        pos.pos.x,
-                        pos.pos.y,
-                        faction.clone(),
-                    ));
-                }
+                UnitType::Riflemen => { commands.spawn(RiflemanBundle::with_faction(x, y, f)); }
+                UnitType::HeavyWeapons => { commands.spawn(HeavyWeaponsBundle::with_faction(x, y, f)); }
+                UnitType::LightVehicle => { commands.spawn(LightVehicleBundle::with_faction(x, y, f)); }
+                UnitType::HeavyArmor => { commands.spawn(HeavyArmorBundle::with_faction(x, y, f)); }
             }
         }
     }
