@@ -11,6 +11,7 @@ mod buildings;
 mod production;
 mod heroes;
 mod tech;
+mod unit_ai;
 mod ai;
 
 use map::{MapPlugin, GridPos, Faction, ControlPoint, ControlPointType};
@@ -22,6 +23,7 @@ use buildings::{BuildingsPlugin, BuildingType, BuildingBundle, BuildingPos, Cons
 use production::{ProductionPlugin, ProductionQueue, building_produces, try_enqueue, EnqueueError};
 use heroes::{HeroPlugin, HeroBundle, Hero, AbilityKind, SignatureAbility, Aura, HeroDowned, is_charge_full, within_aura};
 use tech::{TechPlugin, Tech, Tier, Doctrine, ResearchTarget, ResearchInProgress, start_research};
+use unit_ai::UnitAiPlugin;
 
 fn main() {
     App::new()
@@ -59,6 +61,7 @@ fn main() {
         .add_plugins(ProductionPlugin)
         .add_plugins(HeroPlugin)
         .add_plugins(TechPlugin)
+        .add_plugins(UnitAiPlugin)
         .add_systems(Startup, on_startup)
         .run();
 }
@@ -168,6 +171,9 @@ fn handle_unit_spawn(In(params): In<Option<Value>>, world: &mut World) -> BrpRes
         units::UnitType::LightVehicle => world.spawn(units::LightVehicleBundle::with_faction(x, y, faction)).id(),
         units::UnitType::HeavyArmor => world.spawn(units::HeavyArmorBundle::with_faction(x, y, faction)).id(),
     };
+    world
+        .entity_mut(entity)
+        .insert(units::HomeBase { pos: GridPos { x, y } });
     let entity_id = entity.to_bits();
 
     Ok(serde_json::json!({ "entity_id": entity_id }))
@@ -1078,8 +1084,11 @@ fn handle_hero_spawn(In(params): In<Option<Value>>, world: &mut World) -> BrpRes
     let x = params["x"].as_i64().unwrap_or(0) as i32;
     let y = params["y"].as_i64().unwrap_or(0) as i32;
     let kind = parse_ability_kind(params["ability_kind"].as_str().unwrap_or("rally"))?;
-    let id = world.spawn(HeroBundle::new(name, x, y, faction, kind)).id().to_bits();
-    Ok(serde_json::json!({ "entity_id": id }))
+    let entity = world.spawn(HeroBundle::new(name, x, y, faction, kind)).id();
+    world
+        .entity_mut(entity)
+        .insert(units::HomeBase { pos: GridPos { x, y } });
+    Ok(serde_json::json!({ "entity_id": entity.to_bits() }))
 }
 
 /// BRP handler for "hero/status": { entity }

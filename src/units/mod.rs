@@ -29,6 +29,12 @@ pub struct UnitPos {
     pub pos: GridPos,
 }
 
+/// Where a unit was spawned. Routing units retreat toward this position.
+#[derive(Component, Debug, Clone)]
+pub struct HomeBase {
+    pub pos: GridPos,
+}
+
 // Destination when moving
 #[derive(Component, Debug, Clone)]
 pub struct MoveTarget {

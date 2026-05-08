@@ -64,6 +64,14 @@ pub struct SuppressionContribution {
 #[derive(Component, Debug)] pub struct Routing;
 #[derive(Component)] pub struct TookDamageThisFrame;
 
+/// Records the most recent attacker. Used by unit AI for threat response.
+/// Refreshed on every successful hit; cleared by ai cleanup after a window.
+#[derive(Component, Debug, Clone)]
+pub struct LastAttackedBy {
+    pub attacker: Entity,
+    pub age_secs: f32,
+}
+
 #[derive(Component, Debug, Clone, PartialEq)]
 pub enum MoraleState { Steady, Shaken, Broken }
 
@@ -371,9 +379,18 @@ pub fn attack_system(
         }
     }
 
-    for entity in took_damage {
-        if let Ok(mut e) = commands.get_entity(entity) {
+    for entity in &took_damage {
+        if let Ok(mut e) = commands.get_entity(*entity) {
             e.insert(TookDamageThisFrame);
+        }
+    }
+    // Record attacker for unit-AI threat response. Pair attacker with the
+    // last target they hit this frame.
+    for p in &pending {
+        if took_damage.iter().any(|e| *e == p.target) {
+            if let Ok(mut e) = commands.get_entity(p.target) {
+                e.insert(LastAttackedBy { attacker: p.attacker, age_secs: 0.0 });
+            }
         }
     }
     for entity in to_remove_target {

@@ -204,6 +204,40 @@ fn spawn_unit(unit_type: &str, x: i32, y: i32) -> u64 {
     resp["result"]["entity_id"].as_u64().expect("entity_id u64")
 }
 
+#[test]
+#[ignore = "requires a running Cindertide server on port 15703"]
+fn brp_threat_response_returns_fire() {
+    let _g = lock_world();
+    // Two riflemen in mutual range. Order one to attack the other and let
+    // them shoot. After the unattacked target takes damage, unit AI should
+    // make it return fire (set AttackTarget on it pointing at attacker).
+    let aggressor = spawn_rifleman_with_faction(100, 100, "combine");
+    let victim = spawn_rifleman_with_faction(102, 100, "hollow");
+
+    post(
+        "combat/attack",
+        serde_json::json!({ "attacker_entity": aggressor, "target_entity": victim }),
+    );
+
+    // Wait for first hit + unit AI threat response (one tick after damage).
+    std::thread::sleep(std::time::Duration::from_millis(2000));
+
+    // Victim should be alive (or at least have lost some health).
+    let s = combat_status(victim);
+    let h = s["health_current"].as_f64().unwrap();
+    assert!(h < 100.0, "victim should have taken damage: {s}");
+
+    // Now confirm the aggressor lost some health too — only possible if
+    // unit AI made the victim return fire.
+    std::thread::sleep(std::time::Duration::from_millis(2000));
+    let s2 = combat_status(aggressor);
+    let h2 = s2["health_current"].as_f64().unwrap();
+    assert!(
+        h2 < 100.0,
+        "aggressor should be hit by return fire after threat response: {s2}"
+    );
+}
+
 fn tech_status(faction: u64) -> serde_json::Value {
     let resp = post(
         "tech/status",

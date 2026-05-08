@@ -2,7 +2,7 @@
 
 use bevy::prelude::*;
 use crate::map::{Faction, GridPos};
-use crate::units::{UnitType, RiflemanBundle, HeavyWeaponsBundle, LightVehicleBundle, HeavyArmorBundle};
+use crate::units::{UnitType, RiflemanBundle, HeavyWeaponsBundle, LightVehicleBundle, HeavyArmorBundle, HomeBase};
 use crate::buildings::{BuildingPos, BuildingType, Built};
 use crate::resources::{ResourcePool, ResourceCost, FactionEntity, can_afford, spend, refund};
 
@@ -103,12 +103,13 @@ pub fn production_system(
     for (pos, faction, mut queue) in &mut buildings {
         if let Some(unit_type) = step_progress(&mut queue, dt) {
             let (x, y, f) = (pos.pos.x, pos.pos.y, faction.clone());
-            match unit_type {
-                UnitType::Riflemen => { commands.spawn(RiflemanBundle::with_faction(x, y, f)); }
-                UnitType::HeavyWeapons => { commands.spawn(HeavyWeaponsBundle::with_faction(x, y, f)); }
-                UnitType::LightVehicle => { commands.spawn(LightVehicleBundle::with_faction(x, y, f)); }
-                UnitType::HeavyArmor => { commands.spawn(HeavyArmorBundle::with_faction(x, y, f)); }
-            }
+            let id = match unit_type {
+                UnitType::Riflemen => commands.spawn(RiflemanBundle::with_faction(x, y, f)).id(),
+                UnitType::HeavyWeapons => commands.spawn(HeavyWeaponsBundle::with_faction(x, y, f)).id(),
+                UnitType::LightVehicle => commands.spawn(LightVehicleBundle::with_faction(x, y, f)).id(),
+                UnitType::HeavyArmor => commands.spawn(HeavyArmorBundle::with_faction(x, y, f)).id(),
+            };
+            commands.entity(id).insert(HomeBase { pos: pos.pos.clone() });
         }
     }
 }
