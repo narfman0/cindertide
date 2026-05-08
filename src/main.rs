@@ -26,6 +26,7 @@ use heroes::{HeroPlugin, HeroBundle, Hero, AbilityKind, SignatureAbility, Aura, 
 use tech::{TechPlugin, Tech, Tier, Doctrine, ResearchTarget, ResearchInProgress, start_research};
 use unit_ai::UnitAiPlugin;
 use repair::RepairPlugin;
+use ai::{AiPlugin, AiController};
 
 fn main() {
     App::new()
@@ -46,6 +47,7 @@ fn main() {
                 .with_method("building/status", handle_building_status)
                 .with_method("dev/reset", handle_dev_reset)
                 .with_method("dev/give_resources", handle_dev_give_resources)
+                .with_method("ai/enable", handle_ai_enable)
                 .with_method("production/enqueue", handle_production_enqueue)
                 .with_method("production/queue_status", handle_production_queue_status)
                 .with_method("hero/spawn", handle_hero_spawn)
@@ -66,6 +68,7 @@ fn main() {
         .add_plugins(TechPlugin)
         .add_plugins(UnitAiPlugin)
         .add_plugins(RepairPlugin)
+        .add_plugins(AiPlugin)
         .add_systems(Startup, on_startup)
         .run();
 }
@@ -1310,6 +1313,50 @@ fn handle_hero_ability_use(In(params): In<Option<Value>>, world: &mut World) -> 
     }
 
     Ok(serde_json::json!({ "fired": true }))
+}
+
+fn parse_doctrine(s: &str) -> Result<Doctrine, BrpError> {
+    match s {
+        "assault" => Ok(Doctrine::Assault),
+        "fortification" => Ok(Doctrine::Fortification),
+        "salvage" => Ok(Doctrine::Salvage),
+        other => Err(BrpError {
+            code: -32602,
+            message: format!("unknown doctrine: {other}"),
+            data: None,
+        }),
+    }
+}
+
+/// BRP handler for "ai/enable": { entity, home_x, home_y, doctrine }
+/// Marks a faction as AI-controlled.
+fn handle_ai_enable(In(params): In<Option<Value>>, world: &mut World) -> BrpResult {
+    let params = params.ok_or_else(|| BrpError {
+        code: -32602,
+        message: "missing params".into(),
+        data: None,
+    })?;
+    let entity_id = params["entity"].as_u64().ok_or_else(|| BrpError {
+        code: -32602,
+        message: "entity required".into(),
+        data: None,
+    })?;
+    let hx = params["home_x"].as_i64().unwrap_or(0) as i32;
+    let hy = params["home_y"].as_i64().unwrap_or(0) as i32;
+    let doctrine = parse_doctrine(params["doctrine"].as_str().unwrap_or("assault"))?;
+
+    let entity = Entity::try_from_bits(entity_id).map_err(|_| BrpError {
+        code: -32602,
+        message: format!("entity {entity_id} not found"),
+        data: None,
+    })?;
+    let mut em = world.get_entity_mut(entity).map_err(|_| BrpError {
+        code: -32602,
+        message: format!("entity {entity_id} not found"),
+        data: None,
+    })?;
+    em.insert(AiController::new(hx, hy, doctrine));
+    Ok(serde_json::json!({ "success": true }))
 }
 
 /// BRP handler for "dev/give_resources": { entity, fuel?, scrap?, manpower? }

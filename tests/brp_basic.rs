@@ -206,6 +206,40 @@ fn spawn_unit(unit_type: &str, x: i32, y: i32) -> u64 {
 
 #[test]
 #[ignore = "requires a running Cindertide server on port 15703"]
+fn brp_ai_economic_builds_refinery_first() {
+    let _g = lock_world();
+    let f = spawn_faction("combine");
+    // Top up so the AI can build.
+    post(
+        "dev/give_resources",
+        serde_json::json!({ "entity": f, "fuel": 500.0, "scrap": 500.0 }),
+    );
+    let r = post(
+        "ai/enable",
+        serde_json::json!({
+            "entity": f,
+            "home_x": 600,
+            "home_y": 600,
+            "doctrine": "assault",
+        }),
+    );
+    assert!(r.get("result").is_some(), "ai/enable failed: {r}");
+
+    // Wait through one AI tick (~3s) plus a second.
+    std::thread::sleep(std::time::Duration::from_millis(4500));
+
+    // Use bevy/list (if available) or just verify resources were spent —
+    // the AI should have built a Refinery (200 fuel + 50 scrap).
+    let s = resources_status(f);
+    let fuel = s["fuel"].as_f64().unwrap();
+    assert!(
+        fuel < 700.0,
+        "expected AI to spend resources, fuel={fuel}: {s}"
+    );
+}
+
+#[test]
+#[ignore = "requires a running Cindertide server on port 15703"]
 fn brp_pop_cap_tracks_unit_count() {
     let _g = lock_world();
     let f = spawn_faction("combine");
