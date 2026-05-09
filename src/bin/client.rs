@@ -5,7 +5,7 @@ use bevy::render::camera::ScalingMode;
 use cindertide::map::{Faction, GridPos, Tile};
 use cindertide::units::{UnitPos, UnitType};
 use cindertide::buildings::{BuildingPos, BuildingType};
-use cindertide::campaign::{CampaignRun, PlayableFaction, GlobalProgress, apply_mission_outcome, next_mission_type};
+use cindertide::campaign::{CampaignRun, PlayableFaction, GlobalProgress, apply_mission_outcome, next_mission_type, save_progress, load_progress};
 use cindertide::game::{ActiveRun, GameState};
 use cindertide::mission::{Mission, MissionStatus};
 use cindertide::mapgen::MissionType;
@@ -59,9 +59,11 @@ fn main() {
         .init_resource::<Paused>()
         .init_resource::<ClientScreen>()
         .init_resource::<EditorState>()
+        .insert_resource(MinimapTimer(0.0))
         .add_systems(Startup, setup_scene)
         .add_systems(Startup, setup_ui)
         .add_systems(Startup, load_narrative)
+        .add_systems(Startup, startup_load_progress)
         .add_systems(Update, render_tiles)
         .add_systems(Update, sync_rendered_tile_colors)
         .add_systems(Update, spawn_unit_visuals)
@@ -84,6 +86,9 @@ fn main() {
         .add_systems(Update, update_resource_bar)
         .add_systems(Update, update_unit_info_panel)
         .add_systems(Update, update_production_queue)
+        .add_systems(Update, update_minimap)
+        .add_systems(Update, handle_minimap_click)
+        .add_systems(Update, update_mission_objectives)
         .run();
 }
 
@@ -276,7 +281,23 @@ struct UnitInfoText;
 #[derive(Component)]
 struct ProductionQueueText;
 
+/// Root panel of the minimap (bottom-left, InMission only).
+#[derive(Component)]
+struct MinimapPanel;
+
+/// Colored dot node inside the minimap.
+#[derive(Component)]
+struct MinimapDot;
+
+/// Text node showing the current mission objective (top-right, InMission only).
+#[derive(Component)]
+struct ObjectivesText;
+
 // ── Resources ────────────────────────────────────────────────────────────────
+
+/// Timer for throttling minimap rebuilds (rebuild at most every 0.5 s).
+#[derive(Resource)]
+struct MinimapTimer(f32);
 
 #[derive(Resource, Default)]
 struct VisualEntities {
@@ -378,6 +399,12 @@ fn load_narrative(mut commands: Commands) {
             }
         });
     commands.insert_resource(narrative);
+}
+
+/// On startup, load GlobalProgress from disk and insert it as a resource.
+fn startup_load_progress(mut commands: Commands) {
+    let progress = load_progress();
+    commands.insert_resource(progress);
 }
 
 fn setup_scene(mut commands: Commands) {
@@ -570,6 +597,41 @@ fn setup_ui(mut commands: Commands) {
                     TextColor(Color::srgb(0.75, 0.85, 1.0)),
                     TextFont { font_size: 14.0, ..default() },
                     ProductionQueueText,
+                ));
+            });
+
+            // Bottom-left minimap panel (200×140 px)
+            hud.spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    bottom: Val::Px(0.0),
+                    left: Val::Px(0.0),
+                    width: Val::Px(200.0),
+                    height: Val::Px(140.0),
+                    overflow: Overflow::clip(),
+                    ..default()
+                },
+                BackgroundColor(Color::srgba(0.05, 0.05, 0.05, 0.85)),
+                MinimapPanel,
+            ));
+
+            // Top-right mission objectives panel
+            hud.spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    top: Val::Px(36.0), // below the resource bar
+                    right: Val::Px(0.0),
+                    width: Val::Px(280.0),
+                    padding: UiRect::all(Val::Px(10.0)),
+                    ..default()
+                },
+                BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.65)),
+            )).with_children(|panel| {
+                panel.spawn((
+                    Text::new(""),
+                    TextColor(Color::srgb(1.0, 0.85, 0.3)),
+                    TextFont { font_size: 14.0, ..default() },
+                    ObjectivesText,
                 ));
             });
         });
@@ -917,6 +979,9 @@ fn poll_mission_end(
         apply_mission_outcome(run, &mut progress, won, mission_type);
     }
     active.current_mission_entity = None;
+
+    // Persist progress to disk on each debrief transition
+    save_progress(&progress);
 
     *screen = ClientScreen::Debrief {
         title,
@@ -2188,7 +2253,261 @@ fn update_production_queue(
     };
 }
 
+// ── Minimap system ────────────────────────────────────────────────────────────
+
+const MINIMAP_W: f32 = 200.0;
+const MINIMAP_H: f32 = 140.0;
+const DOT_SIZE: f32 = 2.0;
+
+/// Rebuild minimap dots at most every 0.5 seconds.
+fn update_minimap(
+    mut commands: Commands,
+    screen: Res<ClientScreen>,
+    time: Res<Time>,
+    mut timer: ResMut<MinimapTimer>,
+    panel_q: Query<Entity, With<MinimapPanel>>,
+    dot_q: Query<Entity, With<MinimapDot>>,
+    tiles: Query<&Tile>,
+    units: Query<(&UnitPos, &Faction), With<UnitType>>,
+    buildings: Query<(&BuildingPos, &Faction), With<BuildingType>>,
+    player_faction: Option<Res<PlayerFaction>>,
+) {
+    if *screen != ClientScreen::InMission {
+        return;
+    }
+
+    timer.0 += time.delta_secs();
+    if timer.0 < 0.5 {
+        return;
+    }
+    timer.0 = 0.0;
+
+    // Despawn all existing dots
+    for dot_entity in &dot_q {
+        commands.entity(dot_entity).despawn();
+    }
+
+    let Ok(panel_entity) = panel_q.single() else { return };
+
+    // Determine map bounds
+    let mut min_x = i32::MAX;
+    let mut min_y = i32::MAX;
+    let mut max_x = i32::MIN;
+    let mut max_y = i32::MIN;
+    for tile in &tiles {
+        min_x = min_x.min(tile.pos.x);
+        min_y = min_y.min(tile.pos.y);
+        max_x = max_x.max(tile.pos.x);
+        max_y = max_y.max(tile.pos.y);
+    }
+    if min_x == i32::MAX {
+        return;
+    }
+    let map_w = (max_x - min_x + 1) as f32;
+    let map_h = (max_y - min_y + 1) as f32;
+    if map_w <= 0.0 || map_h <= 0.0 {
+        return;
+    }
+
+    let scale_x = MINIMAP_W / map_w;
+    let scale_y = MINIMAP_H / map_h;
+
+    // Helper to convert grid pos to minimap pixel offset
+    let to_px = |gx: i32, gy: i32| -> (f32, f32) {
+        let px = (gx - min_x) as f32 * scale_x;
+        let py = (gy - min_y) as f32 * scale_y;
+        (px, py)
+    };
+
+    let player_f = player_faction.as_ref().map(|pf| pf.0.clone());
+
+    // Spawn terrain dots
+    let mut tile_dots: Vec<(f32, f32, Color)> = Vec::new();
+    for tile in &tiles {
+        let base = terrain_color_dark(&tile.terrain_type);
+        let (px, py) = to_px(tile.pos.x, tile.pos.y);
+        tile_dots.push((px, py, base));
+    }
+
+    // Spawn building dots (white)
+    let mut building_dots: Vec<(f32, f32, Color)> = Vec::new();
+    for (bpos, _faction) in &buildings {
+        let (px, py) = to_px(bpos.pos.x, bpos.pos.y);
+        building_dots.push((px, py, Color::srgb(1.0, 1.0, 1.0)));
+    }
+
+    // Spawn unit dots
+    let mut unit_dots: Vec<(f32, f32, Color)> = Vec::new();
+    for (upos, faction) in &units {
+        let color = if Some(faction.clone()) == player_f {
+            Color::srgb(1.0, 1.0, 0.0) // yellow for player
+        } else {
+            Color::srgb(1.0, 0.15, 0.15) // red for enemy
+        };
+        let (px, py) = to_px(upos.pos.x, upos.pos.y);
+        unit_dots.push((px, py, color));
+    }
+
+    // Spawn all dots as children of the minimap panel
+    let all_dots: Vec<(f32, f32, Color)> = tile_dots
+        .into_iter()
+        .chain(building_dots)
+        .chain(unit_dots)
+        .collect();
+
+    commands.entity(panel_entity).with_children(|parent| {
+        for (px, py, color) in all_dots {
+            parent.spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(px),
+                    top: Val::Px(py),
+                    width: Val::Px(DOT_SIZE),
+                    height: Val::Px(DOT_SIZE),
+                    ..default()
+                },
+                BackgroundColor(color),
+                MinimapDot,
+            ));
+        }
+    });
+}
+
+/// Handle left-clicks on the minimap to move the camera to that map position.
+fn handle_minimap_click(
+    buttons: Res<ButtonInput<MouseButton>>,
+    windows: Query<&Window>,
+    screen: Res<ClientScreen>,
+    tiles: Query<&Tile>,
+    mut cameras: Query<&mut Transform, With<IsometricCamera>>,
+) {
+    if *screen != ClientScreen::InMission {
+        return;
+    }
+    if !buttons.just_pressed(MouseButton::Left) {
+        return;
+    }
+
+    let Ok(window) = windows.single() else { return };
+    let Some(cursor) = window.cursor_position() else { return };
+
+    // The minimap is at bottom-left: x in [0, MINIMAP_W], y in [window.height - MINIMAP_H, window.height]
+    let win_h = window.height();
+    let minimap_top = win_h - MINIMAP_H;
+
+    if cursor.x < 0.0 || cursor.x > MINIMAP_W || cursor.y < minimap_top || cursor.y > win_h {
+        return;
+    }
+
+    // Map bounds
+    let mut min_x = i32::MAX;
+    let mut min_y = i32::MAX;
+    let mut max_x = i32::MIN;
+    let mut max_y = i32::MIN;
+    for tile in &tiles {
+        min_x = min_x.min(tile.pos.x);
+        min_y = min_y.min(tile.pos.y);
+        max_x = max_x.max(tile.pos.x);
+        max_y = max_y.max(tile.pos.y);
+    }
+    if min_x == i32::MAX {
+        return;
+    }
+    let map_w = (max_x - min_x + 1) as f32;
+    let map_h = (max_y - min_y + 1) as f32;
+
+    let frac_x = cursor.x / MINIMAP_W;
+    let frac_y = (cursor.y - minimap_top) / MINIMAP_H;
+
+    let grid_x = min_x as f32 + frac_x * map_w;
+    let grid_y = min_y as f32 + frac_y * map_h;
+
+    let world_x = grid_x;
+    let world_z = grid_y;
+
+    // Move camera to the clicked position (preserve Y / height)
+    if let Ok(mut cam_transform) = cameras.single_mut() {
+        cam_transform.translation.x = world_x;
+        cam_transform.translation.z = world_z;
+    }
+}
+
+// ── Mission objectives HUD ────────────────────────────────────────────────────
+
+/// Update the top-right objectives panel each frame during InMission.
+fn update_mission_objectives(
+    screen: Res<ClientScreen>,
+    active: Res<ActiveRun>,
+    missions: Query<&Mission>,
+    units: Query<&Faction, With<UnitType>>,
+    buildings: Query<(&Faction, &BuildingType), With<BuildingPos>>,
+    player_faction: Option<Res<PlayerFaction>>,
+    mut text_q: Query<&mut Text, With<ObjectivesText>>,
+) {
+    if *screen != ClientScreen::InMission {
+        return;
+    }
+    let Ok(mut text) = text_q.single_mut() else { return };
+
+    let Some(mission_entity) = active.current_mission_entity else {
+        **text = String::new();
+        return;
+    };
+    let Ok(mission) = missions.get(mission_entity) else {
+        **text = String::new();
+        return;
+    };
+
+    let remaining = (mission.deadline - mission.elapsed).max(0.0);
+    let remaining_secs = remaining as u32;
+
+    let player_f = player_faction.as_ref().map(|pf| pf.0.clone());
+    let enemy_f = Some(mission.opponent_faction.clone());
+
+    let obj_text = match &mission.mission_type {
+        MissionType::Control => {
+            format!("HOLD THE CENTER\n{} seconds remaining", remaining_secs)
+        }
+        MissionType::Assault => {
+            // Count enemy buildings alive
+            let enemy_buildings = buildings
+                .iter()
+                .filter(|(f, _)| Some((*f).clone()) == enemy_f)
+                .count();
+            format!("DESTROY ENEMY HQ\nbuildings remaining: {}", enemy_buildings)
+        }
+        MissionType::Defense => {
+            format!("SURVIVE\n{} seconds remaining", remaining_secs)
+        }
+        MissionType::Extraction => {
+            let player_units = units
+                .iter()
+                .filter(|f| Some((*f).clone()) == player_f)
+                .count();
+            format!("EXTRACT UNITS\nget {} units to extraction zone", player_units)
+        }
+        MissionType::Survival => {
+            format!("SURVIVE\n{} seconds remaining", remaining_secs)
+        }
+    };
+
+    **text = obj_text;
+}
+
 // ── Color helpers ──────────────────────────────────────────────────────────────
+
+fn terrain_color_dark(terrain: &cindertide::map::TerrainType) -> Color {
+    use cindertide::map::TerrainType;
+    match terrain {
+        TerrainType::Grass     => Color::srgb(0.12, 0.22, 0.08),
+        TerrainType::Road      => Color::srgb(0.18, 0.18, 0.18),
+        TerrainType::Forest    => Color::srgb(0.05, 0.15, 0.05),
+        TerrainType::Rubble    => Color::srgb(0.22, 0.20, 0.18),
+        TerrainType::Mud       => Color::srgb(0.20, 0.13, 0.06),
+        TerrainType::Corrupted => Color::srgb(0.28, 0.04, 0.28),
+        _                      => Color::srgb(0.20, 0.20, 0.20),
+    }
+}
 
 fn terrain_color(terrain: &cindertide::map::TerrainType) -> Color {
     use cindertide::map::TerrainType;

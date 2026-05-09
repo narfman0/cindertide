@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use serde::{Serialize, Deserialize};
 use crate::mapgen::MissionType;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -23,13 +24,54 @@ pub struct CampaignRun {
     pub complete: bool,
 }
 
-#[derive(Resource, Debug, Clone, Default)]
+#[derive(Resource, Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GlobalProgress {
     pub combine_beaten: bool,
     pub ironborn_beaten: bool,
     pub handler_unlocked: bool,
     pub handler_beaten: bool,
+    #[serde(skip)]
     pub first_beaten: Option<PlayableFaction>,
+}
+
+/// Path to the player's progress file.
+fn progress_path() -> std::path::PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    std::path::PathBuf::from(home).join(".cindertide").join("progress.toml")
+}
+
+/// Save `GlobalProgress` to `~/.cindertide/progress.toml`.
+pub fn save_progress(progress: &GlobalProgress) {
+    let path = progress_path();
+    if let Some(parent) = path.parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            eprintln!("save_progress: failed to create dir: {e}");
+            return;
+        }
+    }
+    match toml::to_string(progress) {
+        Ok(content) => {
+            if let Err(e) = std::fs::write(&path, content) {
+                eprintln!("save_progress: failed to write {}: {e}", path.display());
+            }
+        }
+        Err(e) => eprintln!("save_progress: serialization failed: {e}"),
+    }
+}
+
+/// Load `GlobalProgress` from `~/.cindertide/progress.toml`, returning default on any error.
+pub fn load_progress() -> GlobalProgress {
+    let path = progress_path();
+    match std::fs::read_to_string(&path) {
+        Ok(content) => match toml::from_str::<GlobalProgress>(&content) {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("load_progress: parse error: {e}");
+                GlobalProgress::default()
+            }
+        },
+        Err(_) => GlobalProgress::default(),
+    }
 }
 
 fn faction_sequence(faction: &PlayableFaction) -> [MissionType; 5] {
