@@ -74,6 +74,7 @@ fn main() {
         .init_resource::<NetIdCounter>()
         .init_resource::<RemoteGameState>()
         .init_resource::<ModelAssets>()
+        .init_resource::<EditorEnteredFromGame>()
         .insert_resource(MinimapTimer(0.0))
         .insert_resource(NetBroadcastTimer(0.0))
         .add_systems(Startup, setup_scene)
@@ -93,6 +94,7 @@ fn main() {
         .add_systems(Update, sync_selection_rings)
         .add_systems(Update, update_drag_rect)
         .add_systems(Update, handle_keyboard_commands)
+        .add_systems(Update, handle_paused_menu_input)
         .add_systems(Update, handle_editor_keyboard)
         .add_systems(Update, update_paused_overlay)
         .add_systems(Update, handle_ui_input)
@@ -149,10 +151,46 @@ enum EditorTool {
     PlaceUnit,
     PlaceBuilding,
     Erase,
+    ScriptEditor,
 }
 
 impl Default for EditorTool {
     fn default() -> Self { EditorTool::PaintTerrain }
+}
+
+// ── Script editor data types ──────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct ScriptEventDef {
+    id: String,
+    trigger_type: String,    // "time" or "beat"
+    trigger_seconds: f32,    // used if trigger_type == "time"
+    trigger_beat: String,    // used if trigger_type == "beat" e.g. "LastStand"
+    actions: Vec<ActionDef>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct ActionDef {
+    action_type: String,  // "dialogue", "spawn_units", "objective", "win_mission", "lose_mission"
+    text: String,         // for dialogue / objective
+    faction: String,      // for spawn_units
+    unit_type: String,    // for spawn_units
+    count: u32,
+    x: i32,
+    y: i32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum ScriptField {
+    TriggerSeconds,
+    TriggerBeat,
+    ActionType,
+    ActionText,
+    ActionFaction,
+    ActionUnitType,
+    ActionCount,
+    ActionX,
+    ActionY,
 }
 
 /// Terrain types cycled in paint mode (right-click).
@@ -200,6 +238,12 @@ struct EditorState {
     building_type_idx: usize,
     /// Timer for double-press Del confirm (seconds since first press).
     del_confirm_timer: Option<f32>,
+    // Script editor state
+    script_events: Vec<ScriptEventDef>,
+    script_selected: usize,
+    script_action_selected: usize,
+    script_editing_field: Option<ScriptField>,
+    script_field_buffer: String,
 }
 
 impl Default for EditorState {
@@ -211,6 +255,11 @@ impl Default for EditorState {
             unit_type_idx: 0,
             building_type_idx: 0,
             del_confirm_timer: None,
+            script_events: Vec::new(),
+            script_selected: 0,
+            script_action_selected: 0,
+            script_editing_field: None,
+            script_field_buffer: String::new(),
         }
     }
 }
@@ -262,6 +311,8 @@ struct SavedMap {
     loss_override: Option<String>,
     #[serde(default)]
     mission_index_override: Option<usize>,
+    #[serde(default)]
+    script_events: Vec<ScriptEventDef>,
 }
 
 // ── Components ──────────────────────────────────────────────────────────────
@@ -584,6 +635,10 @@ fn load_model_assets(mut model_assets: ResMut<ModelAssets>) {
 #[derive(Resource, Default)]
 struct RemoteGameState(Option<NetGameState>);
 
+/// When true, the editor was entered from a paused game — Escape returns to InMission.
+#[derive(Resource, Default)]
+struct EditorEnteredFromGame(bool);
+
 /// Stable u64 IDs assigned to entities for network identity.
 #[derive(Component)]
 struct NetId(u64);
@@ -850,8 +905,10 @@ fn setup_ui(mut commands: Commands) {
         parent.spawn((
             Node {
                 position_type: PositionType::Absolute,
-                left: Val::Percent(40.0),
+                left: Val::Percent(30.0),
                 top: Val::Px(12.0),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
                 ..default()
             },
             Visibility::Hidden,
@@ -864,6 +921,12 @@ fn setup_ui(mut commands: Commands) {
                     font_size: 36.0,
                     ..default()
                 },
+            ));
+            p.spawn((
+                Node { margin: UiRect::top(Val::Px(8.0)), ..default() },
+                Text::new("[Space] Resume   [E] Open Editor   [Q] Quit to Title"),
+                TextColor(Color::srgb(0.75, 0.75, 0.75)),
+                TextFont { font_size: 16.0, ..default() },
             ));
         });
 
@@ -2027,33 +2090,35 @@ fn handle_keyboard_commands(
         return;
     }
 
-    // A key — toggle attack-move mode
-    if keys.just_pressed(KeyCode::KeyA) {
-        attack_move_mode.0 = !attack_move_mode.0;
-        info!("Attack-move mode: {}", attack_move_mode.0);
-    }
-
-    // S key — stop all selected units
-    if keys.just_pressed(KeyCode::KeyS) {
-        for &unit_entity in &selected.entities {
-            commands.entity(unit_entity)
-                .remove::<MoveTarget>()
-                .remove::<MoveProgress>()
-                .remove::<PlayerAttackOrder>()
-                .remove::<AttackMoveOrder>()
-                .remove::<HoldPosition>();
+    // A key — toggle attack-move mode (only when not paused)
+    if !paused.0 {
+        if keys.just_pressed(KeyCode::KeyA) {
+            attack_move_mode.0 = !attack_move_mode.0;
+            info!("Attack-move mode: {}", attack_move_mode.0);
         }
-    }
 
-    // H key — hold position (attack in range but do not move)
-    if keys.just_pressed(KeyCode::KeyH) {
-        for &unit_entity in &selected.entities {
-            commands.entity(unit_entity)
-                .remove::<MoveTarget>()
-                .remove::<MoveProgress>()
-                .remove::<PlayerAttackOrder>()
-                .remove::<AttackMoveOrder>()
-                .insert(HoldPosition);
+        // S key — stop all selected units
+        if keys.just_pressed(KeyCode::KeyS) {
+            for &unit_entity in &selected.entities {
+                commands.entity(unit_entity)
+                    .remove::<MoveTarget>()
+                    .remove::<MoveProgress>()
+                    .remove::<PlayerAttackOrder>()
+                    .remove::<AttackMoveOrder>()
+                    .remove::<HoldPosition>();
+            }
+        }
+
+        // H key — hold position (attack in range but do not move)
+        if keys.just_pressed(KeyCode::KeyH) {
+            for &unit_entity in &selected.entities {
+                commands.entity(unit_entity)
+                    .remove::<MoveTarget>()
+                    .remove::<MoveProgress>()
+                    .remove::<PlayerAttackOrder>()
+                    .remove::<AttackMoveOrder>()
+                    .insert(HoldPosition);
+            }
         }
     }
 
@@ -2114,6 +2179,83 @@ fn handle_keyboard_commands(
                 SelectionRing { unit_entity: next_entity },
             ));
         }
+    }
+}
+
+/// Handle E (open editor) and Q (quit to title) while paused.
+fn handle_paused_menu_input(
+    mut commands: Commands,
+    keys: Res<ButtonInput<KeyCode>>,
+    paused: Res<Paused>,
+    mut screen: ResMut<ClientScreen>,
+    mut time: ResMut<Time<Virtual>>,
+    mut visual_entities: ResMut<VisualEntities>,
+    mut editor: ResMut<EditorState>,
+    mut entered_from_game: ResMut<EditorEnteredFromGame>,
+    tiles: Query<(Entity, &Tile)>,
+    rendered_tiles: Query<Entity, With<RenderedTile>>,
+) {
+    if !paused.0 {
+        return;
+    }
+    if !matches!(*screen, ClientScreen::InMission | ClientScreen::TestMission { .. }) {
+        return;
+    }
+
+    // E — open editor from paused game
+    if keys.just_pressed(KeyCode::KeyE) {
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let save_path = format!("assets/maps/ingame_edit_{}.toml", timestamp);
+        let saved_tiles: Vec<SavedTile> = tiles.iter().map(|(_, t)| SavedTile {
+            x: t.pos.x,
+            y: t.pos.y,
+            terrain: terrain_type_name(&t.terrain_type).to_string(),
+        }).collect();
+        let map = SavedMap {
+            tiles: saved_tiles,
+            units: Vec::new(),
+            buildings: Vec::new(),
+            mission_type: None,
+            player_faction: None,
+            opponent_faction: None,
+            deadline_seconds: None,
+            briefing_override: None,
+            win_override: None,
+            loss_override: None,
+            mission_index_override: None,
+            script_events: Vec::new(),
+        };
+        if let Ok(content) = toml::to_string(&map) {
+            let _ = std::fs::create_dir_all("assets/maps");
+            let _ = std::fs::write(&save_path, content);
+        }
+        *editor = EditorState::default();
+        entered_from_game.0 = true;
+        // Clear rendered tile visuals so editor can re-render
+        for entity in &rendered_tiles {
+            commands.entity(entity).despawn();
+        }
+        visual_entities.units.clear();
+        visual_entities.buildings.clear();
+        *screen = ClientScreen::MapEditor;
+        // Don't unpause the Paused resource — handle_editor_keyboard will see entered_from_game=true
+        // and restore paused on Escape
+    }
+
+    // Q — quit to title while paused
+    if keys.just_pressed(KeyCode::KeyQ) {
+        entered_from_game.0 = false;
+        visual_entities.units.clear();
+        visual_entities.buildings.clear();
+        commands.queue(move |world: &mut World| {
+            cindertide::wipe_world_entities(world);
+            *world.resource_mut::<Paused>() = Paused(false);
+            world.resource_mut::<Time<Virtual>>().unpause();
+            *world.resource_mut::<ClientScreen>() = ClientScreen::Title;
+        });
     }
 }
 
@@ -2238,6 +2380,9 @@ fn handle_editor_keyboard(
     buildings_full: Query<(&BuildingPos, &Faction, &BuildingType)>,
     mut visual_entities: ResMut<VisualEntities>,
     rendered_tiles: Query<Entity, With<RenderedTile>>,
+    mut entered_from_game: ResMut<EditorEnteredFromGame>,
+    mut paused: ResMut<Paused>,
+    mut time_virtual: ResMut<Time<Virtual>>,
 ) {
     if *screen != ClientScreen::MapEditor {
         return;
@@ -2245,8 +2390,22 @@ fn handle_editor_keyboard(
 
     let ctrl = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
 
-    // Escape → return to title
+    // Escape → return to title (or back to paused game if entered from game)
     if keys.just_pressed(KeyCode::Escape) {
+        if editor.script_editing_field.is_some() {
+            // Cancel field editing
+            editor.script_editing_field = None;
+            editor.script_field_buffer.clear();
+            return;
+        }
+        if entered_from_game.0 {
+            // Return to paused in-game state
+            entered_from_game.0 = false;
+            paused.0 = true;
+            time_virtual.pause();
+            *screen = ClientScreen::InMission;
+            return;
+        }
         // Wipe editor entities and return to title
         for (entity, _) in &tiles {
             commands.entity(entity).despawn();
@@ -2260,11 +2419,178 @@ fn handle_editor_keyboard(
         return;
     }
 
+    // Handle script editor field input mode
+    if editor.script_editing_field.is_some() {
+        // Accept character input into buffer
+        // Handle backspace
+        if keys.just_pressed(KeyCode::Backspace) {
+            editor.script_field_buffer.pop();
+        }
+        // Handle Enter to confirm
+        if keys.just_pressed(KeyCode::Enter) {
+            let buf = editor.script_field_buffer.clone();
+            let field = editor.script_editing_field.take().unwrap();
+            let sel = editor.script_selected;
+            let action_sel = editor.script_action_selected;
+            if sel < editor.script_events.len() {
+                match field {
+                    ScriptField::TriggerSeconds => {
+                        if let Ok(v) = buf.parse::<f32>() {
+                            editor.script_events[sel].trigger_seconds = v;
+                        }
+                    }
+                    ScriptField::TriggerBeat => {
+                        editor.script_events[sel].trigger_beat = buf.clone();
+                    }
+                    ScriptField::ActionType => {
+                        if action_sel < editor.script_events[sel].actions.len() {
+                            editor.script_events[sel].actions[action_sel].action_type = buf.clone();
+                        }
+                    }
+                    ScriptField::ActionText => {
+                        if action_sel < editor.script_events[sel].actions.len() {
+                            editor.script_events[sel].actions[action_sel].text = buf.clone();
+                        }
+                    }
+                    ScriptField::ActionFaction => {
+                        if action_sel < editor.script_events[sel].actions.len() {
+                            editor.script_events[sel].actions[action_sel].faction = buf.clone();
+                        }
+                    }
+                    ScriptField::ActionUnitType => {
+                        if action_sel < editor.script_events[sel].actions.len() {
+                            editor.script_events[sel].actions[action_sel].unit_type = buf.clone();
+                        }
+                    }
+                    ScriptField::ActionCount => {
+                        if let Ok(v) = buf.parse::<u32>() {
+                            if action_sel < editor.script_events[sel].actions.len() {
+                                editor.script_events[sel].actions[action_sel].count = v;
+                            }
+                        }
+                    }
+                    ScriptField::ActionX => {
+                        if let Ok(v) = buf.parse::<i32>() {
+                            if action_sel < editor.script_events[sel].actions.len() {
+                                editor.script_events[sel].actions[action_sel].x = v;
+                            }
+                        }
+                    }
+                    ScriptField::ActionY => {
+                        if let Ok(v) = buf.parse::<i32>() {
+                            if action_sel < editor.script_events[sel].actions.len() {
+                                editor.script_events[sel].actions[action_sel].y = v;
+                            }
+                        }
+                    }
+                }
+            }
+            editor.script_field_buffer.clear();
+        }
+        // Note: character typing is handled via a separate approach — we just use keyboard keys
+        // Since we can't get char events here easily, we rely on the user pressing keys
+        // and map them to characters in a limited way
+        return;
+    }
+
     // Tool selection
     if keys.just_pressed(KeyCode::Digit1) { editor.tool = EditorTool::PaintTerrain; }
     if keys.just_pressed(KeyCode::Digit2) { editor.tool = EditorTool::PlaceUnit; }
     if keys.just_pressed(KeyCode::Digit3) { editor.tool = EditorTool::PlaceBuilding; }
     if keys.just_pressed(KeyCode::Digit4) { editor.tool = EditorTool::Erase; }
+    if keys.just_pressed(KeyCode::Digit5) { editor.tool = EditorTool::ScriptEditor; }
+
+    // ── Script editor controls (only when tool 5 is active) ───────────────────
+    if editor.tool == EditorTool::ScriptEditor {
+        let event_count = editor.script_events.len();
+
+        // Up/Down: navigate event list
+        if keys.just_pressed(KeyCode::ArrowUp) && editor.script_selected > 0 {
+            editor.script_selected -= 1;
+            editor.script_action_selected = 0;
+        }
+        if keys.just_pressed(KeyCode::ArrowDown) && event_count > 0 && editor.script_selected < event_count - 1 {
+            editor.script_selected += 1;
+            editor.script_action_selected = 0;
+        }
+
+        // N: create new event
+        if keys.just_pressed(KeyCode::KeyN) && !ctrl {
+            let id = format!("event_{}", editor.script_events.len());
+            editor.script_events.push(ScriptEventDef {
+                id,
+                trigger_type: "time".to_string(),
+                trigger_seconds: 0.0,
+                trigger_beat: String::new(),
+                actions: vec![ActionDef {
+                    action_type: "dialogue".to_string(),
+                    text: String::new(),
+                    ..Default::default()
+                }],
+            });
+            editor.script_selected = editor.script_events.len() - 1;
+            editor.script_action_selected = 0;
+        }
+
+        // Delete: remove selected event
+        if keys.just_pressed(KeyCode::Delete) && event_count > 0 && editor.script_selected < event_count {
+            let sel = editor.script_selected;
+            editor.script_events.remove(sel);
+            let new_count = editor.script_events.len();
+            if sel > 0 && sel >= new_count {
+                editor.script_selected = new_count.saturating_sub(1);
+            }
+            editor.script_action_selected = 0;
+        }
+
+        // Enter: start editing trigger field for selected event
+        if keys.just_pressed(KeyCode::Enter) && editor.script_selected < event_count {
+            let sel = editor.script_selected;
+            let (ttype, tseconds, tbeat) = {
+                let ev = &editor.script_events[sel];
+                (ev.trigger_type.clone(), ev.trigger_seconds, ev.trigger_beat.clone())
+            };
+            if ttype == "beat" {
+                editor.script_field_buffer = tbeat;
+                editor.script_editing_field = Some(ScriptField::TriggerBeat);
+            } else {
+                editor.script_field_buffer = tseconds.to_string();
+                editor.script_editing_field = Some(ScriptField::TriggerSeconds);
+            }
+        }
+
+        // A: add new action to selected event
+        if keys.just_pressed(KeyCode::KeyA) && editor.script_selected < event_count {
+            let sel = editor.script_selected;
+            editor.script_events[sel].actions.push(ActionDef {
+                action_type: "dialogue".to_string(),
+                ..Default::default()
+            });
+        }
+
+        // X: remove selected action
+        if keys.just_pressed(KeyCode::KeyX) && editor.script_selected < event_count {
+            let sel = editor.script_selected;
+            let action_sel = editor.script_action_selected;
+            let action_count = editor.script_events[sel].actions.len();
+            if action_sel < action_count {
+                editor.script_events[sel].actions.remove(action_sel);
+                let new_count = editor.script_events[sel].actions.len();
+                if action_sel > 0 && action_sel >= new_count {
+                    editor.script_action_selected = new_count.saturating_sub(1);
+                }
+            }
+        }
+
+        // Tab: cycle selected action
+        if keys.just_pressed(KeyCode::Tab) && editor.script_selected < event_count {
+            let sel = editor.script_selected;
+            let action_count = editor.script_events[sel].actions.len();
+            if action_count > 0 {
+                editor.script_action_selected = (editor.script_action_selected + 1) % action_count;
+            }
+        }
+    }
 
     // Cycle faction (F)
     if keys.just_pressed(KeyCode::KeyF) {
@@ -2345,6 +2671,7 @@ fn handle_editor_keyboard(
             win_override: None,
             loss_override: None,
             mission_index_override: None,
+            script_events: editor.script_events.clone(),
         };
 
         let timestamp = std::time::SystemTime::now()
@@ -2401,6 +2728,11 @@ fn handle_editor_keyboard(
                         spawn_editor_building(&mut commands, sb.x, sb.y, faction, &sb.building_type);
                     }
 
+                    // Load script events
+                    editor.script_events = map.script_events.clone();
+                    editor.script_selected = 0;
+                    editor.script_action_selected = 0;
+
                     info!("editor: loaded map from {path}");
                 }
             }
@@ -2440,6 +2772,7 @@ fn handle_editor_keyboard(
             win_override: None,
             loss_override: None,
             mission_index_override: None,
+            script_events: editor.script_events.clone(),
         };
 
         let timestamp = std::time::SystemTime::now()
@@ -2447,6 +2780,25 @@ fn handle_editor_keyboard(
             .map(|d| d.as_secs())
             .unwrap_or(0);
         let path = format!("assets/maps/test_{}.toml", timestamp);
+
+        // Also write a script TOML if there are any events
+        let script_events_clone = editor.script_events.clone();
+        let script_path = if !script_events_clone.is_empty() {
+            let sp = format!("assets/scripts/editor_{}.toml", timestamp);
+            let script_toml = script_events_to_toml(&script_events_clone);
+            if let Err(e) = std::fs::create_dir_all("assets/scripts") {
+                eprintln!("editor: failed to create scripts dir: {e}");
+                None
+            } else if let Err(e) = std::fs::write(&sp, &script_toml) {
+                eprintln!("editor: failed to save script: {e}");
+                None
+            } else {
+                info!("editor: saved script to {sp}");
+                Some(sp)
+            }
+        } else {
+            None
+        };
 
         if let Ok(content) = toml::to_string(&map) {
             if let Err(e) = std::fs::create_dir_all("assets/maps") {
@@ -2495,6 +2847,17 @@ fn handle_editor_keyboard(
                     cindertide::setup_demo_scenario(world, &player, mission_index);
                     cindertide::bake_navmesh(world);
 
+                    // Load the editor script if one was written
+                    if let Some(ref sp) = script_path {
+                        // Extract just the stem (filename without path prefix and .toml)
+                        let script_name = std::path::Path::new(sp)
+                            .file_stem()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or("editor_0")
+                            .to_string();
+                        world.resource_mut::<ScriptState>().load_script(&script_name);
+                    }
+
                     world.resource_mut::<ActiveRun>().current_mission_entity = Some(mission_entity);
                     *world.resource_mut::<GameState>() = GameState::InMission;
                     world.insert_resource(PlayerFaction(player));
@@ -2518,6 +2881,55 @@ fn find_latest_custom_map() -> Option<String> {
         .collect();
     entries.sort_by_key(|e| std::cmp::Reverse(e.file_name()));
     entries.first().map(|e| e.path().to_string_lossy().to_string())
+}
+
+/// Serialize a list of ScriptEventDef to TOML matching the combine_m0.toml format.
+fn script_events_to_toml(events: &[ScriptEventDef]) -> String {
+    let mut out = String::new();
+    for ev in events {
+        out.push_str("[[events]]\n");
+        out.push_str(&format!("id = {:?}\n", ev.id));
+        if ev.trigger_type == "beat" {
+            out.push_str(&format!(
+                "trigger = {{ type = \"condition\", condition = \"beat\", beat_id = {:?} }}\n",
+                ev.trigger_beat
+            ));
+        } else {
+            out.push_str(&format!(
+                "trigger = {{ type = \"time\", seconds = {} }}\n",
+                ev.trigger_seconds
+            ));
+        }
+        out.push_str("actions = [\n");
+        for action in &ev.actions {
+            match action.action_type.as_str() {
+                "dialogue" => {
+                    out.push_str(&format!("  {{ type = \"dialogue\", text = {:?} }},\n", action.text));
+                }
+                "spawn_units" => {
+                    out.push_str(&format!(
+                        "  {{ type = \"spawn_units\", faction = {:?}, unit_type = {:?}, count = {}, x = {}, y = {} }},\n",
+                        action.faction, action.unit_type, action.count, action.x, action.y
+                    ));
+                }
+                "objective" => {
+                    out.push_str(&format!("  {{ type = \"objective\", text = {:?} }},\n", action.text));
+                }
+                "change_objective" => {
+                    out.push_str(&format!("  {{ type = \"change_objective\", text = {:?} }},\n", action.text));
+                }
+                "win_mission" => {
+                    out.push_str("  { type = \"win_mission\" },\n");
+                }
+                "lose_mission" => {
+                    out.push_str("  { type = \"lose_mission\" },\n");
+                }
+                _ => {}
+            }
+        }
+        out.push_str("]\n\n");
+    }
+    out
 }
 
 fn terrain_type_name(t: &cindertide::map::TerrainType) -> &'static str {
@@ -2737,6 +3149,9 @@ fn handle_editor_mouse_input(
                 }
             }
         }
+        EditorTool::ScriptEditor => {
+            // Mouse clicks are not used in script editor mode
+        }
     }
 }
 
@@ -2764,11 +3179,74 @@ fn update_editor_panel(
 
     let Ok(mut text) = panel_text.single_mut() else { return };
 
+    // Script editor mode: show script event list
+    if editor.tool == EditorTool::ScriptEditor {
+        let mut lines = vec!["-- SCRIPT EDITOR --".to_string()];
+        lines.push("[N] Add Event  [Del] Remove".to_string());
+        lines.push(String::new());
+        for (i, ev) in editor.script_events.iter().enumerate() {
+            let trigger_str = if ev.trigger_type == "beat" {
+                format!("beat:{}", ev.trigger_beat)
+            } else {
+                format!("t={:.1}s", ev.trigger_seconds)
+            };
+            let first_action = ev.actions.first().map(|a| a.action_type.as_str()).unwrap_or("(none)");
+            let marker = if i == editor.script_selected { "> " } else { "  " };
+            lines.push(format!("{}[{}] {} -> {}", marker, i, trigger_str, first_action));
+        }
+        if editor.script_events.is_empty() {
+            lines.push("  (no events)".to_string());
+        }
+        lines.push(String::new());
+        if editor.script_selected < editor.script_events.len() {
+            let ev = &editor.script_events[editor.script_selected];
+            lines.push("-- Selected Event --".to_string());
+            let trigger_str = if ev.trigger_type == "beat" {
+                format!("beat / {}", ev.trigger_beat)
+            } else {
+                format!("time / {:.1}s", ev.trigger_seconds)
+            };
+            lines.push(format!("Trigger: {trigger_str}"));
+            lines.push("Actions:".to_string());
+            for (j, action) in ev.actions.iter().enumerate() {
+                let marker = if j == editor.script_action_selected { ">" } else { " " };
+                let action_str = match action.action_type.as_str() {
+                    "spawn_units" => format!(
+                        "{} SpawnUnits {} {} x{} @({},{})",
+                        marker, action.faction, action.unit_type, action.count, action.x, action.y
+                    ),
+                    "dialogue" => format!("{} Dialogue: {}", marker, &action.text[..action.text.len().min(20)]),
+                    "objective" | "change_objective" => format!("{} Objective: {}", marker, &action.text[..action.text.len().min(20)]),
+                    other => format!("{} {}", marker, other),
+                };
+                lines.push(format!("  {}", action_str));
+            }
+            if ev.actions.is_empty() {
+                lines.push("  (no actions)".to_string());
+            }
+            if let Some(ref field) = editor.script_editing_field {
+                lines.push(String::new());
+                lines.push(format!("Editing {:?}:", field));
+                lines.push(format!("> {}_", editor.script_field_buffer));
+                lines.push("[Enter] confirm  [Esc] cancel".to_string());
+            } else {
+                lines.push(String::new());
+                lines.push("[Enter] edit trigger".to_string());
+                lines.push("[A] add action  [X] del action".to_string());
+                lines.push("[Tab] cycle action".to_string());
+                lines.push("[Up/Down] nav events".to_string());
+            }
+        }
+        **text = lines.join("\n");
+        return;
+    }
+
     let tool_name = match &editor.tool {
         EditorTool::PaintTerrain => "1: Paint Terrain",
         EditorTool::PlaceUnit    => "2: Place Unit",
         EditorTool::PlaceBuilding => "3: Place Building",
         EditorTool::Erase        => "4: Erase",
+        EditorTool::ScriptEditor => "5: Script Editor",
     };
 
     let terrain_name = terrain_type_name(&EDITOR_TERRAINS[editor.terrain_idx]);
@@ -2792,7 +3270,7 @@ fn update_editor_panel(
     };
 
     **text = format!(
-        "Tool: {tool_name}\n\nTerrain: {terrain_name}\nFaction: {faction_name_str}\nUnit: {unit_name}\nBuilding: {building_name}\n\nTiles: {tile_count}\nUnits: {unit_count}\nBuildings: {building_count}\n\n--- Keys ---\n1-4: tool\nF: faction\nT: unit type\nB: building\nR-click: cycle terrain\nDel: clear map\nCtrl+S: save\nCtrl+L: load\nP: test mission\nEsc: exit{del_hint}"
+        "Tool: {tool_name}\n\nTerrain: {terrain_name}\nFaction: {faction_name_str}\nUnit: {unit_name}\nBuilding: {building_name}\n\nTiles: {tile_count}\nUnits: {unit_count}\nBuildings: {building_count}\n\n--- Keys ---\n1-5: tool\nF: faction\nT: unit type\nB: building\nR-click: cycle terrain\nDel: clear map\nCtrl+S: save\nCtrl+L: load\nP: test mission\nEsc: exit{del_hint}"
     );
 }
 
