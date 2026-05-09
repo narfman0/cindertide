@@ -46,6 +46,12 @@ x = 118
 y = 10
 
 [[buildings]]
+faction = "Covenant"
+building_type = "CommandBunker"
+x = 10
+y = 70
+
+[[buildings]]
 faction = "Hollow"
 building_type = "CommandBunker"
 x = 115
@@ -71,51 +77,171 @@ y = 13
 
 [[script_events]]
 id = "miscalculation"
-trigger = { type = "time", seconds = 0.0 }
-actions = [
-  { type = "dialogue", text = "I have miscalculated. It is awake but it is not contained — not grateful — not cooperative. Destroy the Ancient One's core before it fully manifests. Everything depends on this." },
-  { type = "objective", text = "Destroy the Ancient One's core" },
-]
+trigger_type = "time"
+trigger_seconds = 0.0
+trigger_beat = ""
+
+[[script_events.actions]]
+action_type = "dialogue"
+text = "I have miscalculated. It is awake but it is not contained — not grateful — not cooperative. Destroy the Ancient One's core before it fully manifests. Everything depends on this."
+faction = ""
+unit_type = ""
+count = 0
+x = 0
+y = 0
+
+[[script_events.actions]]
+action_type = "objective"
+text = "Destroy the Ancient One's core"
+faction = ""
+unit_type = ""
+count = 0
+x = 0
+y = 0
 
 [[script_events]]
 id = "hollow_counterattack"
-trigger = { type = "time", seconds = 120.0 }
-actions = [
-  { type = "spawn_units", faction = "Hollow", unit_type = "Riflemen", count = 4, x = 95, y = 40 },
-  { type = "spawn_units", faction = "Hollow", unit_type = "HeavyArmor", count = 1, x = 100, y = 33 },
-  { type = "dialogue", text = "The Hollow surge in its defense — it is directing them. I didn't account for tactical intelligence at this scale." },
-]
+trigger_type = "time"
+trigger_seconds = 120.0
+trigger_beat = ""
+
+[[script_events.actions]]
+action_type = "spawn_units"
+text = ""
+faction = "Hollow"
+unit_type = "Riflemen"
+count = 4
+x = 95
+y = 40
+
+[[script_events.actions]]
+action_type = "spawn_units"
+text = ""
+faction = "Hollow"
+unit_type = "HeavyArmor"
+count = 1
+x = 100
+y = 33
+
+[[script_events.actions]]
+action_type = "dialogue"
+text = "The Hollow surge in its defense — it is directing them. I didn't account for tactical intelligence at this scale."
+faction = ""
+unit_type = ""
+count = 0
+x = 0
+y = 0
 
 [[script_events]]
 id = "this_is_what_i_wanted"
-trigger = { type = "time", seconds = 300.0 }
-actions = [
-  { type = "dialogue", text = "This is what I wanted... wasn't it? I spent nineteen years building toward this moment. I should feel triumph. I don't feel triumph." },
-]
+trigger_type = "time"
+trigger_seconds = 300.0
+trigger_beat = ""
+
+[[script_events.actions]]
+action_type = "dialogue"
+text = "This is what I wanted... wasn't it? I spent nineteen years building toward this moment. I should feel triumph. I don't feel triumph."
+faction = ""
+unit_type = ""
+count = 0
+x = 0
+y = 0
 
 [[script_events]]
 id = "desperate_reinforcements"
-trigger = { type = "condition", condition = "beat", beat_id = "LastStand" }
-actions = [
-  { type = "spawn_units", faction = "Covenant", unit_type = "HeavyWeapons", count = 3, x = 8, y = 65 },
-  { type = "spawn_units", faction = "Covenant", unit_type = "Riflemen", count = 3, x = 10, y = 68 },
-  { type = "dialogue", text = "I won't let it end like this. Not after nineteen years. Every remaining asset — deploy everything. We finish this now." },
-]
+trigger_type = "beat"
+trigger_seconds = 0.0
+trigger_beat = "LastStand"
+
+[[script_events.actions]]
+action_type = "spawn_units"
+text = ""
+faction = "Covenant"
+unit_type = "HeavyWeapons"
+count = 3
+x = 8
+y = 65
+
+[[script_events.actions]]
+action_type = "spawn_units"
+text = ""
+faction = "Covenant"
+unit_type = "Riflemen"
+count = 3
+x = 10
+y = 68
+
+[[script_events.actions]]
+action_type = "dialogue"
+text = "I won't let it end like this. Not after nineteen years. Every remaining asset — deploy everything. We finish this now."
+faction = ""
+unit_type = ""
+count = 0
+x = 0
+y = 0
 
 [[script_events]]
 id = "final_revelation"
-trigger = { type = "time", seconds = 600.0 }
-actions = [
-  { type = "spawn_units", faction = "Hollow", unit_type = "Riflemen", count = 8, x = 110, y = 20 },
-  { type = "spawn_units", faction = "Hollow", unit_type = "HeavyArmor", count = 3, x = 112, y = 15 },
-  { type = "spawn_units", faction = "Hollow", unit_type = "HeavyWeapons", count = 2, x = 108, y = 25 },
-  { type = "dialogue", text = "It planned further ahead than I did. Every site, every engagement, every death — it was already composing something from what it found. And I was the last piece it needed." },
-]
+trigger_type = "time"
+trigger_seconds = 600.0
+trigger_beat = ""
+
+[[script_events.actions]]
+action_type = "spawn_units"
+text = ""
+faction = "Hollow"
+unit_type = "Riflemen"
+count = 8
+x = 110
+y = 20
+
+[[script_events.actions]]
+action_type = "spawn_units"
+text = ""
+faction = "Hollow"
+unit_type = "HeavyArmor"
+count = 3
+x = 112
+y = 15
+
+[[script_events.actions]]
+action_type = "spawn_units"
+text = ""
+faction = "Hollow"
+unit_type = "HeavyWeapons"
+count = 2
+x = 108
+y = 25
+
+[[script_events.actions]]
+action_type = "dialogue"
+text = "It planned further ahead than I did. Every site, every engagement, every death — it was already composing something from what it found. And I was the last piece it needed."
+faction = ""
+unit_type = ""
+count = 0
+x = 0
+y = 0
 
 [[script_events]]
 id = "last_entry"
-trigger = { type = "time", seconds = 2400.0 }
-actions = [
-  { type = "dialogue", text = "This is the last entry I will make as myself." },
-  { type = "change_objective", text = "End this — whatever the cost" },
-]
+trigger_type = "time"
+trigger_seconds = 2400.0
+trigger_beat = ""
+
+[[script_events.actions]]
+action_type = "dialogue"
+text = "This is the last entry I will make as myself."
+faction = ""
+unit_type = ""
+count = 0
+x = 0
+y = 0
+
+[[script_events.actions]]
+action_type = "change_objective"
+text = "End this — whatever the cost"
+faction = ""
+unit_type = ""
+count = 0
+x = 0
+y = 0

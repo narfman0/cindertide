@@ -65,19 +65,19 @@ y = 10
 
 [[buildings]]
 faction = "Ironborn"
-building_type = "Foundry"
+building_type = "CommandBunker"
 x = 10
 y = 42
 
 [[buildings]]
 faction = "Ironborn"
-building_type = "Scrapyard"
+building_type = "Foundry"
 x = 13
 y = 42
 
 [[buildings]]
 faction = "Ironborn"
-building_type = "Barracks"
+building_type = "Scrapyard"
 x = 10
 y = 39
 
@@ -107,42 +107,138 @@ y = 13
 
 [[script_events]]
 id = "forge_master_dialogue"
-trigger = { type = "time", seconds = 0.0 }
-actions = [
-  { type = "dialogue", text = "Corp thinks paperwork makes it theirs. We're going to remind them who actually built this place. Hold the foundry." },
-  { type = "objective", text = "Hold the Foundry against the Combine assault" },
-]
+trigger_type = "time"
+trigger_seconds = 0.0
+trigger_beat = ""
+
+[[script_events.actions]]
+action_type = "dialogue"
+text = "Corp thinks paperwork makes it theirs. We're going to remind them who actually built this place. Hold the foundry."
+faction = ""
+unit_type = ""
+count = 0
+x = 0
+y = 0
+
+[[script_events.actions]]
+action_type = "objective"
+text = "Hold the Foundry against the Combine assault"
+faction = ""
+unit_type = ""
+count = 0
+x = 0
+y = 0
 
 [[script_events]]
 id = "combine_probe"
-trigger = { type = "time", seconds = 45.0 }
-actions = [
-  { type = "spawn_units", faction = "Combine", unit_type = "Riflemen", count = 3, x = 55, y = 26 },
-  { type = "dialogue", text = "Corp infantry probing the perimeter. Show them the cost of trespass." },
-]
+trigger_type = "time"
+trigger_seconds = 45.0
+trigger_beat = ""
+
+[[script_events.actions]]
+action_type = "spawn_units"
+text = ""
+faction = "Combine"
+unit_type = "Riflemen"
+count = 3
+x = 55
+y = 26
+
+[[script_events.actions]]
+action_type = "dialogue"
+text = "Corp infantry probing the perimeter. Show them the cost of trespass."
+faction = ""
+unit_type = ""
+count = 0
+x = 0
+y = 0
 
 [[script_events]]
 id = "armored_push"
-trigger = { type = "time", seconds = 150.0 }
-actions = [
-  { type = "spawn_units", faction = "Combine", unit_type = "HeavyArmor", count = 1, x = 60, y = 22 },
-  { type = "spawn_units", faction = "Combine", unit_type = "Riflemen", count = 2, x = 58, y = 26 },
-  { type = "dialogue", text = "They brought armor. Get the welders on that hull — we've cracked tougher shells than that." },
-]
+trigger_type = "time"
+trigger_seconds = 150.0
+trigger_beat = ""
+
+[[script_events.actions]]
+action_type = "spawn_units"
+text = ""
+faction = "Combine"
+unit_type = "HeavyArmor"
+count = 1
+x = 60
+y = 22
+
+[[script_events.actions]]
+action_type = "spawn_units"
+text = ""
+faction = "Combine"
+unit_type = "Riflemen"
+count = 2
+x = 58
+y = 26
+
+[[script_events.actions]]
+action_type = "dialogue"
+text = "They brought armor. Get the welders on that hull — we've cracked tougher shells than that."
+faction = ""
+unit_type = ""
+count = 0
+x = 0
+y = 0
 
 [[script_events]]
 id = "emergency_repair"
-trigger = { type = "condition", condition = "beat", beat_id = "LastStand" }
-actions = [
-  { type = "dialogue", text = "Emergency Repair Protocol activated — all crews to the foundry walls! We hold or we lose everything we built!" },
-  { type = "change_objective", text = "Emergency: hold the foundry perimeter" },
-]
+trigger_type = "beat"
+trigger_seconds = 0.0
+trigger_beat = "LastStand"
+
+[[script_events.actions]]
+action_type = "dialogue"
+text = "Emergency Repair Protocol activated — all crews to the foundry walls! We hold or we lose everything we built!"
+faction = ""
+unit_type = ""
+count = 0
+x = 0
+y = 0
+
+[[script_events.actions]]
+action_type = "change_objective"
+text = "Emergency: hold the foundry perimeter"
+faction = ""
+unit_type = ""
+count = 0
+x = 0
+y = 0
 
 [[script_events]]
 id = "final_assault"
-trigger = { type = "time", seconds = 240.0 }
-actions = [
-  { type = "spawn_units", faction = "Combine", unit_type = "Riflemen", count = 5, x = 62, y = 24 },
-  { type = "spawn_units", faction = "Combine", unit_type = "HeavyArmor", count = 1, x = 60, y = 18 },
-  { type = "dialogue", text = "Full Corp assault on the foundry! This is their big push — if we break them here, they don't come back." },
-]
+trigger_type = "time"
+trigger_seconds = 240.0
+trigger_beat = ""
+
+[[script_events.actions]]
+action_type = "spawn_units"
+text = ""
+faction = "Combine"
+unit_type = "Riflemen"
+count = 5
+x = 62
+y = 24
+
+[[script_events.actions]]
+action_type = "spawn_units"
+text = ""
+faction = "Combine"
+unit_type = "HeavyArmor"
+count = 1
+x = 60
+y = 18
+
+[[script_events.actions]]
+action_type = "dialogue"
+text = "Full Corp assault on the foundry! This is their big push — if we break them here, they don't come back."
+faction = ""
+unit_type = ""
+count = 0
+x = 0
+y = 0

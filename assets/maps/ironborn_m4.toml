@@ -46,6 +46,12 @@ x = 118
 y = 10
 
 [[buildings]]
+faction = "Ironborn"
+building_type = "CommandBunker"
+x = 10
+y = 70
+
+[[buildings]]
 faction = "Combine"
 building_type = "CommandBunker"
 x = 115
@@ -71,35 +77,123 @@ y = 13
 
 [[script_events]]
 id = "we_end_this"
-trigger = { type = "time", seconds = 0.0 }
-actions = [
-  { type = "dialogue", text = "We end this here. The Combine Command Bunker falls today. Raze it to the ground." },
-  { type = "objective", text = "Destroy the Combine Command Bunker" },
-]
+trigger_type = "time"
+trigger_seconds = 0.0
+trigger_beat = ""
+
+[[script_events.actions]]
+action_type = "dialogue"
+text = "We end this here. The Combine Command Bunker falls today. Raze it to the ground."
+faction = ""
+unit_type = ""
+count = 0
+x = 0
+y = 0
+
+[[script_events.actions]]
+action_type = "objective"
+text = "Destroy the Combine Command Bunker"
+faction = ""
+unit_type = ""
+count = 0
+x = 0
+y = 0
 
 [[script_events]]
 id = "defense_wave"
-trigger = { type = "time", seconds = 150.0 }
-actions = [
-  { type = "spawn_units", faction = "Combine", unit_type = "Riflemen", count = 4, x = 100, y = 35 },
-  { type = "spawn_units", faction = "Combine", unit_type = "HeavyArmor", count = 1, x = 105, y = 28 },
-  { type = "dialogue", text = "Corp rallying their defense — they're not giving up that bunker without a fight." },
-]
+trigger_type = "time"
+trigger_seconds = 150.0
+trigger_beat = ""
+
+[[script_events.actions]]
+action_type = "spawn_units"
+text = ""
+faction = "Combine"
+unit_type = "Riflemen"
+count = 4
+x = 100
+y = 35
+
+[[script_events.actions]]
+action_type = "spawn_units"
+text = ""
+faction = "Combine"
+unit_type = "HeavyArmor"
+count = 1
+x = 105
+y = 28
+
+[[script_events.actions]]
+action_type = "dialogue"
+text = "Corp rallying their defense — they're not giving up that bunker without a fight."
+faction = ""
+unit_type = ""
+count = 0
+x = 0
+y = 0
 
 [[script_events]]
 id = "veteran_squad"
-trigger = { type = "condition", condition = "beat", beat_id = "LastStand" }
-actions = [
-  { type = "spawn_units", faction = "Ironborn", unit_type = "HeavyArmor", count = 2, x = 8, y = 65 },
-  { type = "dialogue", text = "Veteran armor crews arriving from the depot. They heard the call. Get them into the fight!" },
-]
+trigger_type = "beat"
+trigger_seconds = 0.0
+trigger_beat = "LastStand"
+
+[[script_events.actions]]
+action_type = "spawn_units"
+text = ""
+faction = "Ironborn"
+unit_type = "HeavyArmor"
+count = 2
+x = 8
+y = 65
+
+[[script_events.actions]]
+action_type = "dialogue"
+text = "Veteran armor crews arriving from the depot. They heard the call. Get them into the fight!"
+faction = ""
+unit_type = ""
+count = 0
+x = 0
+y = 0
 
 [[script_events]]
 id = "massive_reinforcement"
-trigger = { type = "time", seconds = 600.0 }
-actions = [
-  { type = "spawn_units", faction = "Ironborn", unit_type = "Riflemen", count = 5, x = 8, y = 62 },
-  { type = "spawn_units", faction = "Combine", unit_type = "Riflemen", count = 6, x = 112, y = 20 },
-  { type = "spawn_units", faction = "Combine", unit_type = "HeavyWeapons", count = 2, x = 110, y = 15 },
-  { type = "dialogue", text = "Both sides throwing everything into this fight. This is the moment the Ironfields was built for — push through!" },
-]
+trigger_type = "time"
+trigger_seconds = 600.0
+trigger_beat = ""
+
+[[script_events.actions]]
+action_type = "spawn_units"
+text = ""
+faction = "Ironborn"
+unit_type = "Riflemen"
+count = 5
+x = 8
+y = 62
+
+[[script_events.actions]]
+action_type = "spawn_units"
+text = ""
+faction = "Combine"
+unit_type = "Riflemen"
+count = 6
+x = 112
+y = 20
+
+[[script_events.actions]]
+action_type = "spawn_units"
+text = ""
+faction = "Combine"
+unit_type = "HeavyWeapons"
+count = 2
+x = 110
+y = 15
+
+[[script_events.actions]]
+action_type = "dialogue"
+text = "Both sides throwing everything into this fight. This is the moment the Ironfields was built for — push through!"
+faction = ""
+unit_type = ""
+count = 0
+x = 0
+y = 0

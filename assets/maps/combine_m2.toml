@@ -77,36 +77,132 @@ y = 13
 
 [[script_events]]
 id = "setup_dialogue"
-trigger = { type = "time", seconds = 0.0 }
-actions = [
-  { type = "dialogue", text = "Hold this crossing. The Ironborn cannot be allowed to advance any further. Fifteen minutes — that's all we need." },
-  { type = "objective", text = "Hold the crossing for 15 minutes" },
-]
+trigger_type = "time"
+trigger_seconds = 0.0
+trigger_beat = ""
+
+[[script_events.actions]]
+action_type = "dialogue"
+text = "Hold this crossing. The Ironborn cannot be allowed to advance any further. Fifteen minutes — that's all we need."
+faction = ""
+unit_type = ""
+count = 0
+x = 0
+y = 0
+
+[[script_events.actions]]
+action_type = "objective"
+text = "Hold the crossing for 15 minutes"
+faction = ""
+unit_type = ""
+count = 0
+x = 0
+y = 0
 
 [[script_events]]
 id = "first_crossing"
-trigger = { type = "time", seconds = 30.0 }
-actions = [
-  { type = "spawn_units", faction = "Ironborn", unit_type = "Riflemen", count = 3, x = 65, y = 20 },
-  { type = "dialogue", text = "Ironborn infantry at the crossing — open fire!" },
-]
+trigger_type = "time"
+trigger_seconds = 30.0
+trigger_beat = ""
+
+[[script_events.actions]]
+action_type = "spawn_units"
+text = ""
+faction = "Ironborn"
+unit_type = "Riflemen"
+count = 3
+x = 65
+y = 20
+
+[[script_events.actions]]
+action_type = "dialogue"
+text = "Ironborn infantry at the crossing — open fire!"
+faction = ""
+unit_type = ""
+count = 0
+x = 0
+y = 0
 
 [[script_events]]
 id = "armored_assault"
-trigger = { type = "time", seconds = 120.0 }
-actions = [
-  { type = "spawn_units", faction = "Ironborn", unit_type = "HeavyArmor", count = 1, x = 67, y = 18 },
-  { type = "spawn_units", faction = "Ironborn", unit_type = "Riflemen", count = 2, x = 65, y = 22 },
-  { type = "dialogue", text = "Armor at the crossing! Get something heavy on that tank before it clears the bridge!" },
-]
+trigger_type = "time"
+trigger_seconds = 120.0
+trigger_beat = ""
+
+[[script_events.actions]]
+action_type = "spawn_units"
+text = ""
+faction = "Ironborn"
+unit_type = "HeavyArmor"
+count = 1
+x = 67
+y = 18
+
+[[script_events.actions]]
+action_type = "spawn_units"
+text = ""
+faction = "Ironborn"
+unit_type = "Riflemen"
+count = 2
+x = 65
+y = 22
+
+[[script_events.actions]]
+action_type = "dialogue"
+text = "Armor at the crossing! Get something heavy on that tank before it clears the bridge!"
+faction = ""
+unit_type = ""
+count = 0
+x = 0
+y = 0
 
 [[script_events]]
 id = "final_wave"
-trigger = { type = "time", seconds = 300.0 }
-actions = [
-  { type = "spawn_units", faction = "Ironborn", unit_type = "HeavyArmor", count = 2, x = 66, y = 16 },
-  { type = "spawn_units", faction = "Ironborn", unit_type = "Riflemen", count = 4, x = 68, y = 20 },
-  { type = "spawn_units", faction = "Ironborn", unit_type = "HeavyWeapons", count = 1, x = 64, y = 22 },
-  { type = "dialogue", text = "Full assault on the crossing! Hold your ground — reinforcements are ten minutes out!" },
-  { type = "change_objective", text = "Hold the crossing under full Ironborn assault" },
-]
+trigger_type = "time"
+trigger_seconds = 300.0
+trigger_beat = ""
+
+[[script_events.actions]]
+action_type = "spawn_units"
+text = ""
+faction = "Ironborn"
+unit_type = "HeavyArmor"
+count = 2
+x = 66
+y = 16
+
+[[script_events.actions]]
+action_type = "spawn_units"
+text = ""
+faction = "Ironborn"
+unit_type = "Riflemen"
+count = 4
+x = 68
+y = 20
+
+[[script_events.actions]]
+action_type = "spawn_units"
+text = ""
+faction = "Ironborn"
+unit_type = "HeavyWeapons"
+count = 1
+x = 64
+y = 22
+
+[[script_events.actions]]
+action_type = "dialogue"
+text = "Full assault on the crossing! Hold your ground — reinforcements are ten minutes out!"
+faction = ""
+unit_type = ""
+count = 0
+x = 0
+y = 0
+
+[[script_events.actions]]
+action_type = "change_objective"
+text = "Hold the crossing under full Ironborn assault"
+faction = ""
+unit_type = ""
+count = 0
+x = 0
+y = 0

@@ -107,41 +107,129 @@ y = 7
 
 [[script_events]]
 id = "everything_proceeds"
-trigger = { type = "time", seconds = 0.0 }
-actions = [
-  { type = "dialogue", text = "Everything proceeds as planned. The incursion is a side effect of the ritual — manageable, contained. Survive, gather data, and do not interfere with the process." },
-  { type = "objective", text = "Survive the ritual's side effects" },
-]
+trigger_type = "time"
+trigger_seconds = 0.0
+trigger_beat = ""
+
+[[script_events.actions]]
+action_type = "dialogue"
+text = "Everything proceeds as planned. The incursion is a side effect of the ritual — manageable, contained. Survive, gather data, and do not interfere with the process."
+faction = ""
+unit_type = ""
+count = 0
+x = 0
+y = 0
+
+[[script_events.actions]]
+action_type = "objective"
+text = "Survive the ritual's side effects"
+faction = ""
+unit_type = ""
+count = 0
+x = 0
+y = 0
 
 [[script_events]]
 id = "first_scouts"
-trigger = { type = "time", seconds = 30.0 }
-actions = [
-  { type = "spawn_units", faction = "Hollow", unit_type = "Riflemen", count = 2, x = 50, y = 26 },
-  { type = "dialogue", text = "Hollow scouts at the perimeter. Expected. Engage as needed." },
-]
+trigger_type = "time"
+trigger_seconds = 30.0
+trigger_beat = ""
+
+[[script_events.actions]]
+action_type = "spawn_units"
+text = ""
+faction = "Hollow"
+unit_type = "Riflemen"
+count = 2
+x = 50
+y = 26
+
+[[script_events.actions]]
+action_type = "dialogue"
+text = "Hollow scouts at the perimeter. Expected. Engage as needed."
+faction = ""
+unit_type = ""
+count = 0
+x = 0
+y = 0
 
 [[script_events]]
 id = "hollow_wave"
-trigger = { type = "time", seconds = 120.0 }
-actions = [
-  { type = "spawn_units", faction = "Hollow", unit_type = "Riflemen", count = 4, x = 55, y = 24 },
-  { type = "dialogue", text = "The ritual is drawing them in larger numbers. Fascinating. Hold the perimeter." },
-]
+trigger_type = "time"
+trigger_seconds = 120.0
+trigger_beat = ""
+
+[[script_events.actions]]
+action_type = "spawn_units"
+text = ""
+faction = "Hollow"
+unit_type = "Riflemen"
+count = 4
+x = 55
+y = 24
+
+[[script_events.actions]]
+action_type = "dialogue"
+text = "The ritual is drawing them in larger numbers. Fascinating. Hold the perimeter."
+faction = ""
+unit_type = ""
+count = 0
+x = 0
+y = 0
 
 [[script_events]]
 id = "data_gathering"
-trigger = { type = "time", seconds = 300.0 }
-actions = [
-  { type = "dialogue", text = "Fascinating... the ritual is working. The resonance is building exactly as modeled. A few minutes more." },
-]
+trigger_type = "time"
+trigger_seconds = 300.0
+trigger_beat = ""
+
+[[script_events.actions]]
+action_type = "dialogue"
+text = "Fascinating... the ritual is working. The resonance is building exactly as modeled. A few minutes more."
+faction = ""
+unit_type = ""
+count = 0
+x = 0
+y = 0
 
 [[script_events]]
 id = "hollow_surge"
-trigger = { type = "time", seconds = 500.0 }
-actions = [
-  { type = "spawn_units", faction = "Hollow", unit_type = "Riflemen", count = 5, x = 52, y = 22 },
-  { type = "spawn_units", faction = "Hollow", unit_type = "HeavyWeapons", count = 1, x = 55, y = 18 },
-  { type = "dialogue", text = "Surge pattern exceeds projections. Adjust defensive positioning — do not let them reach the ritual site." },
-  { type = "change_objective", text = "Hold the perimeter until the ritual completes" },
-]
+trigger_type = "time"
+trigger_seconds = 500.0
+trigger_beat = ""
+
+[[script_events.actions]]
+action_type = "spawn_units"
+text = ""
+faction = "Hollow"
+unit_type = "Riflemen"
+count = 5
+x = 52
+y = 22
+
+[[script_events.actions]]
+action_type = "spawn_units"
+text = ""
+faction = "Hollow"
+unit_type = "HeavyWeapons"
+count = 1
+x = 55
+y = 18
+
+[[script_events.actions]]
+action_type = "dialogue"
+text = "Surge pattern exceeds projections. Adjust defensive positioning — do not let them reach the ritual site."
+faction = ""
+unit_type = ""
+count = 0
+x = 0
+y = 0
+
+[[script_events.actions]]
+action_type = "change_objective"
+text = "Hold the perimeter until the ritual completes"
+faction = ""
+unit_type = ""
+count = 0
+x = 0
+y = 0

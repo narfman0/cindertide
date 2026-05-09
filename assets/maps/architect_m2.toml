@@ -47,8 +47,14 @@ y = 10
 
 [[buildings]]
 faction = "Covenant"
-building_type = "Workshop"
+building_type = "CommandBunker"
 x = 10
+y = 70
+
+[[buildings]]
+faction = "Covenant"
+building_type = "Workshop"
+x = 13
 y = 70
 
 [[buildings]]
@@ -77,33 +83,105 @@ y = 13
 
 [[script_events]]
 id = "beyond_control"
-trigger = { type = "time", seconds = 0.0 }
-actions = [
-  { type = "dialogue", text = "They grow beyond my control — temporarily. The Hollow nest must be destroyed before they consume my embedded agents. Move quickly." },
-  { type = "objective", text = "Destroy the Hollow Nest" },
-]
+trigger_type = "time"
+trigger_seconds = 0.0
+trigger_beat = ""
+
+[[script_events.actions]]
+action_type = "dialogue"
+text = "They grow beyond my control — temporarily. The Hollow nest must be destroyed before they consume my embedded agents. Move quickly."
+faction = ""
+unit_type = ""
+count = 0
+x = 0
+y = 0
+
+[[script_events.actions]]
+action_type = "objective"
+text = "Destroy the Hollow Nest"
+faction = ""
+unit_type = ""
+count = 0
+x = 0
+y = 0
 
 [[script_events]]
 id = "hollow_patrol"
-trigger = { type = "time", seconds = 60.0 }
-actions = [
-  { type = "spawn_units", faction = "Hollow", unit_type = "Riflemen", count = 2, x = 80, y = 40 },
-  { type = "dialogue", text = "Hollow patrol in mid-territory. Eliminate them — leave no witnesses to our approach." },
-]
+trigger_type = "time"
+trigger_seconds = 60.0
+trigger_beat = ""
+
+[[script_events.actions]]
+action_type = "spawn_units"
+text = ""
+faction = "Hollow"
+unit_type = "Riflemen"
+count = 2
+x = 80
+y = 40
+
+[[script_events.actions]]
+action_type = "dialogue"
+text = "Hollow patrol in mid-territory. Eliminate them — leave no witnesses to our approach."
+faction = ""
+unit_type = ""
+count = 0
+x = 0
+y = 0
 
 [[script_events]]
 id = "nest_defense_awakens"
-trigger = { type = "time", seconds = 240.0 }
-actions = [
-  { type = "spawn_units", faction = "Hollow", unit_type = "Riflemen", count = 4, x = 105, y = 22 },
-  { type = "spawn_units", faction = "Hollow", unit_type = "HeavyWeapons", count = 1, x = 108, y = 18 },
-  { type = "dialogue", text = "The nest knows we're coming. Its defenders are awakening — push through before they can fully mobilize!" },
-]
+trigger_type = "time"
+trigger_seconds = 240.0
+trigger_beat = ""
+
+[[script_events.actions]]
+action_type = "spawn_units"
+text = ""
+faction = "Hollow"
+unit_type = "Riflemen"
+count = 4
+x = 105
+y = 22
+
+[[script_events.actions]]
+action_type = "spawn_units"
+text = ""
+faction = "Hollow"
+unit_type = "HeavyWeapons"
+count = 1
+x = 108
+y = 18
+
+[[script_events.actions]]
+action_type = "dialogue"
+text = "The nest knows we're coming. Its defenders are awakening — push through before they can fully mobilize!"
+faction = ""
+unit_type = ""
+count = 0
+x = 0
+y = 0
 
 [[script_events]]
 id = "contingency_assets"
-trigger = { type = "condition", condition = "beat", beat_id = "LastStand" }
-actions = [
-  { type = "spawn_units", faction = "Covenant", unit_type = "HeavyWeapons", count = 2, x = 8, y = 65 },
-  { type = "dialogue", text = "Deploying contingency assets. I prepared for this possibility. Heavy teams inbound — do not waste them." },
-]
+trigger_type = "beat"
+trigger_seconds = 0.0
+trigger_beat = "LastStand"
+
+[[script_events.actions]]
+action_type = "spawn_units"
+text = ""
+faction = "Covenant"
+unit_type = "HeavyWeapons"
+count = 2
+x = 8
+y = 65
+
+[[script_events.actions]]
+action_type = "dialogue"
+text = "Deploying contingency assets. I prepared for this possibility. Heavy teams inbound — do not waste them."
+faction = ""
+unit_type = ""
+count = 0
+x = 0
+y = 0
