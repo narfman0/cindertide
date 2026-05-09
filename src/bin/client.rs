@@ -37,6 +37,10 @@ use cindertide::{
     game::GamePlugin,
 };
 use std::collections::{HashMap, HashSet};
+use std::io::{Read as IoRead, Write};
+use std::net::{TcpListener, TcpStream};
+use std::sync::{Arc, Mutex};
+use std::sync::mpsc::{self, Receiver, Sender};
 use serde::{Serialize, Deserialize};
 
 fn main() {
@@ -63,7 +67,11 @@ fn main() {
         .init_resource::<TechPanelVisible>()
         .init_resource::<FogOfWar>()
         .init_resource::<AudioEventQueue>()
+        .init_resource::<MultiplayerRole>()
+        .init_resource::<NetIdCounter>()
+        .init_resource::<RemoteGameState>()
         .insert_resource(MinimapTimer(0.0))
+        .insert_resource(NetBroadcastTimer(0.0))
         .add_systems(Startup, setup_scene)
         .add_systems(Startup, setup_ui)
         .add_systems(Startup, load_narrative)
@@ -99,6 +107,8 @@ fn main() {
         .add_systems(Update, handle_unit_death)
         .add_systems(Update, tick_death_flashes)
         .add_systems(Update, process_audio_events)
+        .add_systems(Update, host_broadcast_game_state)
+        .add_systems(Update, receive_net_messages)
         .run();
 }
 
@@ -107,6 +117,7 @@ fn main() {
 #[derive(Resource, Debug, Clone, PartialEq)]
 enum ClientScreen {
     Title,
+    MultiplayerMenu { hosting: bool, ip_input: String },
     FactionPicker { selected: usize },
     Briefing { title: String, briefing: String },
     InMission,
@@ -393,6 +404,225 @@ struct AttackMoveMode(bool);
 /// When true, game logic is paused (uses Bevy's virtual time pause).
 #[derive(Resource, Default)]
 struct Paused(bool);
+
+// ── Multiplayer networking ─────────────────────────────────────────────────────
+
+const LAN_PORT: u16 = 5555;
+const NET_STATE_INTERVAL: f32 = 0.1; // 10Hz game state broadcasts
+
+/// Serializable snapshot of a unit for network transmission.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct NetUnit {
+    id: u64,
+    x: i32,
+    y: i32,
+    faction: String,
+    unit_type: String,
+    hp: f32,
+    hp_max: f32,
+}
+
+/// Serializable snapshot of a building for network transmission.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct NetBuilding {
+    id: u64,
+    x: i32,
+    y: i32,
+    faction: String,
+    building_type: String,
+    hp: f32,
+    hp_max: f32,
+    built: bool,
+}
+
+/// Full game state snapshot sent from host to clients.
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+struct NetGameState {
+    units: Vec<NetUnit>,
+    buildings: Vec<NetBuilding>,
+    mission_status: String,   // "Active", "Won", "Lost"
+    elapsed: f32,
+    deadline: f32,
+}
+
+/// Command sent from joining client to host.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+enum ClientCommand {
+    MoveOrder { unit_ids: Vec<u64>, target_x: i32, target_y: i32 },
+    AttackOrder { unit_ids: Vec<u64>, target_id: u64 },
+    BuildOrder { building_type: String, x: i32, y: i32 },
+}
+
+/// Wraps a command or state in a length-prefixed frame.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+enum NetMessage {
+    State(NetGameState),
+    Command(ClientCommand),
+}
+
+/// Role of this process in a multiplayer session.
+#[derive(Resource, Default, Clone, PartialEq, Debug)]
+enum MultiplayerRole {
+    #[default]
+    None,
+    Host,
+    Client { server_ip: String },
+}
+
+/// Shared channel ends for the networking thread.
+/// `outbox` — messages to send to peers; `inbox` — messages received from peers.
+/// Both are wrapped in `Arc<Mutex<>>` to satisfy Bevy's `Resource: Sync` requirement.
+#[derive(Resource, Clone)]
+struct NetChannels {
+    outbox: Arc<Mutex<Sender<NetMessage>>>,
+    inbox: Arc<Mutex<Receiver<NetMessage>>>,
+}
+
+/// Timer for state broadcast cadence (host only).
+#[derive(Resource)]
+struct NetBroadcastTimer(f32);
+
+/// Latest game state received from host (client only).
+#[derive(Resource, Default)]
+struct RemoteGameState(Option<NetGameState>);
+
+/// Stable u64 IDs assigned to entities for network identity.
+#[derive(Component)]
+struct NetId(u64);
+
+/// Counter for assigning NetIds.
+#[derive(Resource, Default)]
+struct NetIdCounter(u64);
+
+fn next_net_id(counter: &mut NetIdCounter) -> u64 {
+    counter.0 += 1;
+    counter.0
+}
+
+/// Send a length-prefixed JSON message over a TCP stream (non-blocking write).
+fn send_net_message(stream: &mut TcpStream, msg: &NetMessage) -> std::io::Result<()> {
+    let data = serde_json::to_vec(msg).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+    let len = data.len() as u32;
+    stream.write_all(&len.to_be_bytes())?;
+    stream.write_all(&data)?;
+    Ok(())
+}
+
+/// Read one length-prefixed JSON message from a TCP stream (blocking).
+fn read_net_message(stream: &mut TcpStream) -> std::io::Result<NetMessage> {
+    let mut len_buf = [0u8; 4];
+    stream.read_exact(&mut len_buf)?;
+    let len = u32::from_be_bytes(len_buf) as usize;
+    if len > 4 * 1024 * 1024 {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "message too large"));
+    }
+    let mut buf = vec![0u8; len];
+    stream.read_exact(&mut buf)?;
+    serde_json::from_slice(&buf).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+}
+
+/// Spawn a host networking thread: accepts one client and bridges the channels.
+fn spawn_host_thread(tx: Sender<NetMessage>, rx: Arc<Mutex<Receiver<NetMessage>>>) {
+    std::thread::spawn(move || {
+        let listener = match TcpListener::bind(format!("0.0.0.0:{LAN_PORT}")) {
+            Ok(l) => l,
+            Err(e) => {
+                eprintln!("[net/host] bind failed: {e}");
+                return;
+            }
+        };
+        info!("[net/host] listening on port {LAN_PORT}");
+        // Accept one client
+        let (mut stream, addr) = match listener.accept() {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("[net/host] accept failed: {e}");
+                return;
+            }
+        };
+        info!("[net/host] client connected from {addr}");
+        stream.set_nodelay(true).ok();
+        stream.set_read_timeout(Some(std::time::Duration::from_millis(5))).ok();
+
+        let mut stream_write = stream.try_clone().expect("clone stream");
+
+        // Spawn read thread for incoming commands
+        let tx_clone = tx.clone();
+        std::thread::spawn(move || {
+            loop {
+                match read_net_message(&mut stream) {
+                    Ok(msg) => { let _ = tx_clone.send(msg); }
+                    Err(e) if e.kind() == std::io::ErrorKind::TimedOut
+                           || e.kind() == std::io::ErrorKind::WouldBlock => {}
+                    Err(_) => break,
+                }
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+        });
+
+        // Write loop: forward outbox to client
+        loop {
+            let msg = {
+                let rx_guard = rx.lock().unwrap();
+                rx_guard.try_recv().ok()
+            };
+            if let Some(msg) = msg {
+                if send_net_message(&mut stream_write, &msg).is_err() {
+                    break;
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    });
+}
+
+/// Spawn a client networking thread: connects to host and bridges channels.
+fn spawn_client_thread(server_ip: String, tx: Sender<NetMessage>, rx: Arc<Mutex<Receiver<NetMessage>>>) {
+    std::thread::spawn(move || {
+        let addr = format!("{server_ip}:{LAN_PORT}");
+        info!("[net/client] connecting to {addr}");
+        let mut stream = match TcpStream::connect(&addr) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("[net/client] connect failed: {e}");
+                return;
+            }
+        };
+        stream.set_nodelay(true).ok();
+        stream.set_read_timeout(Some(std::time::Duration::from_millis(5))).ok();
+        info!("[net/client] connected to host");
+
+        let mut stream_write = stream.try_clone().expect("clone stream");
+
+        // Spawn read thread for incoming state
+        let tx_clone = tx.clone();
+        std::thread::spawn(move || {
+            loop {
+                match read_net_message(&mut stream) {
+                    Ok(msg) => { let _ = tx_clone.send(msg); }
+                    Err(e) if e.kind() == std::io::ErrorKind::TimedOut
+                           || e.kind() == std::io::ErrorKind::WouldBlock => {}
+                    Err(_) => break,
+                }
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+        });
+
+        // Write loop: forward commands to host
+        loop {
+            let msg = {
+                let rx_guard = rx.lock().unwrap();
+                rx_guard.try_recv().ok()
+            };
+            if let Some(msg) = msg {
+                if send_net_message(&mut stream_write, &msg).is_err() {
+                    break;
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    });
+}
 
 // ── Helper functions ──────────────────────────────────────────────────────────
 
@@ -793,7 +1023,18 @@ fn update_screen_overlay(
             *vis = Visibility::Visible;
             **title = "CINDERTIDE".to_string();
             **body = "a dieselpunk RTS".to_string();
-            **hint = "Press Enter to begin  |  E — Map Editor".to_string();
+            **hint = "Press Enter to begin  |  E — Map Editor  |  M — Multiplayer".to_string();
+        }
+        ClientScreen::MultiplayerMenu { hosting, ip_input } => {
+            *vis = Visibility::Visible;
+            **title = "MULTIPLAYER".to_string();
+            let status = if *hosting {
+                format!("Hosting on port {LAN_PORT}\nWaiting for a player to join…\n\nH — Host  |  J — Join at {}\n\nEsc — Back", ip_input)
+            } else {
+                format!("Join IP: {}\n\nH — Host  |  J — Join\n\nEsc — Back", ip_input)
+            };
+            **body = status;
+            **hint = "H = host on port 5555  |  J = join  |  Enter = start singleplayer".to_string();
         }
         ClientScreen::FactionPicker { selected } => {
             *vis = Visibility::Visible;
@@ -860,6 +1101,7 @@ fn handle_ui_input(
     mut game_state: ResMut<GameState>,
     progress: Res<GlobalProgress>,
     narrative: Option<Res<NarrativeData>>,
+    mut mp_role: ResMut<MultiplayerRole>,
     mut commands: Commands,
 ) {
     // Only handle UI input when not in mission or editor
@@ -875,6 +1117,11 @@ fn handle_ui_input(
         ClientScreen::Title => {
             if enter {
                 *screen = ClientScreen::FactionPicker { selected: 0 };
+            } else if keys.just_pressed(KeyCode::KeyM) {
+                *screen = ClientScreen::MultiplayerMenu {
+                    hosting: false,
+                    ip_input: "127.0.0.1".to_string(),
+                };
             } else if keys.just_pressed(KeyCode::KeyE) {
                 // Enter map editor: wipe world, spawn blank 48×28 grass map
                 commands.queue(|world: &mut World| {
@@ -890,6 +1137,42 @@ fn handle_ui_input(
                     }
                     *world.resource_mut::<ClientScreen>() = ClientScreen::MapEditor;
                 });
+            }
+        }
+
+        ClientScreen::MultiplayerMenu { hosting: _, ip_input } => {
+            if keys.just_pressed(KeyCode::Escape) {
+                *screen = ClientScreen::Title;
+                *mp_role = MultiplayerRole::None;
+            } else if keys.just_pressed(KeyCode::KeyH) {
+                // Host: spawn networking thread and go to faction picker
+                let (tx_in, rx_in) = mpsc::channel::<NetMessage>();
+                let (tx_out, rx_out) = mpsc::channel::<NetMessage>();
+                let rx_out_arc = Arc::new(Mutex::new(rx_out));
+                spawn_host_thread(tx_in.clone(), rx_out_arc);
+                commands.insert_resource(NetChannels {
+                    outbox: Arc::new(Mutex::new(tx_out)),
+                    inbox: Arc::new(Mutex::new(rx_in)),
+                });
+                *mp_role = MultiplayerRole::Host;
+                *screen = ClientScreen::MultiplayerMenu { hosting: true, ip_input: ip_input.clone() };
+            } else if keys.just_pressed(KeyCode::KeyJ) {
+                // Join: connect to IP
+                let ip = ip_input.clone();
+                let (tx_in, rx_in) = mpsc::channel::<NetMessage>();
+                let (tx_out, rx_out) = mpsc::channel::<NetMessage>();
+                let rx_out_arc = Arc::new(Mutex::new(rx_out));
+                spawn_client_thread(ip.clone(), tx_in.clone(), rx_out_arc);
+                commands.insert_resource(NetChannels {
+                    outbox: Arc::new(Mutex::new(tx_out)),
+                    inbox: Arc::new(Mutex::new(rx_in)),
+                });
+                *mp_role = MultiplayerRole::Client { server_ip: ip };
+                // Client goes to faction picker too (will sync from host)
+                *screen = ClientScreen::FactionPicker { selected: 0 };
+            } else if enter {
+                // Enter without hosting = just go to singleplayer faction picker
+                *screen = ClientScreen::FactionPicker { selected: 0 };
             }
         }
 
@@ -1007,6 +1290,8 @@ fn handle_ui_input(
 
         ClientScreen::InMission => {}
         ClientScreen::MapEditor => {}
+        // MultiplayerMenu handled above; this arm exists so the compiler is happy
+        // if we ever reach it again from a re-match (shouldn't happen).
     }
 }
 
@@ -3300,5 +3585,213 @@ fn process_audio_events(mut queue: ResMut<AudioEventQueue>) {
     for event in queue.0.drain(..) {
         trace!("audio event: {:?}", event);
         // TODO: match event { AudioEvent::Combat => play combat_sfx, ... }
+    }
+}
+
+// ── Multiplayer systems ───────────────────────────────────────────────────────
+
+/// Host: every NET_STATE_INTERVAL seconds, serialize world state and broadcast to clients.
+fn host_broadcast_game_state(
+    mp_role: Res<MultiplayerRole>,
+    net_channels: Option<Res<NetChannels>>,
+    time: Res<Time>,
+    mut timer: ResMut<NetBroadcastTimer>,
+    screen: Res<ClientScreen>,
+    units: Query<(Entity, &UnitPos, &Faction, &UnitType, Option<&Health>, Option<&NetId>)>,
+    buildings: Query<(Entity, &BuildingPos, &Faction, &BuildingType, Option<&Health>, Option<&Built>, Option<&NetId>)>,
+    missions: Query<&Mission>,
+    active: Res<ActiveRun>,
+    mut commands: Commands,
+    mut net_id_counter: ResMut<NetIdCounter>,
+) {
+    if *mp_role != MultiplayerRole::Host {
+        return;
+    }
+    let Some(channels) = net_channels else { return };
+    if *screen != ClientScreen::InMission {
+        return;
+    }
+
+    timer.0 += time.delta_secs();
+    if timer.0 < NET_STATE_INTERVAL {
+        return;
+    }
+    timer.0 = 0.0;
+
+    // Assign NetIds to entities that don't have one yet
+    let mut newly_assigned: Vec<(Entity, u64)> = Vec::new();
+    for (entity, _, _, _, _, net_id) in &units {
+        if net_id.is_none() {
+            let id = next_net_id(&mut net_id_counter);
+            newly_assigned.push((entity, id));
+        }
+    }
+    for (entity, _, _, _, _, _, net_id) in &buildings {
+        if net_id.is_none() {
+            let id = next_net_id(&mut net_id_counter);
+            newly_assigned.push((entity, id));
+        }
+    }
+    for (entity, id) in newly_assigned {
+        commands.entity(entity).insert(NetId(id));
+    }
+
+    // Build state snapshot
+    let net_units: Vec<NetUnit> = units.iter().filter_map(|(_, pos, faction, utype, health, net_id)| {
+        let id = net_id.map(|n| n.0).unwrap_or(0);
+        Some(NetUnit {
+            id,
+            x: pos.pos.x,
+            y: pos.pos.y,
+            faction: format!("{:?}", faction),
+            unit_type: format!("{:?}", utype),
+            hp: health.map(|h| h.current).unwrap_or(100.0),
+            hp_max: health.map(|h| h.max).unwrap_or(100.0),
+        })
+    }).collect();
+
+    let net_buildings: Vec<NetBuilding> = buildings.iter().filter_map(|(_, pos, faction, btype, health, built, net_id)| {
+        let id = net_id.map(|n| n.0).unwrap_or(0);
+        Some(NetBuilding {
+            id,
+            x: pos.pos.x,
+            y: pos.pos.y,
+            faction: format!("{:?}", faction),
+            building_type: format!("{:?}", btype),
+            hp: health.map(|h| h.current).unwrap_or(100.0),
+            hp_max: health.map(|h| h.max).unwrap_or(100.0),
+            built: built.is_some(),
+        })
+    }).collect();
+
+    let (mission_status, elapsed, deadline) = if let Some(entity) = active.current_mission_entity {
+        if let Ok(m) = missions.get(entity) {
+            let status = match m.status {
+                MissionStatus::Active => "Active",
+                MissionStatus::Won => "Won",
+                MissionStatus::Lost => "Lost",
+            };
+            (status.to_string(), m.elapsed, m.deadline)
+        } else {
+            ("Active".to_string(), 0.0, 300.0)
+        }
+    } else {
+        ("Active".to_string(), 0.0, 300.0)
+    };
+
+    let state = NetGameState {
+        units: net_units,
+        buildings: net_buildings,
+        mission_status,
+        elapsed,
+        deadline,
+    };
+
+    let _ = channels.outbox.lock().unwrap().send(NetMessage::State(state));
+}
+
+/// Receive messages from network thread and handle them.
+/// - Host: receives ClientCommands and applies them to the ECS.
+/// - Client: receives NetGameState and stores it.
+fn receive_net_messages(
+    mp_role: Res<MultiplayerRole>,
+    net_channels: Option<Res<NetChannels>>,
+    mut remote_state: ResMut<RemoteGameState>,
+    mut commands: Commands,
+    units: Query<(Entity, &NetId, &UnitPos), With<UnitType>>,
+    tiles: Query<&Tile>,
+) {
+    let Some(channels) = net_channels else { return };
+
+    // Drain all pending messages
+    loop {
+        let msg = match channels.inbox.lock().unwrap().try_recv() {
+            Ok(m) => m,
+            Err(_) => break,
+        };
+
+        match msg {
+            NetMessage::State(state) => {
+                // Client stores remote state for rendering
+                if matches!(*mp_role, MultiplayerRole::Client { .. }) {
+                    remote_state.0 = Some(state);
+                }
+            }
+            NetMessage::Command(cmd) => {
+                // Host applies commands from client
+                if *mp_role == MultiplayerRole::Host {
+                    apply_client_command(&mut commands, cmd, &units, &tiles);
+                }
+            }
+        }
+    }
+}
+
+/// Apply a ClientCommand to the ECS (host only).
+fn apply_client_command(
+    commands: &mut Commands,
+    cmd: ClientCommand,
+    units: &Query<(Entity, &NetId, &UnitPos), With<UnitType>>,
+    tiles: &Query<&Tile>,
+) {
+    match cmd {
+        ClientCommand::MoveOrder { unit_ids, target_x, target_y } => {
+            let target_pos = GridPos { x: target_x, y: target_y };
+            let tile_map: HashMap<(i32, i32), cindertide::map::TerrainType> = tiles
+                .iter()
+                .map(|t| ((t.pos.x, t.pos.y), t.terrain_type.clone()))
+                .collect();
+            let max_x = tile_map.keys().map(|(x, _)| *x).max().unwrap_or(40);
+            let max_y = tile_map.keys().map(|(_, y)| *y).max().unwrap_or(25);
+
+            for (entity, net_id, pos) in units.iter() {
+                if unit_ids.contains(&net_id.0) {
+                    let grid = cindertide::map::pathfinding::PathfindingGrid {
+                        width: max_x + 1,
+                        height: max_y + 1,
+                        tiles: tile_map.clone(),
+                        unit_type: cindertide::map::pathfinding::UnitKind::Infantry,
+                    };
+                    if let Some(path) = grid.find_path(pos.pos.clone(), target_pos.clone()) {
+                        commands.entity(entity)
+                            .remove::<HoldPosition>()
+                            .insert(MoveTarget { target: target_pos.clone() })
+                            .insert(MoveProgress { path, current_step: 0, elapsed: 0.0 });
+                    }
+                }
+            }
+        }
+        ClientCommand::AttackOrder { unit_ids, target_id } => {
+            // Find target entity by NetId
+            let target_entity = units.iter()
+                .find(|(_, net_id, _)| net_id.0 == target_id)
+                .map(|(e, _, _)| e);
+            if let Some(target) = target_entity {
+                for (entity, net_id, _) in units.iter() {
+                    if unit_ids.contains(&net_id.0) {
+                        commands.entity(entity)
+                            .remove::<MoveTarget>()
+                            .remove::<MoveProgress>()
+                            .remove::<AttackMoveOrder>()
+                            .remove::<HoldPosition>()
+                            .insert(PlayerAttackOrder { target });
+                    }
+                }
+            }
+        }
+        ClientCommand::BuildOrder { building_type, x, y } => {
+            // Parse building type and spawn placement command
+            let bt = match building_type.as_str() {
+                "Refinery" => Some(BuildingType::Refinery),
+                "Barracks" => Some(BuildingType::Barracks),
+                "CommandBunker" => Some(BuildingType::CommandBunker),
+                "MotorPool" => Some(BuildingType::MotorPool),
+                _ => None,
+            };
+            if let Some(bt) = bt {
+                use cindertide::buildings::BuildingBundle;
+                commands.spawn(BuildingBundle::new(bt, Faction::Ironborn, x, y));
+            }
+        }
     }
 }
