@@ -1819,6 +1819,10 @@ fn handle_mission_select(In(params): In<Option<Value>>, world: &mut World) -> Br
             status: MissionStatus::Active,
             elapsed: 0.0,
             deadline: 300.0,
+            hill_timer: 0.0,
+            hill_threshold: 180.0,
+            assassination_target: None,
+            ffa_check_timer: 0.0,
         })
         .id();
 
@@ -2244,6 +2248,10 @@ fn handle_mission_start(In(params): In<Option<Value>>, world: &mut World) -> Brp
             status: MissionStatus::Active,
             elapsed: 0.0,
             deadline,
+            hill_timer: 0.0,
+            hill_threshold: 180.0,
+            assassination_target: None,
+            ffa_check_timer: 0.0,
         })
         .id()
         .to_bits();
@@ -2294,6 +2302,9 @@ fn parse_mission_type(s: &str) -> Result<mapgen::MissionType, BrpError> {
         "defense" => Ok(mapgen::MissionType::Defense),
         "extraction" => Ok(mapgen::MissionType::Extraction),
         "survival" => Ok(mapgen::MissionType::Survival),
+        "ffa" | "FFA" => Ok(mapgen::MissionType::Ffa),
+        "king-of-the-hill" | "KingOfTheHill" | "koth" => Ok(mapgen::MissionType::KingOfTheHill),
+        "assassination" | "Assassination" => Ok(mapgen::MissionType::Assassination),
         other => Err(BrpError {
             code: -32602,
             message: format!("unknown mission_type: {other}"),

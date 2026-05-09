@@ -3,10 +3,11 @@
 use bevy::prelude::*;
 use crate::map::{Faction, ControlPoint};
 use crate::mapgen::MissionType;
-use crate::buildings::{BuildingType, BuildingPos};
+use crate::buildings::{BuildingType, BuildingPos, Built};
 use crate::combat::{Health, Dead};
-use crate::units::UnitType;
+use crate::units::{UnitType, UnitPos};
 use crate::resources::FactionEntity;
+use std::collections::HashSet;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum MissionStatus {
@@ -25,6 +26,37 @@ pub struct Mission {
     pub status: MissionStatus,
     pub elapsed: f32,
     pub deadline: f32,
+    /// KotH: cumulative seconds the player has held the hill
+    pub hill_timer: f32,
+    /// KotH: seconds needed to win (default 180.0)
+    pub hill_threshold: f32,
+    /// Assassination: which entity is the enemy commander to kill
+    pub assassination_target: Option<Entity>,
+    /// FFA: throttle timer (checks every 2 seconds)
+    pub ffa_check_timer: f32,
+}
+
+impl Mission {
+    pub fn new(mission_type: MissionType, player_faction: Faction, opponent_faction: Faction) -> Self {
+        Self {
+            mission_type,
+            player_faction,
+            opponent_faction,
+            status: MissionStatus::Active,
+            elapsed: 0.0,
+            deadline: 300.0,
+            hill_timer: 0.0,
+            hill_threshold: 180.0,
+            assassination_target: None,
+            ffa_check_timer: 0.0,
+        }
+    }
+}
+
+/// Tag component marking the designated commander unit of a faction.
+#[derive(Component, Debug, Clone)]
+pub struct Commander {
+    pub faction: Faction,
 }
 
 // --- Pure rules ---
@@ -76,6 +108,11 @@ pub fn evaluate_status(
             else if elapsed >= deadline { MissionStatus::Won }
             else if opponent_units_alive == 0 { MissionStatus::Active } // waves continue
             else { MissionStatus::Active }
+        }
+        // These mission types have dedicated systems (ffa/koth/assassination_win_system)
+        // and do not use the evaluate_status path.
+        MissionType::Ffa | MissionType::KingOfTheHill | MissionType::Assassination => {
+            MissionStatus::Active
         }
     }
 }
@@ -154,11 +191,144 @@ pub fn mission_check_system(
     }
 }
 
+// ── FFA win condition ─────────────────────────────────────────────────────────
+
+/// FFA: last faction with at least one living unit OR built building wins.
+/// Throttled to check every 2 seconds.
+pub fn ffa_win_system(
+    time: Res<Time>,
+    mut missions: Query<&mut Mission>,
+    units: Query<(&Faction, Entity), (With<UnitType>, Without<Dead>)>,
+    buildings: Query<(&Faction, Entity), (With<BuildingPos>, With<Built>, Without<Dead>)>,
+) {
+    let dt = time.delta_secs();
+    for mut m in &mut missions {
+        if m.status != MissionStatus::Active {
+            continue;
+        }
+        if m.mission_type != MissionType::Ffa {
+            continue;
+        }
+
+        m.ffa_check_timer += dt;
+        if m.ffa_check_timer < 2.0 {
+            continue;
+        }
+        m.ffa_check_timer = 0.0;
+
+        // Collect factions still alive (have a unit or built building).
+        let mut alive_factions: HashSet<Faction> = HashSet::new();
+        for (f, _) in &units {
+            alive_factions.insert(f.clone());
+        }
+        for (f, _) in &buildings {
+            alive_factions.insert(f.clone());
+        }
+
+        if alive_factions.len() <= 1 {
+            // Determine winner
+            if alive_factions.contains(&m.player_faction) {
+                m.status = MissionStatus::Won;
+            } else {
+                m.status = MissionStatus::Lost;
+            }
+        }
+    }
+}
+
+// ── KotH win condition ────────────────────────────────────────────────────────
+
+/// KotH: player accumulates hill_timer when they have more units in the center
+/// zone (radius 5 tiles) than the enemy. First to hill_threshold seconds wins.
+pub fn koth_win_system(
+    time: Res<Time>,
+    mut missions: Query<&mut Mission>,
+    units: Query<(&Faction, &UnitPos), (With<UnitType>, Without<Dead>)>,
+) {
+    let dt = time.delta_secs();
+    // Hill center for a 128×80 map
+    const HILL_CX: i32 = 64;
+    const HILL_CY: i32 = 40;
+    const HILL_RADIUS: i32 = 5;
+
+    for mut m in &mut missions {
+        if m.status != MissionStatus::Active {
+            continue;
+        }
+        if m.mission_type != MissionType::KingOfTheHill {
+            continue;
+        }
+
+        let mut player_count = 0i32;
+        let mut enemy_count = 0i32;
+
+        for (f, pos) in &units {
+            let dx = (pos.pos.x - HILL_CX).abs();
+            let dy = (pos.pos.y - HILL_CY).abs();
+            if dx <= HILL_RADIUS && dy <= HILL_RADIUS {
+                if f == &m.player_faction {
+                    player_count += 1;
+                } else if f == &m.opponent_faction {
+                    enemy_count += 1;
+                }
+            }
+        }
+
+        if player_count > enemy_count {
+            m.hill_timer += dt;
+        } else if enemy_count > player_count {
+            m.hill_timer = (m.hill_timer - dt * 0.5).max(0.0);
+        }
+        m.hill_timer = m.hill_timer.clamp(0.0, m.hill_threshold);
+
+        if m.hill_timer >= m.hill_threshold {
+            m.status = MissionStatus::Won;
+        }
+    }
+}
+
+// ── Assassination win condition ───────────────────────────────────────────────
+
+/// Assassination: kill the enemy commander to win; losing your own commander
+/// is an instant loss.
+pub fn assassination_win_system(
+    mut missions: Query<&mut Mission>,
+    commanders: Query<(Entity, &Commander, Option<&Dead>)>,
+) {
+    for mut m in &mut missions {
+        if m.status != MissionStatus::Active {
+            continue;
+        }
+        if m.mission_type != MissionType::Assassination {
+            continue;
+        }
+
+        let mut player_commander_dead = false;
+        let mut enemy_commander_dead = false;
+
+        for (_, commander, dead) in &commanders {
+            let is_dead = dead.is_some();
+            if commander.faction == m.player_faction && is_dead {
+                player_commander_dead = true;
+            } else if commander.faction == m.opponent_faction && is_dead {
+                enemy_commander_dead = true;
+            }
+        }
+
+        if enemy_commander_dead {
+            m.status = MissionStatus::Won;
+        } else if player_commander_dead {
+            m.status = MissionStatus::Lost;
+        }
+    }
+}
+
 pub struct MissionPlugin;
 
 impl Plugin for MissionPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Update, mission_check_system);
+        app.add_systems(Update, (ffa_win_system, koth_win_system, assassination_win_system));
     }
 }
 

@@ -28,6 +28,9 @@ pub enum MissionType {
     Defense,
     Extraction,
     Survival,
+    Ffa,
+    KingOfTheHill,
+    Assassination,
 }
 
 #[derive(Debug, Clone)]
@@ -91,6 +94,7 @@ fn map_dims(mt: &MissionType) -> (i32, i32) {
         MissionType::Defense | MissionType::Survival => (80, 52),
         MissionType::Assault | MissionType::Control  => (128, 80),
         MissionType::Extraction                      => (160, 100),
+        MissionType::Ffa | MissionType::KingOfTheHill | MissionType::Assassination => (128, 80),
     }
 }
 
@@ -158,6 +162,14 @@ fn gen_left_half_tile(
             let cx = width / 2;
             let cy = height / 2;
             if (x - cx).abs().max((y - cy).abs()) <= 1 {
+                return TerrainType::Grass;
+            }
+        }
+        MissionType::KingOfTheHill => {
+            // Clear hill zone at map center (radius 5 tiles).
+            let cx = width / 2;
+            let cy = height / 2;
+            if (x - cx).abs().max((y - cy).abs()) <= 5 {
                 return TerrainType::Grass;
             }
         }
@@ -254,8 +266,9 @@ fn gen_left_half_tile(
     let choke_count = {
         let base: i32 = match mission_type {
             MissionType::Defense | MissionType::Survival => 2,
-            MissionType::Assault | MissionType::Control  => 3,
-            MissionType::Extraction                      => 4,
+            MissionType::Assault | MissionType::Control
+            | MissionType::KingOfTheHill | MissionType::Assassination => 3,
+            MissionType::Extraction | MissionType::Ffa   => 4,
         };
         (base + ((seed & 0x3) as i32).min(2)).max(2)
     };
@@ -341,7 +354,8 @@ pub fn generate(width: i32, height: i32, seed: u64, mission_type: MissionType) -
 
     // Base positions — always 2 for symmetric maps, 1 for defense/survival.
     let bases: Vec<GridPos> = match mission_type {
-        MissionType::Assault | MissionType::Control => vec![
+        MissionType::Assault | MissionType::Control
+        | MissionType::KingOfTheHill | MissionType::Assassination => vec![
             GridPos { x: 2, y: height / 2 },
             GridPos { x: width - 3, y: height / 2 },
         ],
@@ -351,6 +365,12 @@ pub fn generate(width: i32, height: i32, seed: u64, mission_type: MissionType) -
             GridPos { x: width - 3, y: height - 3 },
         ],
         MissionType::Survival => vec![GridPos { x: width / 2, y: height / 2 }],
+        MissionType::Ffa => vec![
+            GridPos { x: 2, y: 2 },
+            GridPos { x: width - 3, y: 2 },
+            GridPos { x: 2, y: height - 3 },
+            GridPos { x: width - 3, y: height - 3 },
+        ],
     };
 
     // Choke points: along the centre column at corridor y positions.
@@ -358,8 +378,9 @@ pub fn generate(width: i32, height: i32, seed: u64, mission_type: MissionType) -
     let half_w = width / 2;
     let choke_base: i32 = match mission_type {
         MissionType::Defense | MissionType::Survival => 2,
-        MissionType::Assault | MissionType::Control  => 3,
-        MissionType::Extraction                      => 4,
+        MissionType::Assault | MissionType::Control
+        | MissionType::KingOfTheHill | MissionType::Assassination => 3,
+        MissionType::Extraction | MissionType::Ffa   => 4,
     };
     let choke_count = (choke_base + ((seed & 0x3) as i32).min(2)) as usize;
     let chokepoints: Vec<GridPos> = (0..choke_count)
@@ -385,6 +406,7 @@ pub fn generate(width: i32, height: i32, seed: u64, mission_type: MissionType) -
     let symmetric = matches!(
         mission_type,
         MissionType::Assault | MissionType::Control | MissionType::Extraction
+        | MissionType::KingOfTheHill | MissionType::Assassination
     );
 
     for y in 0..height {

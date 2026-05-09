@@ -1598,6 +1598,10 @@ fn handle_ui_input(
                         status: MissionStatus::Active,
                         elapsed: 0.0,
                         deadline: 300.0,
+                        hill_timer: 0.0,
+                        hill_threshold: 180.0,
+                        assassination_target: None,
+                        ffa_check_timer: 0.0,
                     }).id();
 
                     // Try to load map from file; fall back to procedural demo
@@ -3073,6 +3077,10 @@ fn handle_editor_keyboard(
                         status: MissionStatus::Active,
                         elapsed: 0.0,
                         deadline: 300.0,
+                        hill_timer: 0.0,
+                        hill_threshold: 180.0,
+                        assassination_target: None,
+                        ffa_check_timer: 0.0,
                     }).id();
 
                     // Spawn faction loadouts for both sides.
@@ -4561,6 +4569,9 @@ fn update_mission_objectives(
     buildings: Query<(&Faction, &BuildingType), With<BuildingPos>>,
     player_faction: Option<Res<PlayerFaction>>,
     script_state: Option<Res<ScriptState>>,
+    commanders: Query<(&cindertide::mission::Commander, &cindertide::combat::Health), Without<cindertide::combat::Dead>>,
+    all_factions_units: Query<&Faction, (With<UnitType>, Without<cindertide::combat::Dead>)>,
+    all_factions_buildings: Query<&Faction, (With<BuildingPos>, With<cindertide::buildings::Built>, Without<cindertide::combat::Dead>)>,
     mut text_q: Query<&mut Text, With<ObjectivesText>>,
 ) {
     if !matches!(*screen, ClientScreen::InMission | ClientScreen::TestMission { .. }) {
@@ -4615,6 +4626,45 @@ fn update_mission_objectives(
         }
         MissionType::Survival => {
             format!("SURVIVE\n{} seconds remaining", remaining_secs)
+        }
+        MissionType::Ffa => {
+            // Count distinct factions still alive
+            let mut alive_factions = std::collections::HashSet::new();
+            for f in &all_factions_units {
+                alive_factions.insert(f.clone());
+            }
+            for f in &all_factions_buildings {
+                alive_factions.insert(f.clone());
+            }
+            format!("LAST FACTION STANDING\n{} factions remain", alive_factions.len())
+        }
+        MissionType::KingOfTheHill => {
+            let threshold = mission.hill_threshold;
+            let current = mission.hill_timer;
+            let bar_len = 20usize;
+            let filled = ((current / threshold) * bar_len as f32).round() as usize;
+            let filled = filled.min(bar_len);
+            let bar: String = "#".repeat(filled) + &"-".repeat(bar_len - filled);
+            format!(
+                "HOLD THE HILL\n[{}] {:.0}/{:.0}s",
+                bar, current, threshold
+            )
+        }
+        MissionType::Assassination => {
+            // Check if the player's commander is under attack (health < 50%)
+            let player_cmd_low = if let Some(ref pf) = player_f {
+                commanders
+                    .iter()
+                    .filter(|(cmd, _)| &cmd.faction == pf)
+                    .any(|(_, health)| health.current / health.max < 0.5)
+            } else {
+                false
+            };
+            if player_cmd_low {
+                "ELIMINATE THE ENEMY COMMANDER\n[YOUR COMMANDER IS UNDER ATTACK]".to_string()
+            } else {
+                "ELIMINATE THE ENEMY COMMANDER".to_string()
+            }
         }
     };
 
