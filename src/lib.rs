@@ -1816,6 +1816,9 @@ fn handle_mission_select(In(params): In<Option<Value>>, world: &mut World) -> Br
 
     setup_demo_scenario(world, &map_faction, current_mission_index);
 
+    // Bake NavMesh after tiles are spawned.
+    bake_navmesh(world);
+
     world.resource_mut::<ActiveRun>().current_mission_entity = Some(mission_entity);
     *world.resource_mut::<GameState>() = GameState::InMission;
 
@@ -2921,6 +2924,23 @@ pub fn setup_demo_scenario(world: &mut World, player: &Faction, mission_index: u
             capture_progress: 0.0,
         });
     }
+}
+
+// =============================================================================
+// NavMesh baking helper.
+// =============================================================================
+
+/// Collect all Tile entities, build a NavMesh from them, and insert it as a
+/// world resource. Call this after all tiles have been spawned.
+pub fn bake_navmesh(world: &mut World) {
+    let tile_map: std::collections::HashMap<(i32, i32), map::TerrainType> = {
+        let mut q = world.query::<&map::Tile>();
+        q.iter(world).map(|t| ((t.pos.x, t.pos.y), t.terrain_type.clone())).collect()
+    };
+    let max_x = tile_map.keys().map(|(x, _)| *x).max().unwrap_or(0);
+    let max_y = tile_map.keys().map(|(_, y)| *y).max().unwrap_or(0);
+    let nav = map::NavMesh::build(max_x + 1, max_y + 1, &tile_map);
+    world.insert_resource(nav);
 }
 
 // =============================================================================

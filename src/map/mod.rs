@@ -1,6 +1,8 @@
 use bevy::prelude::*;
 
 pub mod pathfinding;
+pub mod navmesh;
+pub use navmesh::NavMesh;
 
 // Terrain types matching docs/world.md
 #[derive(Debug, Clone, PartialEq)]

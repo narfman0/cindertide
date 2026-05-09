@@ -3,8 +3,11 @@
 // - Routing retreat: broken units move toward HomeBase
 
 use bevy::prelude::*;
+use std::collections::HashSet;
 use crate::combat::{AttackTarget, LastAttackedBy, Routing, Dead, Pinned};
-use crate::units::{UnitPos, HomeBase, MovementSpeed, MoveProgress};
+use crate::units::{UnitPos, HomeBase, MovementSpeed, MoveProgress, UnitKind};
+use crate::map::NavMesh;
+use crate::map::pathfinding::{PathfindingGrid, UnitKind as PfUnitKind};
 
 /// Time after which a LastAttackedBy memory expires.
 pub const THREAT_MEMORY_SECONDS: f32 = 6.0;
@@ -44,25 +47,54 @@ pub fn threat_response_system(
     }
 }
 
-/// Broken (Routing) units move one tile toward HomeBase per (1/speed) seconds.
-/// Bypasses MoveTarget/MoveProgress.path entirely.
+/// Broken (Routing) units use pathfinding to retreat toward HomeBase.
+/// Falls back to step_toward if no NavMesh is available.
 pub fn routing_retreat_system(
     time: Res<Time>,
+    nav: Option<Res<NavMesh>>,
     mut q: Query<
-        (&HomeBase, &mut UnitPos, &MovementSpeed, &mut MoveProgress),
+        (&HomeBase, &mut UnitPos, &MovementSpeed, &mut MoveProgress, Option<&UnitKind>),
         (With<Routing>, Without<Pinned>, Without<Dead>),
     >,
 ) {
     let dt = time.delta_secs();
-    for (home, mut pos, speed, mut progress) in &mut q {
+    for (home, mut pos, speed, mut progress, unit_kind) in &mut q {
+        // Recompute path if path is exhausted or empty and unit isn't home yet.
+        if pos.pos != home.pos && progress.current_step >= progress.path.len() {
+            if let Some(ref nav_res) = nav {
+                let pf_kind = match unit_kind {
+                    Some(UnitKind::Vehicle) => PfUnitKind::Vehicle,
+                    _ => PfUnitKind::Infantry,
+                };
+                let occupied: HashSet<(i32, i32)> = HashSet::new();
+                if let Some(path) = PathfindingGrid::find_path_on_navmesh(
+                    nav_res,
+                    pos.pos.clone(),
+                    home.pos.clone(),
+                    &pf_kind,
+                    &occupied,
+                ) {
+                    progress.path = path;
+                    progress.current_step = 0;
+                }
+            }
+        }
+
         progress.elapsed += dt * speed.tiles_per_second;
         while progress.elapsed >= 1.0 {
             progress.elapsed -= 1.0;
             if pos.pos == home.pos {
                 break;
             }
-            let next = step_toward(&pos.pos, &home.pos);
-            pos.pos = next;
+            // Advance along computed path if available, else fall back to step_toward.
+            if progress.current_step < progress.path.len() {
+                let next = progress.path[progress.current_step].clone();
+                progress.current_step += 1;
+                pos.pos = next;
+            } else {
+                let next = step_toward(&pos.pos, &home.pos);
+                pos.pos = next;
+            }
         }
     }
 }

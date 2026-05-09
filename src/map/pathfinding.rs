@@ -1,6 +1,6 @@
-use std::collections::{BinaryHeap, HashMap};
+use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::cmp::Ordering;
-use crate::map::{GridPos, TerrainType, movement_cost, vehicle_passable};
+use crate::map::{GridPos, TerrainType, movement_cost, vehicle_passable, NavMesh};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum UnitKind {
@@ -112,7 +112,11 @@ impl PathfindingGrid {
             pos: from.clone(),
         });
 
-        let neighbors = [(0, 1), (0, -1), (1, 0), (-1, 0)];
+        // 8-directional neighbors: cardinals + diagonals
+        let neighbors: [(i32, i32); 8] = [
+            (0, 1), (0, -1), (1, 0), (-1, 0),
+            (1, 1), (1, -1), (-1, 1), (-1, -1),
+        ];
 
         while let Some(current) = open.pop() {
             let cur_key = (current.pos.x, current.pos.y);
@@ -138,14 +142,135 @@ impl PathfindingGrid {
                 continue;
             }
 
-            for (dx, dy) in &neighbors {
+            for &(dx, dy) in &neighbors {
                 let nx = current.pos.x + dx;
                 let ny = current.pos.y + dy;
+                let is_diagonal = dx != 0 && dy != 0;
+
+                // Corner-cutting prevention: both adjacent cardinals must be passable.
+                if is_diagonal {
+                    if !self.is_passable(current.pos.x + dx, current.pos.y)
+                        || !self.is_passable(current.pos.x, current.pos.y + dy)
+                    {
+                        continue;
+                    }
+                }
+
                 if !self.is_passable(nx, ny) {
                     continue;
                 }
                 let terrain = self.terrain_at(nx, ny).unwrap();
-                let step_cost = movement_cost(terrain);
+                let base_cost = movement_cost(terrain);
+                let step_cost = if is_diagonal { base_cost * 1.414 } else { base_cost };
+                let tentative_g = current.g + step_cost;
+                let nb_key = (nx, ny);
+
+                if tentative_g < *g_score.get(&nb_key).unwrap_or(&f32::MAX) {
+                    g_score.insert(nb_key, tentative_g);
+                    came_from.insert(nb_key, cur_key);
+                    let h = manhattan(&GridPos { x: nx, y: ny }, &to);
+                    open.push(Node {
+                        f: tentative_g + h,
+                        g: tentative_g,
+                        pos: GridPos { x: nx, y: ny },
+                    });
+                }
+            }
+        }
+
+        None
+    }
+
+    /// A* using a precomputed NavMesh instead of a HashMap tile lookup.
+    /// `occupied` is the set of tiles blocked by other units; the destination
+    /// is always treated as unblocked regardless of whether it appears there.
+    pub fn find_path_on_navmesh(
+        nav: &NavMesh,
+        from: GridPos,
+        to: GridPos,
+        kind: &UnitKind,
+        occupied: &HashSet<(i32, i32)>,
+    ) -> Option<Vec<GridPos>> {
+        if from == to {
+            return Some(vec![from]);
+        }
+
+        if !nav.is_passable(from.x, from.y, kind) || !nav.is_passable(to.x, to.y, kind) {
+            return None;
+        }
+
+        let dest_key = (to.x, to.y);
+
+        let passable = |x: i32, y: i32| -> bool {
+            if !nav.is_passable(x, y, kind) {
+                return false;
+            }
+            let key = (x, y);
+            if occupied.contains(&key) && key != dest_key {
+                return false;
+            }
+            true
+        };
+
+        let mut open: BinaryHeap<Node> = BinaryHeap::new();
+        let mut g_score: HashMap<(i32, i32), f32> = HashMap::new();
+        let mut came_from: HashMap<(i32, i32), (i32, i32)> = HashMap::new();
+
+        let start_key = (from.x, from.y);
+        g_score.insert(start_key, 0.0);
+        open.push(Node {
+            f: manhattan(&from, &to),
+            g: 0.0,
+            pos: from,
+        });
+
+        let neighbors: [(i32, i32); 8] = [
+            (0, 1), (0, -1), (1, 0), (-1, 0),
+            (1, 1), (1, -1), (-1, 1), (-1, -1),
+        ];
+
+        while let Some(current) = open.pop() {
+            let cur_key = (current.pos.x, current.pos.y);
+
+            if current.pos == to {
+                let mut path = Vec::new();
+                let mut key = cur_key;
+                loop {
+                    path.push(GridPos { x: key.0, y: key.1 });
+                    match came_from.get(&key) {
+                        Some(&prev) => key = prev,
+                        None => break,
+                    }
+                }
+                path.reverse();
+                return Some(path);
+            }
+
+            let best_g = *g_score.get(&cur_key).unwrap_or(&f32::MAX);
+            if current.g > best_g {
+                continue;
+            }
+
+            for &(dx, dy) in &neighbors {
+                let nx = current.pos.x + dx;
+                let ny = current.pos.y + dy;
+                let is_diagonal = dx != 0 && dy != 0;
+
+                // Prevent corner-cutting: both adjacent cardinal neighbors must be passable.
+                if is_diagonal {
+                    if !passable(current.pos.x + dx, current.pos.y)
+                        || !passable(current.pos.x, current.pos.y + dy)
+                    {
+                        continue;
+                    }
+                }
+
+                if !passable(nx, ny) {
+                    continue;
+                }
+
+                let base_cost = nav.cost(nx, ny, kind);
+                let step_cost = if is_diagonal { base_cost * 1.414 } else { base_cost };
                 let tentative_g = current.g + step_cost;
                 let nb_key = (nx, ny);
 

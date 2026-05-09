@@ -1335,6 +1335,7 @@ fn handle_ui_input(
                     }).id();
 
                     cindertide::setup_demo_scenario(world, &player, mission_index);
+                    cindertide::bake_navmesh(world);
 
                     world.resource_mut::<ActiveRun>().current_mission_entity = Some(mission_entity);
                     *world.resource_mut::<GameState>() = GameState::InMission;
@@ -1685,11 +1686,11 @@ fn handle_mouse_input(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     selection_rings: Query<Entity, With<SelectionRing>>,
-    tiles: Query<&Tile>,
     mut drag_state: ResMut<DragState>,
     attack_move_mode: Res<AttackMoveMode>,
     screen: Res<ClientScreen>,
     mut audio_queue: ResMut<AudioEventQueue>,
+    nav: Option<Res<cindertide::map::NavMesh>>,
 ) {
     // Only handle mouse input during mission (or test mission)
     if !matches!(*screen, ClientScreen::InMission | ClientScreen::TestMission { .. }) {
@@ -1858,8 +1859,11 @@ fn handle_mouse_input(
             pos.pos.x == gx && pos.pos.y == gy && **faction != player_faction.0
         }).map(|(e, _, _)| e);
 
-        let tile_exists = tiles.iter().any(|t| t.pos.x == gx && t.pos.y == gy);
-        if !tile_exists && enemy_at_target.is_none() {
+        // Verify target is within the map. Use NavMesh bounds when available.
+        let tile_in_bounds = nav.as_ref().map_or(true, |n| {
+            gx >= 0 && gy >= 0 && gx < n.width && gy < n.height
+        });
+        if !tile_in_bounds && enemy_at_target.is_none() {
             return;
         }
 
@@ -1878,12 +1882,6 @@ fn handle_mouse_input(
         } else if shift_held {
             // Shift+right-click: queue waypoint
             info!("queued waypoint at ({gx}, {gy}) — single-target MoveTarget used");
-            let tile_map: HashMap<(i32, i32), cindertide::map::TerrainType> = tiles
-                .iter()
-                .map(|t| ((t.pos.x, t.pos.y), t.terrain_type.clone()))
-                .collect();
-            let max_x = tile_map.keys().map(|(x, _)| *x).max().unwrap_or(40);
-            let max_y = tile_map.keys().map(|(_, y)| *y).max().unwrap_or(25);
             // Build occupied set from all unit positions.
             let all_occupied: HashSet<(i32, i32)> = units.iter()
                 .map(|(_, pos, _)| (pos.pos.x, pos.pos.y))
@@ -1900,22 +1898,23 @@ fn handle_mouse_input(
                     Some(UnitKind::Vehicle) => cindertide::map::pathfinding::UnitKind::Vehicle,
                     _ => cindertide::map::pathfinding::UnitKind::Infantry,
                 };
-                // Exclude the moving unit itself and the destination from occupied.
+                // Exclude the moving unit itself from occupied.
                 let mut occupied = all_occupied.clone();
                 occupied.remove(&(start.x, start.y));
-                let grid = cindertide::map::pathfinding::PathfindingGrid {
-                    width: max_x + 1,
-                    height: max_y + 1,
-                    tiles: tile_map.clone(),
-                    unit_type: pf_kind,
-                    occupied,
-                    destination: Some((target_pos.x, target_pos.y)),
-                };
-                if let Some(path) = grid.find_path(start, target_pos.clone()) {
-                    commands.entity(unit_entity)
-                        .remove::<HoldPosition>()
-                        .insert(MoveTarget { target: target_pos.clone() })
-                        .insert(MoveProgress { path, current_step: 0, elapsed: 0.0 });
+
+                if let Some(ref nav) = nav {
+                    if let Some(path) = cindertide::map::pathfinding::PathfindingGrid::find_path_on_navmesh(
+                        nav,
+                        start.clone(),
+                        target_pos.clone(),
+                        &pf_kind,
+                        &occupied,
+                    ) {
+                        commands.entity(unit_entity)
+                            .remove::<HoldPosition>()
+                            .insert(MoveTarget { target: target_pos.clone() })
+                            .insert(MoveProgress { path, current_step: 0, elapsed: 0.0 });
+                    }
                 }
             }
         } else if attack_move_mode.0 {
@@ -1930,12 +1929,6 @@ fn handle_mouse_input(
             }
         } else {
             // Normal right-click move
-            let tile_map: HashMap<(i32, i32), cindertide::map::TerrainType> = tiles
-                .iter()
-                .map(|t| ((t.pos.x, t.pos.y), t.terrain_type.clone()))
-                .collect();
-            let max_x = tile_map.keys().map(|(x, _)| *x).max().unwrap_or(40);
-            let max_y = tile_map.keys().map(|(_, y)| *y).max().unwrap_or(25);
             // Build occupied set from all unit positions.
             let all_occupied: HashSet<(i32, i32)> = units.iter()
                 .map(|(_, pos, _)| (pos.pos.x, pos.pos.y))
@@ -1953,23 +1946,24 @@ fn handle_mouse_input(
                     Some(UnitKind::Vehicle) => cindertide::map::pathfinding::UnitKind::Vehicle,
                     _ => cindertide::map::pathfinding::UnitKind::Infantry,
                 };
-                // Exclude the moving unit itself and the destination from occupied.
+                // Exclude the moving unit itself from occupied.
                 let mut occupied = all_occupied.clone();
                 occupied.remove(&(start.x, start.y));
-                let grid = cindertide::map::pathfinding::PathfindingGrid {
-                    width: max_x + 1,
-                    height: max_y + 1,
-                    tiles: tile_map.clone(),
-                    unit_type: pf_kind,
-                    occupied,
-                    destination: Some((target_pos.x, target_pos.y)),
-                };
-                if let Some(path) = grid.find_path(start, target_pos.clone()) {
-                    commands.entity(unit_entity)
-                        .remove::<HoldPosition>()
-                        .insert(MoveTarget { target: target_pos.clone() })
-                        .insert(MoveProgress { path, current_step: 0, elapsed: 0.0 });
-                    any_moved = true;
+
+                if let Some(ref nav) = nav {
+                    if let Some(path) = cindertide::map::pathfinding::PathfindingGrid::find_path_on_navmesh(
+                        nav,
+                        start.clone(),
+                        target_pos.clone(),
+                        &pf_kind,
+                        &occupied,
+                    ) {
+                        commands.entity(unit_entity)
+                            .remove::<HoldPosition>()
+                            .insert(MoveTarget { target: target_pos.clone() })
+                            .insert(MoveProgress { path, current_step: 0, elapsed: 0.0 });
+                        any_moved = true;
+                    }
                 }
             }
             if any_moved {
@@ -2466,6 +2460,7 @@ fn handle_editor_keyboard(
 
                     // Spawn faction loadouts for both sides.
                     cindertide::setup_demo_scenario(world, &player, mission_index);
+                    cindertide::bake_navmesh(world);
 
                     world.resource_mut::<ActiveRun>().current_mission_entity = Some(mission_entity);
                     *world.resource_mut::<GameState>() = GameState::InMission;

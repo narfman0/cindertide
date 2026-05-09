@@ -1,7 +1,7 @@
 // Buildings — placement, construction progress, costs per `mechanics.md`.
 
 use bevy::prelude::*;
-use crate::map::{GridPos, Faction};
+use crate::map::{GridPos, Faction, NavMesh};
 use crate::resources::{ResourceCost, ResourcePool, spend, can_afford};
 use std::collections::HashSet;
 
@@ -156,11 +156,24 @@ pub fn construction_system(
     }
 }
 
+/// When a building finishes construction (Built marker added), mark its tile
+/// as impassable in the NavMesh.
+pub fn update_navmesh_on_building_placed(
+    mut nav: Option<ResMut<NavMesh>>,
+    query: Query<&BuildingPos, Added<Built>>,
+) {
+    let Some(ref mut nav) = nav else { return };
+    for bp in &query {
+        nav.set_impassable(bp.pos.x, bp.pos.y);
+    }
+}
+
 pub struct BuildingsPlugin;
 
 impl Plugin for BuildingsPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Update, construction_system);
+        app.add_systems(Update, update_navmesh_on_building_placed);
     }
 }
 
