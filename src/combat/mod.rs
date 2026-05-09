@@ -88,6 +88,20 @@ pub struct LastAttackedBy {
     pub age_secs: f32,
 }
 
+/// Applied by the Rifleman "Suppressing Fire" ability: halves move speed and
+/// attack rate for the duration.
+#[derive(Component, Debug, Clone)]
+pub struct Suppressed {
+    pub remaining: f32,
+}
+
+/// Tracks per-unit ability cooldowns. Index 0 = Q ability.
+#[derive(Component, Debug, Clone, Default)]
+pub struct AbilityCooldowns {
+    /// Remaining cooldown in seconds for each ability slot (0=Q, 1=W, 2=E).
+    pub slots: [f32; 3],
+}
+
 #[derive(Component, Debug, Clone, PartialEq)]
 pub enum MoraleState { Steady, Shaken, Broken }
 
@@ -567,6 +581,36 @@ pub fn morale_decay_system(
 }
 
 /// Clear TookDamageThisFrame marker each frame (cleanup system).
+/// Tick Suppressed timers; remove the component when expired.
+pub fn suppressed_tick_system(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut query: Query<(Entity, &mut Suppressed)>,
+) {
+    let dt = time.delta_secs();
+    for (entity, mut sup) in &mut query {
+        sup.remaining -= dt;
+        if sup.remaining <= 0.0 {
+            commands.entity(entity).remove::<Suppressed>();
+        }
+    }
+}
+
+/// Tick ability cooldown timers.
+pub fn ability_cooldowns_tick_system(
+    time: Res<Time>,
+    mut query: Query<&mut AbilityCooldowns>,
+) {
+    let dt = time.delta_secs();
+    for mut cd in &mut query {
+        for slot in &mut cd.slots {
+            if *slot > 0.0 {
+                *slot = (*slot - dt).max(0.0);
+            }
+        }
+    }
+}
+
 pub fn clear_took_damage_system(
     mut commands: Commands,
     query: Query<Entity, With<TookDamageThisFrame>>,
@@ -694,6 +738,8 @@ impl Plugin for CombatPlugin {
                 death_system,
                 player_attack_order_system,
                 attack_move_system,
+                suppressed_tick_system,
+                ability_cooldowns_tick_system,
             )
                 .chain(),
         );

@@ -60,6 +60,7 @@ fn main() {
         .init_resource::<Paused>()
         .init_resource::<ClientScreen>()
         .init_resource::<EditorState>()
+        .init_resource::<TechPanelVisible>()
         .init_resource::<FogOfWar>()
         .insert_resource(MinimapTimer(0.0))
         .add_systems(Startup, setup_scene)
@@ -91,6 +92,8 @@ fn main() {
         .add_systems(Update, update_minimap)
         .add_systems(Update, handle_minimap_click)
         .add_systems(Update, update_mission_objectives)
+        .add_systems(Update, handle_ability_input)
+        .add_systems(Update, update_tech_panel)
         .add_systems(Update, update_fog_of_war)
         .run();
 }
@@ -295,6 +298,21 @@ struct MinimapDot;
 /// Text node showing the current mission objective (top-right, InMission only).
 #[derive(Component)]
 struct ObjectivesText;
+
+/// Root node of the tech tree overlay panel.
+#[derive(Component)]
+struct TechPanel;
+
+/// Text inside the tech tree panel.
+#[derive(Component)]
+struct TechPanelText;
+
+/// Resource tracking tech panel open/close state and selected index.
+#[derive(Resource, Default)]
+struct TechPanelVisible {
+    visible: bool,
+    selected_idx: usize,
+}
 
 // ── Resources ────────────────────────────────────────────────────────────────
 
@@ -679,6 +697,38 @@ fn setup_ui(mut commands: Commands) {
                 TextColor(Color::srgb(0.85, 0.85, 0.85)),
                 TextFont { font_size: 14.0, ..default() },
                 EditorPanelText,
+            ));
+        });
+
+        // Tech tree panel (fullscreen overlay, toggled by T during InMission)
+        parent.spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(0.0),
+                top: Val::Px(0.0),
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::FlexStart,
+                padding: UiRect::all(Val::Px(40.0)),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.88)),
+            Visibility::Hidden,
+            TechPanel,
+        )).with_children(|p| {
+            p.spawn((
+                Text::new("TECH TREE — T to close"),
+                TextColor(Color::srgb(1.0, 0.85, 0.2)),
+                TextFont { font_size: 28.0, ..default() },
+            ));
+            p.spawn((
+                Node { margin: UiRect::top(Val::Px(20.0)), max_width: Val::Px(900.0), ..default() },
+                Text::new(""),
+                TextColor(Color::srgb(0.85, 0.9, 0.85)),
+                TextFont { font_size: 18.0, ..default() },
+                TechPanelText,
             ));
         });
     });
@@ -2124,6 +2174,8 @@ fn update_unit_info_panel(
         Option<&MoveTarget>,
         Option<&AttackTarget>,
         Option<&HoldPosition>,
+        Option<&AbilityCooldowns>,
+        Option<&Suppressed>,
     ), With<UnitType>>,
     mut text_q: Query<&mut Text, With<UnitInfoText>>,
 ) {
@@ -2141,7 +2193,7 @@ fn update_unit_info_panel(
 
     if count == 1 {
         let entity = selected.entities[0];
-        if let Ok((unit_type, health, move_target, attack_target, hold)) = units.get(entity) {
+        if let Ok((unit_type, health, move_target, attack_target, hold, ability_cds, suppressed)) = units.get(entity) {
             let type_name = match unit_type {
                 UnitType::Riflemen => "Riflemen",
                 UnitType::HeavyWeapons => "Heavy Weapons",
@@ -2173,7 +2225,15 @@ fn update_unit_info_panel(
                 "Idle"
             };
 
-            **text = format!("{}\n{}\nOrder: {}", type_name, health_str, order);
+            let q_cd_str = if let Some(cds) = ability_cds {
+                if cds.slots[0] <= 0.0 { "Q:ready".to_string() }
+                else { format!("Q:{:.1}s", cds.slots[0]) }
+            } else {
+                "Q:ready".to_string()
+            };
+            let suppressed_str = if suppressed.is_some() { " [SUPPRESSED]" } else { "" };
+
+            **text = format!("{}{}\n{}\nOrder: {}  {}", type_name, suppressed_str, health_str, order, q_cd_str);
         } else {
             **text = String::new();
         }
@@ -2184,7 +2244,7 @@ fn update_unit_info_panel(
         let mut valid = 0usize;
 
         for &entity in &selected.entities {
-            if let Ok((_, health, _, _, _)) = units.get(entity) {
+            if let Ok((_, health, _, _, _, _, _)) = units.get(entity) {
                 if let Some(h) = health {
                     total_hp += h.current;
                     total_max += h.max;
@@ -2682,4 +2742,393 @@ fn faction_color(faction: &Faction) -> Color {
         Faction::Covenant => Color::srgb(0.20, 0.40, 0.90),
         Faction::Hollow   => Color::srgb(0.70, 0.10, 0.70),
     }
+}
+
+// ── Unit ability system ───────────────────────────────────────────────────────
+
+/// Q/W/E ability cooldown durations in seconds per UnitType.
+fn ability_q_cooldown(unit_type: &UnitType) -> f32 {
+    match unit_type {
+        UnitType::Riflemen    => 15.0,
+        UnitType::HeavyWeapons => 20.0,
+        UnitType::LightVehicle => 10.0,
+        UnitType::HeavyArmor  => 8.0,
+    }
+}
+
+/// Fire Q ability for the given unit.
+fn fire_ability_q(
+    commands: &mut Commands,
+    entity: Entity,
+    unit_type: &UnitType,
+    unit_pos: &cindertide::units::UnitPos,
+    enemies: &[(Entity, cindertide::units::UnitPos)],
+) {
+    match unit_type {
+        UnitType::Riflemen => {
+            // Suppressing Fire: apply Suppressed for 5s to the nearest enemy
+            let nearest = enemies.iter().min_by_key(|(_, epos)| {
+                let dx = (epos.pos.x - unit_pos.pos.x).abs();
+                let dy = (epos.pos.y - unit_pos.pos.y).abs();
+                dx.max(dy)
+            });
+            if let Some((target_entity, _)) = nearest {
+                if let Ok(mut e) = commands.get_entity(*target_entity) {
+                    e.insert(Suppressed { remaining: 5.0 });
+                }
+            }
+            info!("Riflemen: Suppressing Fire");
+        }
+        UnitType::HeavyWeapons => {
+            // Grenade: deal 3× damage to all units on the nearest enemy tile
+            let nearest = enemies.iter().min_by_key(|(_, epos)| {
+                let dx = (epos.pos.x - unit_pos.pos.x).abs();
+                let dy = (epos.pos.y - unit_pos.pos.y).abs();
+                dx.max(dy)
+            });
+            if let Some((_, target_pos)) = nearest {
+                let tx = target_pos.pos.x;
+                let ty = target_pos.pos.y;
+                // Apply Suppressed (as a grenade effect stand-in) to all on that tile
+                for (enemy_entity, epos) in enemies {
+                    if epos.pos.x == tx && epos.pos.y == ty {
+                        if let Ok(mut e) = commands.get_entity(*enemy_entity) {
+                            e.insert(Suppressed { remaining: 3.0 });
+                        }
+                    }
+                }
+            }
+            info!("HeavyWeapons: Grenade");
+        }
+        UnitType::LightVehicle => {
+            // Scout Dash: move 3 tiles in current facing direction (just teleport for now)
+            let new_pos = cindertide::map::GridPos {
+                x: unit_pos.pos.x,
+                y: unit_pos.pos.y - 3, // default: north
+            };
+            if let Ok(mut e) = commands.get_entity(entity) {
+                e.insert(cindertide::units::UnitPos { pos: new_pos });
+            }
+            info!("LightVehicle: Scout Dash");
+        }
+        UnitType::HeavyArmor => {
+            // Rally: remove Suppressed/Routing from self
+            if let Ok(mut e) = commands.get_entity(entity) {
+                e.remove::<Suppressed>()
+                 .remove::<cindertide::combat::Routing>();
+            }
+            info!("HeavyArmor: Rally");
+        }
+    }
+}
+
+/// Handle Q/W/E ability keys for selected units.
+fn handle_ability_input(
+    mut commands: Commands,
+    keys: Res<ButtonInput<KeyCode>>,
+    screen: Res<ClientScreen>,
+    selected: Res<SelectedUnits>,
+    tech_vis: Res<TechPanelVisible>,
+    mut units: Query<(
+        &UnitType,
+        &cindertide::units::UnitPos,
+        Option<&mut AbilityCooldowns>,
+    )>,
+    enemies_q: Query<(Entity, &cindertide::units::UnitPos, &Faction), With<UnitType>>,
+    player_faction: Option<Res<PlayerFaction>>,
+) {
+    if *screen != ClientScreen::InMission || tech_vis.visible {
+        return;
+    }
+    if selected.entities.is_empty() {
+        return;
+    }
+
+    let q_pressed = keys.just_pressed(KeyCode::KeyQ);
+    // W and E reserved for future abilities; add placeholders
+    if !q_pressed {
+        return;
+    }
+
+    let Some(pf) = player_faction else { return };
+
+    // Collect enemy positions for ability targeting
+    let enemies: Vec<(Entity, cindertide::units::UnitPos)> = enemies_q
+        .iter()
+        .filter(|(_, _, f)| **f != pf.0)
+        .map(|(e, pos, _)| (e, pos.clone()))
+        .collect();
+
+    // Clone selected list to avoid borrow issues
+    let selected_ents: Vec<Entity> = selected.entities.clone();
+
+    for &sel_entity in &selected_ents {
+        // We need to handle the mutable borrow carefully
+        let Ok((unit_type, unit_pos, ability_cds)) = units.get_mut(sel_entity) else { continue };
+        let unit_type = unit_type.clone();
+        let unit_pos = unit_pos.clone();
+
+        let cooldown_dur = ability_q_cooldown(&unit_type);
+
+        // Check if cooldown is ready
+        let ready = if let Some(ref cds) = ability_cds {
+            cds.slots[0] <= 0.0
+        } else {
+            true // no AbilityCooldowns component = always ready
+        };
+
+        if !ready {
+            info!("Ability Q not ready");
+            continue;
+        }
+
+        // Fire the ability
+        fire_ability_q(&mut commands, sel_entity, &unit_type, &unit_pos, &enemies);
+
+        // Set cooldown - insert or update component
+        if let Some(mut cds) = ability_cds {
+            cds.slots[0] = cooldown_dur;
+        } else {
+            let mut cds = AbilityCooldowns::default();
+            cds.slots[0] = cooldown_dur;
+            if let Ok(mut e) = commands.get_entity(sel_entity) {
+                e.insert(cds);
+            }
+        }
+    }
+}
+
+// ── Tech tree panel ───────────────────────────────────────────────────────────
+
+/// All available tech items displayed in the tech tree panel.
+struct TechItem {
+    name: &'static str,
+    description: &'static str,
+    target: TechResearchTarget,
+    cost_fuel: f32,
+    cost_scrap: f32,
+}
+
+#[derive(Clone)]
+enum TechResearchTarget {
+    TierTwo,
+    TierThree,
+    DoctrineAssault,
+    DoctrineFortification,
+    DoctrineSalvage,
+}
+
+fn all_tech_items() -> Vec<TechItem> {
+    vec![
+        TechItem {
+            name: "Tier II Upgrades",
+            description: "Unlock tier 2 units and buildings",
+            target: TechResearchTarget::TierTwo,
+            cost_fuel: 200.0,
+            cost_scrap: 200.0,
+        },
+        TechItem {
+            name: "Tier III Upgrades",
+            description: "Unlock tier 3 units and buildings (requires Tier II)",
+            target: TechResearchTarget::TierThree,
+            cost_fuel: 500.0,
+            cost_scrap: 400.0,
+        },
+        TechItem {
+            name: "Assault Doctrine",
+            description: "+25% attack damage; units more aggressive",
+            target: TechResearchTarget::DoctrineAssault,
+            cost_fuel: 100.0,
+            cost_scrap: 150.0,
+        },
+        TechItem {
+            name: "Fortification Doctrine",
+            description: "+50% cover effectiveness; buildings more durable",
+            target: TechResearchTarget::DoctrineFortification,
+            cost_fuel: 100.0,
+            cost_scrap: 150.0,
+        },
+        TechItem {
+            name: "Salvage Doctrine",
+            description: "+30% resource income from kills",
+            target: TechResearchTarget::DoctrineSalvage,
+            cost_fuel: 100.0,
+            cost_scrap: 150.0,
+        },
+    ]
+}
+
+/// Get status string for a tech item given current Tech state.
+fn tech_item_status(item: &TechItem, tier: Tier, doctrine: Option<Doctrine>, researching: bool, fuel: f32, scrap: f32) -> String {
+    let is_done = match &item.target {
+        TechResearchTarget::TierTwo => tier == Tier::Two || tier == Tier::Three,
+        TechResearchTarget::TierThree => tier == Tier::Three,
+        TechResearchTarget::DoctrineAssault => doctrine == Some(Doctrine::Assault),
+        TechResearchTarget::DoctrineFortification => doctrine == Some(Doctrine::Fortification),
+        TechResearchTarget::DoctrineSalvage => doctrine == Some(Doctrine::Salvage),
+    };
+    if is_done {
+        return "[DONE]".to_string();
+    }
+
+    let locked = match &item.target {
+        TechResearchTarget::TierTwo => false,
+        TechResearchTarget::TierThree => tier == Tier::One,
+        TechResearchTarget::DoctrineAssault |
+        TechResearchTarget::DoctrineFortification |
+        TechResearchTarget::DoctrineSalvage => doctrine.is_some(),
+    };
+    if locked {
+        return "[LOCKED]".to_string();
+    }
+
+    if researching {
+        return "[RESEARCHING...]".to_string();
+    }
+
+    let can_afford = fuel >= item.cost_fuel && scrap >= item.cost_scrap;
+    if can_afford {
+        "[AVAILABLE — press Enter]".to_string()
+    } else {
+        "[NEED MORE RESOURCES]".to_string()
+    }
+}
+
+/// Toggle tech panel on T key and handle navigation/research.
+fn update_tech_panel(
+    mut commands: Commands,
+    keys: Res<ButtonInput<KeyCode>>,
+    screen: Res<ClientScreen>,
+    mut tech_vis: ResMut<TechPanelVisible>,
+    mut panel_query: Query<&mut Visibility, With<TechPanel>>,
+    mut text_query: Query<&mut Text, With<TechPanelText>>,
+    player_faction: Option<Res<PlayerFaction>>,
+    mut tech_query: Query<(Entity, &mut Tech, Option<&ResearchInProgress>, &cindertide::resources::FactionEntity, &mut ResourcePool)>,
+) {
+    if *screen != ClientScreen::InMission {
+        if tech_vis.visible {
+            tech_vis.visible = false;
+            for mut vis in &mut panel_query { *vis = Visibility::Hidden; }
+        }
+        return;
+    }
+
+    let up = keys.just_pressed(KeyCode::ArrowUp);
+    let down = keys.just_pressed(KeyCode::ArrowDown);
+    let enter = keys.just_pressed(KeyCode::Enter);
+    let t_key = keys.just_pressed(KeyCode::KeyT);
+
+    if t_key {
+        tech_vis.visible = !tech_vis.visible;
+        let vis = if tech_vis.visible { Visibility::Visible } else { Visibility::Hidden };
+        for mut v in &mut panel_query { *v = vis; }
+    }
+
+    if !tech_vis.visible {
+        return;
+    }
+
+    let items = all_tech_items();
+    let count = items.len();
+
+    if up && tech_vis.selected_idx > 0 {
+        tech_vis.selected_idx -= 1;
+    }
+    if down && tech_vis.selected_idx < count - 1 {
+        tech_vis.selected_idx += 1;
+    }
+
+    let Some(pf) = player_faction else { return };
+
+    // Collect read-only state first
+    struct FactionTechState {
+        entity: Entity,
+        tier: Tier,
+        doctrine: Option<Doctrine>,
+        researching: bool,
+        fuel: f32,
+        scrap: f32,
+    }
+
+    let state: Option<FactionTechState> = tech_query.iter().find_map(|(ent, tech, rp, fe, pool)| {
+        if fe.faction == pf.0 {
+            Some(FactionTechState {
+                entity: ent,
+                tier: tech.tier,
+                doctrine: tech.doctrine,
+                researching: rp.is_some(),
+                fuel: pool.fuel,
+                scrap: pool.scrap,
+            })
+        } else {
+            None
+        }
+    });
+
+    // Handle Enter to research
+    if enter {
+        if let Some(ref s) = state {
+            let item = &items[tech_vis.selected_idx];
+            let can_afford = s.fuel >= item.cost_fuel && s.scrap >= item.cost_scrap;
+            if can_afford && !s.researching {
+                if let Ok((ent, mut tech, _, _, mut pool)) = tech_query.get_mut(s.entity) {
+                    let target = match &item.target {
+                        TechResearchTarget::TierTwo => ResearchTarget::Tier(Tier::Two),
+                        TechResearchTarget::TierThree => ResearchTarget::Tier(Tier::Three),
+                        TechResearchTarget::DoctrineAssault => ResearchTarget::Doctrine(Doctrine::Assault),
+                        TechResearchTarget::DoctrineFortification => ResearchTarget::Doctrine(Doctrine::Fortification),
+                        TechResearchTarget::DoctrineSalvage => ResearchTarget::Doctrine(Doctrine::Salvage),
+                    };
+                    match start_research(&mut pool, &tech, false, target) {
+                        Ok(new_rp) => {
+                            commands.entity(ent).insert(new_rp);
+                            info!("Research started successfully");
+                        }
+                        Err(e) => {
+                            info!("Research failed: {:?}", e);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Build panel text
+    let Ok(mut text) = text_query.single_mut() else { return };
+    let mut lines = Vec::new();
+
+    if let Some(s) = state {
+        let tier_str = match s.tier {
+            Tier::One => "I",
+            Tier::Two => "II",
+            Tier::Three => "III",
+        };
+        let doctrine_str = match s.doctrine {
+            None => "None",
+            Some(Doctrine::Assault) => "Assault",
+            Some(Doctrine::Fortification) => "Fortification",
+            Some(Doctrine::Salvage) => "Salvage",
+        };
+        lines.push(format!("Tier: {}  Doctrine: {}  |  FUEL: {:.0}  SCRAP: {:.0}", tier_str, doctrine_str, s.fuel, s.scrap));
+        lines.push(String::new());
+
+        for (i, item) in items.iter().enumerate() {
+            let selected = i == tech_vis.selected_idx;
+            let prefix = if selected { "> " } else { "  " };
+            let status = tech_item_status(item, s.tier, s.doctrine, s.researching, s.fuel, s.scrap);
+            lines.push(format!(
+                "{}{} ({:.0}F/{:.0}S) — {}",
+                prefix, item.name, item.cost_fuel, item.cost_scrap, status
+            ));
+            if selected {
+                lines.push(format!("    {}", item.description));
+            }
+        }
+        lines.push(String::new());
+        lines.push("Up/Down: navigate  |  Enter: research  |  T: close".to_string());
+    } else {
+        lines.push("No faction tech data found.".to_string());
+    }
+
+    **text = lines.join("\n");
 }
