@@ -229,6 +229,58 @@ impl HeavyArmorBundle {
     }
 }
 
+/// Per-type stats for UI display and system use.
+pub struct UnitStats {
+    pub attack_range: f32,
+    pub move_speed: f32,
+    pub health: f32,
+    pub attack_damage: f32,
+    pub attack_rate: f32,
+    pub vision_range: f32,
+    pub description: &'static str,
+}
+
+pub fn unit_stats(unit_type: &UnitType) -> UnitStats {
+    match unit_type {
+        UnitType::Riflemen => UnitStats {
+            attack_range: 4.0,
+            move_speed: 2.5,
+            health: 80.0,
+            attack_damage: 12.0,
+            attack_rate: 1.2,
+            vision_range: 6.0,
+            description: "Standard all-rounder infantry",
+        },
+        UnitType::HeavyWeapons => UnitStats {
+            attack_range: 6.0,
+            move_speed: 1.5,
+            health: 120.0,
+            attack_damage: 35.0,
+            attack_rate: 0.5,
+            vision_range: 5.0,
+            description: "Slow heavy hitter, suppression specialist",
+        },
+        UnitType::LightVehicle => UnitStats {
+            attack_range: 5.0,
+            move_speed: 4.0,
+            health: 100.0,
+            attack_damage: 20.0,
+            attack_rate: 0.8,
+            vision_range: 10.0,
+            description: "Fast scout vehicle",
+        },
+        UnitType::HeavyArmor => UnitStats {
+            attack_range: 4.0,
+            move_speed: 1.8,
+            health: 250.0,
+            attack_damage: 50.0,
+            attack_rate: 0.4,
+            vision_range: 4.0,
+            description: "Heavy front-line tank",
+        },
+    }
+}
+
 pub struct UnitPlugin;
 
 impl Plugin for UnitPlugin {

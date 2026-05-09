@@ -3,7 +3,7 @@ use bevy::input::mouse::MouseWheel;
 use bevy::prelude::*;
 use bevy::render::camera::ScalingMode;
 use cindertide::map::{Faction, GridPos, Tile};
-use cindertide::units::{UnitPos, UnitType};
+use cindertide::units::{UnitPos, UnitType, unit_stats};
 use cindertide::buildings::{BuildingPos, BuildingType};
 use cindertide::campaign::{CampaignRun, PlayableFaction, GlobalProgress, apply_mission_outcome, next_mission_type, save_progress, load_progress};
 use cindertide::game::{ActiveRun, GameState};
@@ -388,6 +388,10 @@ struct FogOfWar {
     visible: HashSet<(i32, i32)>,
     /// Tiles ever seen by a player unit/building (superset of visible).
     explored: HashSet<(i32, i32)>,
+    /// Fog state from the previous tick — used to skip unchanged tiles.
+    prev_visible: HashSet<(i32, i32)>,
+    /// Explored set from the previous tick.
+    prev_explored: HashSet<(i32, i32)>,
     /// Countdown timer — fog updates every 0.25 s.
     timer: f32,
 }
@@ -726,11 +730,11 @@ fn setup_scene(mut commands: Commands) {
         Camera3d::default(),
         Tonemapping::None,
         Projection::Orthographic(OrthographicProjection {
-            scale: 14.0,
+            scale: 28.0,
             scaling_mode: ScalingMode::FixedVertical { viewport_height: 1.0 },
             ..OrthographicProjection::default_3d()
         }),
-        Transform::from_xyz(32.0, 30.0, 32.0).looking_at(Vec3::new(20.0, 0.0, 12.0), Vec3::Y),
+        Transform::from_xyz(64.0 + 10.0, 10.0, 40.0 + 10.0).looking_at(Vec3::new(64.0, 0.0, 40.0), Vec3::Y),
         IsometricCamera { pan_speed: 20.0, zoom_speed: 2.0 },
     ));
 
@@ -1768,6 +1772,10 @@ fn handle_mouse_input(
                 .collect();
             let max_x = tile_map.keys().map(|(x, _)| *x).max().unwrap_or(40);
             let max_y = tile_map.keys().map(|(_, y)| *y).max().unwrap_or(25);
+            // Build occupied set from all unit positions.
+            let all_occupied: HashSet<(i32, i32)> = units.iter()
+                .map(|(_, pos, _)| (pos.pos.x, pos.pos.y))
+                .collect();
 
             for &unit_entity in &selected_entities {
                 let unit_kind = units.get(unit_entity).ok().and_then(|(_, _, _)| {
@@ -1780,11 +1788,16 @@ fn handle_mouse_input(
                     Some(UnitKind::Vehicle) => cindertide::map::pathfinding::UnitKind::Vehicle,
                     _ => cindertide::map::pathfinding::UnitKind::Infantry,
                 };
+                // Exclude the moving unit itself and the destination from occupied.
+                let mut occupied = all_occupied.clone();
+                occupied.remove(&(start.x, start.y));
                 let grid = cindertide::map::pathfinding::PathfindingGrid {
                     width: max_x + 1,
                     height: max_y + 1,
                     tiles: tile_map.clone(),
                     unit_type: pf_kind,
+                    occupied,
+                    destination: Some((target_pos.x, target_pos.y)),
                 };
                 if let Some(path) = grid.find_path(start, target_pos.clone()) {
                     commands.entity(unit_entity)
@@ -1811,6 +1824,10 @@ fn handle_mouse_input(
                 .collect();
             let max_x = tile_map.keys().map(|(x, _)| *x).max().unwrap_or(40);
             let max_y = tile_map.keys().map(|(_, y)| *y).max().unwrap_or(25);
+            // Build occupied set from all unit positions.
+            let all_occupied: HashSet<(i32, i32)> = units.iter()
+                .map(|(_, pos, _)| (pos.pos.x, pos.pos.y))
+                .collect();
 
             let mut any_moved = false;
             for &unit_entity in &selected_entities {
@@ -1824,11 +1841,16 @@ fn handle_mouse_input(
                     Some(UnitKind::Vehicle) => cindertide::map::pathfinding::UnitKind::Vehicle,
                     _ => cindertide::map::pathfinding::UnitKind::Infantry,
                 };
+                // Exclude the moving unit itself and the destination from occupied.
+                let mut occupied = all_occupied.clone();
+                occupied.remove(&(start.x, start.y));
                 let grid = cindertide::map::pathfinding::PathfindingGrid {
                     width: max_x + 1,
                     height: max_y + 1,
                     tiles: tile_map.clone(),
                     unit_type: pf_kind,
+                    occupied,
+                    destination: Some((target_pos.x, target_pos.y)),
                 };
                 if let Some(path) = grid.find_path(start, target_pos.clone()) {
                     commands.entity(unit_entity)
@@ -2056,7 +2078,7 @@ fn camera_pan_zoom(
 
     if let Projection::Orthographic(ref mut ortho) = *projection {
         for ev in scroll.read() {
-            ortho.scale = (ortho.scale - ev.y * cam.zoom_speed).clamp(2.0, 60.0);
+            ortho.scale = (ortho.scale - ev.y * cam.zoom_speed).clamp(4.0, 120.0);
         }
     }
 }
@@ -2744,7 +2766,12 @@ fn update_unit_info_panel(
             };
             let suppressed_str = if suppressed.is_some() { " [SUPPRESSED]" } else { "" };
 
-            **text = format!("{}{}\n{}\nOrder: {}  {}", type_name, suppressed_str, health_str, order, q_cd_str);
+            let stats = unit_stats(unit_type);
+            **text = format!(
+                "{}{}\n{}\nOrder: {}  {}\nRange: {:.0}  Speed: {:.1}",
+                type_name, suppressed_str, health_str, order, q_cd_str,
+                stats.attack_range, stats.move_speed
+            );
         } else {
             **text = String::new();
         }
@@ -3088,9 +3115,7 @@ fn update_mission_objectives(
 
 // ── Fog of War system ─────────────────────────────────────────────────────────
 
-/// Vision radius in tiles for each entity type.
-const VISION_INFANTRY: i32 = 6;
-const VISION_VEHICLE: i32 = 10;
+/// Vision radius in tiles for buildings (no UnitType to look up stats from).
 const VISION_BUILDING: i32 = 8;
 
 /// Update fog of war every 0.25 s while InMission.
@@ -3098,7 +3123,7 @@ fn update_fog_of_war(
     screen: Res<ClientScreen>,
     time: Res<Time>,
     player_faction: Option<Res<PlayerFaction>>,
-    units: Query<(&UnitPos, &Faction, &UnitKind), With<UnitType>>,
+    units: Query<(&UnitPos, &Faction, &UnitType), With<UnitType>>,
     buildings: Query<(&BuildingPos, &Faction), With<BuildingType>>,
     mut fog: ResMut<FogOfWar>,
     tiles: Query<&Tile>,
@@ -3124,14 +3149,11 @@ fn update_fog_of_war(
     // Recompute visible set from all player units + buildings.
     let mut new_visible: HashSet<(i32, i32)> = HashSet::new();
 
-    for (pos, faction, kind) in &units {
+    for (pos, faction, unit_type) in &units {
         if faction != player_f {
             continue;
         }
-        let radius = match kind {
-            UnitKind::Vehicle => VISION_VEHICLE,
-            UnitKind::Infantry => VISION_INFANTRY,
-        };
+        let radius = unit_stats(unit_type).vision_range as i32;
         let cx = pos.pos.x;
         let cy = pos.pos.y;
         for dy in -radius..=radius {
@@ -3159,23 +3181,40 @@ fn update_fog_of_war(
         }
     }
 
-    fog.visible = new_visible;
+    // Save previous state for change detection.
+    let old_visible = std::mem::replace(&mut fog.visible, new_visible);
+    let old_explored = fog.explored.clone();
+
     // Explored is a superset — never shrinks.
-    let newly_seen: Vec<(i32, i32)> = fog.visible.iter().copied().collect();
-    for pos in newly_seen {
+    let newly_visible: Vec<(i32, i32)> = fog.visible.iter().copied().collect();
+    for pos in newly_visible {
         fog.explored.insert(pos);
     }
 
-    // Update tile material colors based on fog state.
+    fog.prev_visible = old_visible;
+    fog.prev_explored = old_explored;
+
+    // Update tile material colors ONLY for tiles whose fog state changed.
     for tile in &tiles {
         let key = (tile.pos.x, tile.pos.y);
+
+        let was_visible  = fog.prev_visible.contains(&key);
+        let now_visible  = fog.visible.contains(&key);
+        let was_explored = fog.prev_explored.contains(&key);
+        let now_explored = fog.explored.contains(&key);
+
+        // Skip if fog state didn't change.
+        if was_visible == now_visible && was_explored == now_explored {
+            continue;
+        }
+
         let Some(mat_handle) = visual_entities.tile_materials.get(&key) else { continue };
         let Some(mat) = materials.get_mut(mat_handle) else { continue };
 
-        if fog.visible.contains(&key) {
+        if now_visible {
             // Fully visible — normal terrain color.
             mat.base_color = terrain_color(&tile.terrain_type);
-        } else if fog.explored.contains(&key) {
+        } else if now_explored {
             // Shrouded — darkened version of terrain color.
             let c = terrain_color(&tile.terrain_type);
             let LinearRgba { red, green, blue, alpha } = c.to_linear();
@@ -3907,6 +3946,8 @@ fn apply_client_command(
                         height: max_y + 1,
                         tiles: tile_map.clone(),
                         unit_type: cindertide::map::pathfinding::UnitKind::Infantry,
+                        occupied: std::collections::HashSet::new(),
+                        destination: None,
                     };
                     if let Some(path) = grid.find_path(pos.pos.clone(), target_pos.clone()) {
                         commands.entity(entity)

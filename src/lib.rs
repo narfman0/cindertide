@@ -224,7 +224,7 @@ fn handle_unit_move_path(In(params): In<Option<Value>>, world: &mut World) -> Br
         Some(UnitKind::Vehicle) => map::pathfinding::UnitKind::Vehicle,
         _ => map::pathfinding::UnitKind::Infantry,
     };
-    let grid = map::pathfinding::PathfindingGrid { width: max_x + 1, height: max_y + 1, tiles: tile_map, unit_type: pf_kind };
+    let grid = map::pathfinding::PathfindingGrid { width: max_x + 1, height: max_y + 1, tiles: tile_map, unit_type: pf_kind, occupied: std::collections::HashSet::new(), destination: None };
     match grid.find_path(start, goal) {
         Some(path) => {
             let steps = path.len();

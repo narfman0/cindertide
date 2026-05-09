@@ -669,6 +669,8 @@ pub fn attack_move_system(
                 height: max_y + 1,
                 tiles: tile_map.clone(),
                 unit_type: pf_kind,
+                occupied: std::collections::HashSet::new(),
+                destination: None,
             };
             if let Some(path) = grid.find_path(unit_pos.pos.clone(), order.target.clone()) {
                 commands.entity(attacker_entity)
@@ -711,6 +713,8 @@ pub fn player_attack_order_system(
                 height: max_y + 1,
                 tiles: tile_map.clone(),
                 unit_type: pf_kind,
+                occupied: std::collections::HashSet::new(),
+                destination: None,
             };
             if let Some(path) = grid.find_path(unit_pos.pos.clone(), target_pos.pos.clone()) {
                 let steps = path.len();

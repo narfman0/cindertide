@@ -13,6 +13,10 @@ pub struct PathfindingGrid {
     pub height: i32,
     pub tiles: HashMap<(i32, i32), TerrainType>,
     pub unit_type: UnitKind,
+    /// Tiles occupied by other units — treated as impassable (except the destination).
+    pub occupied: std::collections::HashSet<(i32, i32)>,
+    /// The destination tile is excluded from occupied blocking.
+    pub destination: Option<(i32, i32)>,
 }
 
 // Node used in the A* priority queue (min-heap via Reverse ordering)
@@ -64,8 +68,22 @@ impl PathfindingGrid {
                 if *terrain == TerrainType::Void {
                     return false;
                 }
+                if *terrain == TerrainType::Corrupted {
+                    return false;
+                }
                 if self.unit_type == UnitKind::Vehicle && !vehicle_passable(terrain) {
                     return false;
+                }
+                // Block occupied tiles unless this is the destination
+                let key = (x, y);
+                if self.occupied.contains(&key) {
+                    if let Some(dest) = self.destination {
+                        if key != dest {
+                            return false;
+                        }
+                    } else {
+                        return false;
+                    }
                 }
                 true
             }
@@ -158,6 +176,8 @@ mod tests {
             height: h,
             tiles: HashMap::new(), // all Grass by default
             unit_type: UnitKind::Infantry,
+            occupied: std::collections::HashSet::new(),
+            destination: None,
         }
     }
 
@@ -183,6 +203,8 @@ mod tests {
             height: 3,
             tiles,
             unit_type: UnitKind::Infantry,
+            occupied: std::collections::HashSet::new(),
+            destination: None,
         };
         let path = grid.find_path(GridPos { x: 0, y: 0 }, GridPos { x: 4, y: 0 }).unwrap();
         // Path must not pass through any Void tile
@@ -202,6 +224,8 @@ mod tests {
             height: 1,
             tiles,
             unit_type: UnitKind::Vehicle,
+            occupied: std::collections::HashSet::new(),
+            destination: None,
         };
         let result = grid.find_path(GridPos { x: 0, y: 0 }, GridPos { x: 2, y: 0 });
         assert!(result.is_none());
@@ -217,6 +241,8 @@ mod tests {
             height: 1,
             tiles,
             unit_type: UnitKind::Infantry,
+            occupied: std::collections::HashSet::new(),
+            destination: None,
         };
         let result = grid.find_path(GridPos { x: 0, y: 0 }, GridPos { x: 2, y: 0 });
         assert!(result.is_none());
