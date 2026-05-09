@@ -9,6 +9,7 @@ use cindertide::campaign::{CampaignRun, CampaignDef, PlayableFaction, GlobalProg
 use cindertide::game::{ActiveRun, GameState};
 use cindertide::mission::{Mission, MissionStatus};
 use cindertide::mapgen::MissionType;
+use cindertide::mapgen::{ArchetypeDef, generate_from_archetype, scan_archetypes};
 use cindertide::narrative::NarrativeData;
 use cindertide::resources::{FactionBundle, FactionEntity, ResourcePool};
 use cindertide::tech::{Tech, ResearchInProgress, ResearchTarget, Tier, Doctrine, start_research};
@@ -77,6 +78,7 @@ fn main() {
         .init_resource::<EditorEnteredFromGame>()
         .init_resource::<LoadedCampaigns>()
         .init_resource::<CampaignEditorState>()
+        .init_resource::<GeneratePanel>()
         .insert_resource(MinimapTimer(0.0))
         .insert_resource(NetBroadcastTimer(0.0))
         .add_systems(Startup, setup_scene)
@@ -100,6 +102,7 @@ fn main() {
         .add_systems(Update, handle_paused_menu_input)
         .add_systems(Update, handle_editor_keyboard)
         .add_systems(Update, handle_editor_open_campaign)
+        .add_systems(Update, handle_generate_panel)
         .add_systems(Update, handle_campaign_editor_keyboard)
         .add_systems(Update, update_campaign_editor_overlay)
         .add_systems(Update, update_paused_overlay)
@@ -186,6 +189,31 @@ enum CampaignEditorPrompt {
     NewCampaignId,
     NewCampaignName,
     AddMapPath,
+}
+
+// ── Generate panel resource ────────────────────────────────────────────────────
+
+#[derive(Resource)]
+struct GeneratePanel {
+    open: bool,
+    selected: usize,
+    archetypes: Vec<ArchetypeDef>,
+    width: i32,
+    height: i32,
+    seed: u64,
+}
+
+impl Default for GeneratePanel {
+    fn default() -> Self {
+        Self {
+            open: false,
+            selected: 0,
+            archetypes: Vec::new(),
+            width: 128,
+            height: 80,
+            seed: 42,
+        }
+    }
 }
 
 // ── Map editor tool ──────────────────────────────────────────────────────────
@@ -2665,6 +2693,8 @@ fn handle_editor_keyboard(
     if keys.just_pressed(KeyCode::Digit5) { editor.tool = EditorTool::ScriptEditor; }
     if keys.just_pressed(KeyCode::Digit6) { editor.tool = EditorTool::CampaignEditor; }
 
+    // G — open generate panel (handled in handle_generate_panel system)
+
     // ── Script editor controls (only when tool 5 is active) ───────────────────
     if editor.tool == EditorTool::ScriptEditor {
         let event_count = editor.script_events.len();
@@ -3061,6 +3091,128 @@ fn handle_editor_open_campaign(
         campaign_editor.delete_confirm = false;
         campaign_editor.status = String::new();
         *screen = ClientScreen::CampaignEditor;
+    }
+}
+
+/// Handle the generate-from-archetype panel (G key toggle, navigation, Enter to generate).
+fn handle_generate_panel(
+    mut commands: Commands,
+    keys: Res<ButtonInput<KeyCode>>,
+    screen: Res<ClientScreen>,
+    mut gen: ResMut<GeneratePanel>,
+    tiles: Query<(Entity, &Tile)>,
+    units: Query<Entity, With<UnitType>>,
+    buildings: Query<Entity, With<BuildingType>>,
+    rendered_tiles: Query<Entity, With<RenderedTile>>,
+    mut visual_entities: ResMut<VisualEntities>,
+) {
+    if *screen != ClientScreen::MapEditor {
+        // If we leave the editor while panel is open, close it.
+        if gen.open { gen.open = false; }
+        return;
+    }
+
+    let ctrl = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
+
+    // G — toggle panel (don't open when ctrl is held)
+    if keys.just_pressed(KeyCode::KeyG) && !ctrl {
+        if !gen.open {
+            gen.archetypes = scan_archetypes();
+            gen.open = true;
+            gen.selected = 0;
+        } else {
+            gen.open = false;
+        }
+        return;
+    }
+
+    if !gen.open {
+        return;
+    }
+
+    // Esc — close panel
+    if keys.just_pressed(KeyCode::Escape) {
+        gen.open = false;
+        return;
+    }
+
+    let arch_count = gen.archetypes.len();
+
+    // Up/Down: select archetype
+    if keys.just_pressed(KeyCode::ArrowUp) && gen.selected > 0 {
+        gen.selected -= 1;
+    }
+    if keys.just_pressed(KeyCode::ArrowDown) && arch_count > 0 && gen.selected + 1 < arch_count {
+        gen.selected += 1;
+    }
+
+    // Left/Right: adjust width and height
+    if keys.just_pressed(KeyCode::ArrowLeft) {
+        if keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight) {
+            gen.height = (gen.height - 8).max(20);
+        } else {
+            gen.width = (gen.width - 8).max(20);
+        }
+    }
+    if keys.just_pressed(KeyCode::ArrowRight) {
+        if keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight) {
+            gen.height = (gen.height + 8).min(256);
+        } else {
+            gen.width = (gen.width + 8).min(256);
+        }
+    }
+
+    // R — randomize seed
+    if keys.just_pressed(KeyCode::KeyR) {
+        let t = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(12345);
+        gen.seed = t ^ (t >> 17) ^ (t << 31);
+    }
+
+    // Enter — generate
+    if keys.just_pressed(KeyCode::Enter) && arch_count > 0 {
+        let sel = gen.selected.min(arch_count - 1);
+        let def = gen.archetypes[sel].clone();
+        let width = gen.width;
+        let height = gen.height;
+        let seed = gen.seed;
+
+        // Wipe existing world entities
+        for (entity, _) in &tiles { commands.entity(entity).despawn(); }
+        for entity in &units { commands.entity(entity).despawn(); }
+        for entity in &buildings { commands.entity(entity).despawn(); }
+        for entity in &rendered_tiles { commands.entity(entity).despawn(); }
+        visual_entities.units.clear();
+        visual_entities.buildings.clear();
+
+        // Generate the map
+        let tile_map = generate_from_archetype(&def, &std::collections::HashMap::new(), width, height, seed);
+
+        // Spawn tiles
+        for y in 0..height {
+            for x in 0..width {
+                let terrain = tile_map.get(&(x, y))
+                    .cloned()
+                    .unwrap_or(cindertide::map::TerrainType::Grass);
+                let cover = match &terrain {
+                    cindertide::map::TerrainType::Forest | cindertide::map::TerrainType::Rubble
+                        => cindertide::map::CoverDensity::Heavy,
+                    cindertide::map::TerrainType::Road | cindertide::map::TerrainType::Grass
+                        => cindertide::map::CoverDensity::None,
+                    _ => cindertide::map::CoverDensity::Light,
+                };
+                commands.spawn(Tile {
+                    pos: GridPos { x, y },
+                    terrain_type: terrain,
+                    cover,
+                });
+            }
+        }
+
+        info!("Generated map from archetype '{}' ({}x{}, seed {})", def.name, width, height, seed);
+        gen.open = false;
     }
 }
 
@@ -3763,6 +3915,7 @@ fn handle_editor_mouse_input(
 fn update_editor_panel(
     screen: Res<ClientScreen>,
     editor: Res<EditorState>,
+    gen: Res<GeneratePanel>,
     tiles: Query<&Tile>,
     units: Query<&UnitPos, With<UnitType>>,
     buildings: Query<&BuildingPos, With<BuildingType>>,
@@ -3777,11 +3930,36 @@ fn update_editor_panel(
     }
     *vis = Visibility::Visible;
 
-    if !screen.is_changed() && !editor.is_changed() {
+    if !screen.is_changed() && !editor.is_changed() && !gen.is_changed() {
         return;
     }
 
     let Ok(mut text) = panel_text.single_mut() else { return };
+
+    // Generate panel overlay
+    if gen.open {
+        let mut lines = vec!["── GENERATE MAP ─────────────".to_string()];
+        lines.push("Archetypes:".to_string());
+        if gen.archetypes.is_empty() {
+            lines.push("  (none found in assets/archetypes/)".to_string());
+        } else {
+            for (i, arch) in gen.archetypes.iter().enumerate() {
+                let marker = if i == gen.selected { "> " } else { "  " };
+                lines.push(format!("{}[{}] {}", marker, i, arch.name));
+            }
+        }
+        lines.push(String::new());
+        lines.push(format!("Width: {}  Height: {}  Seed: {}", gen.width, gen.height, gen.seed));
+        lines.push(String::new());
+        lines.push("[↑↓] select archetype".to_string());
+        lines.push("[←→] adjust width".to_string());
+        lines.push("[Shift+←→] adjust height".to_string());
+        lines.push("[R] random seed".to_string());
+        lines.push("[Enter] Generate".to_string());
+        lines.push("[Esc] Cancel".to_string());
+        **text = lines.join("\n");
+        return;
+    }
 
     // Campaign editor tool mode: show hint to open campaign editor
     if editor.tool == EditorTool::CampaignEditor {
@@ -3881,7 +4059,7 @@ fn update_editor_panel(
     };
 
     **text = format!(
-        "Tool: {tool_name}\n\nTerrain: {terrain_name}\nFaction: {faction_name_str}\nUnit: {unit_name}\nBuilding: {building_name}\n\nTiles: {tile_count}\nUnits: {unit_count}\nBuildings: {building_count}\n\n--- Keys ---\n1-6: tool\nF: faction\nT: unit type\nB: building\nR-click: cycle terrain\nDel: clear map\nCtrl+S: save\nCtrl+L: load\nP: test mission\nC/6: campaign editor\nEsc: exit{del_hint}"
+        "Tool: {tool_name}\n\nTerrain: {terrain_name}\nFaction: {faction_name_str}\nUnit: {unit_name}\nBuilding: {building_name}\n\nTiles: {tile_count}\nUnits: {unit_count}\nBuildings: {building_count}\n\n--- Keys ---\n1-6: tool\nF: faction\nT: unit type\nB: building\nR-click: cycle terrain\nDel: clear map\nCtrl+S: save\nCtrl+L: load\nP: test mission\nG: Generate from archetype\nC/6: campaign editor\nEsc: exit{del_hint}"
     );
 }
 

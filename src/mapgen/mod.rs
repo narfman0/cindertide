@@ -1,3 +1,6 @@
+pub mod archetype;
+pub use archetype::{ArchetypeDef, generate_from_archetype, scan_archetypes};
+
 // Procedural map generation per `world.md`.
 // Mission type shapes the layout; chokepoints and base locations are
 // authored constraints; everything else flows from a deterministic seed.
