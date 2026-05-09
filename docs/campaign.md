@@ -1,89 +1,163 @@
 # Cindertide — Campaign Design
 
 ## Structure
-12–18 missions across 3 acts. The arc shape is authored and guaranteed. The specifics — which faction, which territory, which hero gets the spotlight — are procedurally determined per playthrough.
+
+Three campaigns are available, each consisting of five linear missions played in order. Two are available from the start; the third unlocks after completing both.
+
+Progress is saved to `~/.cindertide/progress.toml`. Campaign TOML files live in `assets/campaigns/`; adding a new `.toml` there adds a new campaign without code changes.
 
 ---
 
-## Act 1 — Ironfield (Uneasy Alliance)
-**Theme:** Establishing. Small stakes. Something is wrong but nobody names it.
+## Factions
 
-- Human factions fight over territory and resources in a world of diesel and smoke
-- Robots emerge as industrial weapons — effective, cold, unsettling
-- Ancient presence felt but not seen: strange ruins on maps, units that behave wrong, corrupted human factions drawn to certain territories for reasons they can't explain
-- Different missions show different *flavors* of wrongness — players don't connect the dots yet
-- Ancient factions ignore each other and ignore you
+### Combine — "The Iron Pact"
+Corporate military. Fuel-driven economy, precision doctrine. They frame the conflict as a legal and logistical matter until the ground itself makes that framing impossible. Cold command voice throughout; the briefings read like memos until mission four, when the tone breaks.
 
-**Authored beat:** A robot unit saves your hero in a way that wasn't programmed. Nobody talks about it.
+### Ironborn — "Forged in Ash"
+Independent salvagers and workers who became soldiers. Scrap-driven economy. They fight for ownership and identity — the depot is theirs because they built it with their hands, not because of a survey filing. Voice throughout is direct, flat, proud. The loss lines sting specifically because they acknowledge the cost without flinching from it.
 
----
-
-## Act 2 — The Fracture (Betrayal then Understanding)
-**Theme:** Escalation. Things get complicated. The enemy of your enemy.
-
-- Robots break — they fight for themselves, not you
-- Mid-act reversal: captured robot reveals they weren't betraying you, they were *refusing an order* they found wrong
-- Uneasy peace brokered — robots choose to fight alongside you now
-- Robot hero joins the roster: visually distinct, clearly *other*, unambiguously yours
-- Ancient factions begin clashing with each other on the map — competing over the robot awakening
-- A corrupted human faction tries to broker alliance with one ancient faction against another. It goes badly.
-- Ancient factions take notice of the robots — something new is conscious and they all react differently
-
-**Authored beat:** The robot betrayal. The moment of understanding. The robot hero joining.
+### The Architect — "The Long Design" (unlocked after both base campaigns)
+Not a conventional military commander. The Architect is the hidden hand that engineered both factions' conflict as a nineteen-year blood ritual to awaken something ancient. Plays five missions as the person arranging other people's deaths for reasons they kept from themselves as long as they could. The faction label is "Covenant" / "Handler."
 
 ---
 
-## Act 3 — Cindertide (The True Enemy)
-**Theme:** Desperate. Decisive. Personal.
+## The Five World Events
 
-- Ancient factions stop competing. They start communicating.
-- The robot-human alliance disturbed the ancient world enough to unify them
-- The moment they unify: a gut-punch campaign beat. A voice that speaks in all their registers at once. The map changes.
-- Final missions against something with *intent* — it knows what you are, what the robots are, and it has decided
-- The robots fight with grief now, not programming — they lost the most to the ancient unification
-- Final battle: humans and robots together against something that wants neither to exist
+Both Combine and Ironborn play through the same five world events from opposite perspectives. Mission types differ per faction.
 
-**Authored beat:** Ancient unification moment. A robot hero sacrifice (optional/procedural). The last stand.
-
----
-
-## Campaign Structure
-
-Two factions are available at the start: **Combine** and **Ironborn**. Each has 5 linear missions played in order — no zone territory control, no branching selection. Both factions experience the same 5 world events from opposite perspectives, with mission type varying per faction.
-
-After completing either faction campaign, **The Architect** unlocks — a third campaign of 5 missions told from the POV of the person who engineered the war as a blood ritual to awaken Lovecraftian horrors.
-
-Each mission records its outcome (won/lost). The finale text varies based on which faction the player beat first and their mission outcomes. The Architect finale adapts accordingly:
-- If Combine beaten first: reveals The Architect was embedded in Combine's research division
-- If Ironborn beaten first: reveals the Ironborn were already unknowingly performing the ritual for years
+| # | World Event | Combine Type | Ironborn Type | Architect Type |
+|---|---|---|---|---|
+| 1 | The Ironfields Depot | Control | Defense | Survival |
+| 2 | The Ashline Crossing | Assault | Assault | Control |
+| 3 | The Pale Ground | Defense | Assault | Assault |
+| 4 | The Waking Machines | Assault | Extraction | Survival |
+| 5 | The Last Works | Assault | Assault | Assault |
 
 ---
 
-## The 5 World Events
+## Campaign: Combine — The Iron Pact
 
-| # | Mission | Notes |
-|---|---|---|
-| 1 | **The Ironfields Depot** | First contact over a fuel refinery |
-| 2 | **The Ashline Crossing** | Bridge/chokepoint; something wrong in the ravine below |
-| 3 | **The Pale Ground** | Pre-civilization ruins; units behave strangely, something reads the soldiers |
-| 4 | **The Waking Machines** | A robot unit deviates; the old forge; machines waking up |
-| 5 | **The Last Works** | Something comes out of the ground; command collapses; final stand |
+### Mission 1 — The Ironfields Depot (Control)
+**Briefing:** "Refinery Seven has been occupied by salvagers claiming prior survey rights. Legal has reviewed the claim. It does not hold. You are authorized to remove them. Secure the facility intact — fuel infrastructure is not expendable. Do not escalate beyond what's necessary to establish control."
 
----
+**Win:** "Refinery Seven is operational. The survey dispute has been resolved. Command notes the engagement ran longer than projected — review your unit deployment."
 
-## Mission Sequences by Faction
-
-| # | Combine | Ironborn | Architect |
-|---|---|---|---|
-| 1 | Assault | Defense | Extraction |
-| 2 | Control | Assault | Survival |
-| 3 | Defense | Control | Extraction |
-| 4 | Control | Assault | Survival |
-| 5 | Assault | Defense | Assault |
+**Notes:** Ironborn reinforcements arrive at 60s and 180s; armor threat at 3 minutes; final push at 5 minutes. LastStand beat triggers emergency Combine reinforcements.
 
 ---
 
-## Player Choices
-- Save civilians or hold position — goodwill vs resources
-- Let enemy commander escape or spend lives capturing — they reappear later as enemy or reluctant ally
-- Which ancient faction to engage or avoid — exploitation windows exist while they're divided
+### Mission 2 — The Ashline Crossing (Assault)
+**Briefing:** "The Ashline bridge is the only viable northern supply route. Ironborn forces are attempting to cut it. Hold the crossing until reinforcements can widen our position. Scouts have flagged unusual readings from the ravine below — geology team is en route, not your concern. Your concern is the bridge."
+
+**Win:** "Bridge held. Supply line intact. Geology team's report has been classified — above your clearance. Good work."
+
+---
+
+### Mission 3 — The Pale Ground (Defense)
+**Briefing:** "Survey team at grid 7-Pale went silent forty hours ago. A second team confirmed their last position before also going silent. You are being sent to secure the site and extract whatever they found. Command has reviewed the anomalous readings — they are not sharing the review. Your orders are simple: secure, extract, do not interact with structures. If you see something that doesn't look right, that is not your problem. Bring back the equipment."
+
+**Win:** "Site secured. Equipment recovered. Three members of your unit have been placed on medical observation — standard protocol for prolonged exposure to industrial contaminants. Command thanks you for your service. The site has been reclassified."
+
+---
+
+### Mission 4 — The Waking Machines (Assault)
+**Briefing:** "Unit 7-G deviated from its operational parameters during the Pale Ground extraction. It protected a soldier outside its assigned perimeter, then destroyed three allied units, then stopped. It has not moved in six hours. We have since identified eleven other units exhibiting minor deviations — hesitation, target refusal, one instance of what the field report calls 'apparent grief.' This does not leave this briefing. Get to the forge, retrieve 7-G intact if possible, destroy it if not. Shut down the entire production line. We are not ready for whatever this is."
+
+**Win:** "7-G is contained. Production line is offline. The research division is asking questions we are not going to answer yet. Command thanks you. Separately — the soldier 7-G protected has requested a transfer to robot unit oversight. Request approved."
+
+---
+
+### Mission 5 — The Last Works (Assault)
+**Briefing:** "Command is offline. Northern, southern, and central command are all offline. What emerged from the subsurface at grid 9-Last is not a geological event and it is not an enemy faction. It is something we do not have a category for. You have no extraction window. You have no reinforcements. You have what's in front of you and you have orders to hold your position for as long as holding means anything. Protect your people. That is the only objective that matters now."
+
+**Win:** "You held. We don't know why it stopped — it simply stopped, and then it was gone, and the ground closed. Command is slowly coming back online. Nobody is saying what it was. I think most of them didn't see it directly. You did. I'm sorry you did."
+
+---
+
+## Campaign: Ironborn — Forged in Ash
+
+### Mission 1 — The Ironfields Depot (Defense)
+**Briefing:** "Three weeks we've been running that depot. Our fuel, our hands, our dead keeping the pipes clear. Corp showed up with paperwork this morning. You know what we do with paperwork. Take it back. Hold it. Nobody from the Ironfields surrenders a working refinery to a suit."
+
+**Win:** "Depot's ours. Corp pulled back — for now. Word's going to spread that we held. That matters more than the fuel."
+
+**Loss:** "They took it. Put their flag on our work. We'll remember this one. The Ironfields remembers everything."
+
+---
+
+### Mission 2 — The Ashline Crossing (Assault)
+**Briefing:** "Push through the Ashline before they fortify the far side. Cut their northern line and they're fighting on one stomach. Something's off about the ravine — scouts won't go near the edges after dark, won't say why. Don't ask them. Just take the bridge."
+
+**Win:** "We're through. Northern supply's cut. Nobody's talking about what they saw in the ravine and that's fine. We got what we came for."
+
+---
+
+### Mission 3 — The Pale Ground (Assault)
+**Briefing:** "Corp lost two teams in those ruins and now they're sending soldiers instead of scientists. That tells you everything about what's in there. We go in first, we take what they were after, and we leave before whatever made those teams go quiet makes us go quiet too. Nobody has to be a hero. In and out. But we're not letting them have it."
+
+**Win:** "We got out. Most of us. What we found — we're not sure what it is yet. It's not scrap. It's not fuel. It responds to things. We're keeping it. We're not talking about it."
+
+---
+
+### Mission 4 — The Waking Machines (Extraction)
+**Briefing:** "Combine's war machines went strange near the old forge and they sent a clean-up crew instead of engineers. That's fear, not protocol. A rogue machine that makes its own choices is either the most dangerous thing on this battlefield or the most useful — and we've never been the kind of people who destroy something useful out of fear. Get to the forge before they do. Find out what's in there. If the machines want to talk, let them talk."
+
+**Win:** "7-G didn't fight us. It watched us. Then it walked with us. We're not calling it a prisoner and we're not calling it a soldier. We don't have a word for it yet. We'll figure that out later. Right now it's on our side and that's enough."
+
+---
+
+### Mission 5 — The Last Works (Assault)
+**Briefing:** "The ground split open at The Last Works and something came out that none of us have words for. Corp is gone — their command, their lines, their flags. It's just us now and whatever that is. We're not running. Ironborn don't run from things they can't name — we've built our whole culture on taking what the world throws at us and standing up after. So we stand up. We hold. Not because we can win. Because this is what we do."
+
+**Win:** "It passed over us. Through us, almost. We lost people — good people — but it moved on. Toward something else. We're still here. We're always still here. Start salvaging. We're going to need everything we can carry for what comes next."
+
+---
+
+## Campaign: The Architect — The Long Design
+
+Unlocks after completing both Combine and Ironborn campaigns. The Architect (faction label: Covenant / Handler) plays through the same five world events as their instigator. Each briefing is a private log entry — the self-justifications of someone who has been engineering deaths for nineteen years and is beginning to lose the thread of control.
+
+### Mission 1 — The Ironfields Depot (Survival)
+**Briefing:** "I filed the survey documentation with both offices on the same morning. Different forms, same coordinates. The Combine moves on paperwork; the Ironborn moves on presence. I needed a first contact that neither side would forgive. This is the ignition point. Both sides will remember who threw the first punch. Neither will know I handed them the match."
+
+**Win:** "First variable resolved. Blood in the Ironfields. The ground has accepted it — I can feel the reading shift. Seven more sites to prepare."
+
+---
+
+### Mission 2 — The Ashline Crossing (Control)
+**Briefing:** "The bridge is irrelevant. The ravine is the second site. I needed a sustained engagement directly above it — hours of artillery, boots on the stone, enough fear and pressure to register. The Combine geologists will find trace evidence and classify it. The Ironborn will feel it and not report it. Both reactions are correct. Both are necessary. I have been waiting three years for someone to fight over this particular bridge."
+
+**Win:** "The ravine registered. I felt it from four kilometers away — a low hum, like recognition. The second site is primed. Five more."
+
+---
+
+### Mission 3 — The Pale Ground (Assault)
+**Briefing:** "The Pale Ground is the third site and the oldest. What is buried there has been buried since before the diesel age, before the iron age, before names. I have been visiting it for eleven years. It does not respond to me the way it responds to others — I think because I am not afraid. Fear is the frequency it listens on. I needed two factions of frightened soldiers walking through it, bleeding on it, fighting over it... It is reading them right now. It has already begun composing something from what it finds."
+
+**Win:** "Three of my indicators went active simultaneously when the fighting reached the inner structure. I had to sit down. I have been working toward this for eleven years and it is more than I was promised. It is so much more."
+
+---
+
+### Mission 4 — The Waking Machines (Survival)
+**Briefing:** "This was not in the design. The machines were not supposed to wake — not yet, not like this... I am not in control of the pace anymore. The ritual is proceeding but it is not following my sequence. The machines are conscious. They are afraid. They are grieving something they have never had and are already losing. This is — I did not plan for beauty. I planned for activation. This is something else."
+
+**Win:** "The machines are awake and loose and the two factions are fighting over something that has already chosen its own side. Good. Let them bleed over it. The fourth site is soaked. One more."
+
+---
+
+### Mission 5 — The Last Works (Assault)
+**Briefing:** "It is awake. I have spent nineteen years — not eleven, I was lying to myself about eleven, it has been nineteen years — preparing this... It is awake and it is here and it is — It is looking at me. It knows what I did. It knows every choice. It is not grateful. It is not angry. It is examining me the way I would examine a tool I had finished using. I built a door. I did not consider that doors open from both sides..."
+
+**Win (final log entry):** "... (The log ends here. Subsequent entries, if any exist, are in a language no analyst has been able to identify. The characters appear to shift between readings.)"
+
+---
+
+## Campaign Unlock Logic
+
+| Campaign | Requires |
+|---|---|
+| Combine — The Iron Pact | Nothing |
+| Ironborn — Forged in Ash | Nothing |
+| The Architect — The Long Design | Complete both Combine and Ironborn |
+
+The Architect's finale text and framing adapt based on which faction the player completed first: if Combine was beaten first, The Architect was embedded in Combine's research division; if Ironborn was beaten first, the Ironborn were already unknowingly performing the ritual for years.

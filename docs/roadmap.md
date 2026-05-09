@@ -1,241 +1,136 @@
 # Cindertide — Implementation Roadmap
 
-Incremental build order. Every step ships **headless-testable via BRP** —
-no rendering required for any step in this roadmap. Each step adds pure
-functions (math), ECS components/systems, BRP method(s), unit tests, and at
-least one BRP integration test.
-
-Where a step references existing design docs, those are the source of truth
-for the *what*; this roadmap defines the *order* and the *acceptance shape*.
+Current status: the game is feature-complete for a playable single-player campaign experience. All core systems are implemented. What remains is polish, content, and multiplayer hardening.
 
 ---
 
-## Completed
+## What Is Built
 
-| Step | Title | Notes |
-|---|---|---|
-| 1 | Bevy + BRP scaffold | port 15703, MinimalPlugins, hot-reload-friendly |
-| 2 | Map ECS + terrain | `Tile`, `Zone`, `ControlPoint`, `GridPos`, terrain types |
-| 3 | A* pathfinding + unit movement | infantry/vehicle distinction, terrain costs |
-| 4 | Basic combat | `Health`, `AttackDamage`, range check, cover damage reduction |
-| 5 | Cover on units | `InCover` component, `update_cover_system` |
-| 6 | Flanking + facing | `Facing`, `AttackAngle`, cover bypass for rear/flank |
-| 7 | Suppression + morale | `Pinned`, `Routing`, `MoraleState` |
-| 7.5 | Integration polish | `RiflemanBundle`, `unit/spawn`/`unit/status` BRP, ParamSet fix |
-| 8 | Resources | Fuel/Scrap/Manpower per faction; trickle, cap, spend |
-| 9 | Control point capture | radius capture, contested rules, Combine/Ironborn trickle bonuses |
-| 10 | Buildings + grid placement | 16 building types, costs, construction progress, `dev/reset` |
-| 11 | Production queues | Per-building, cap 5, cost up-front |
-| 12 | Unit variety | HeavyWeapons / LightVehicle / HeavyArmor bundles |
-| 13 | Heroes | aura suppression-resist, charge meter, Rally / AreaDamage abilities |
-| 14 | Tech tree | Tier 1/2/3 + doctrine choice, ResearchInProgress |
-| 15 | Unit AI | threat response, routing retreat to HomeBase |
-| 16 | Repair Bay | passive heal of nearby allied vehicles, scrap-gated |
-| 17 | Pop cap | base 20 + 10 per Built SupplyDepot, gates production |
-| 18-22 | AI opponent | economic / production / tactical / hero / doctrine systems |
-| 23 | Procedural map gen | LCG seed, mission-shaped layout, base/chokepoint coords |
-| 24 | Missions + win conditions | per-type rules, terminal Won/Lost |
-| 25 | Campaign / living world | 4-zone state, mission outcome → territory shifts |
-| 26 | Authored beats | HeroGoesDown, LastStand, AncientUnification |
-| 27 | Hollow faction | corruption-zone spawners, Act-3 United Voice rate doubling |
-| 28 | Level editor | tile JSON save/load, dimension validation |
-| 29 | Save / load | in-memory slots, snapshot/restore of factions/units/tiles |
-| 30 | Render scaffolding | feature-gated `render` module; full pipeline pending Synty work |
-| 31 | Campaign MVP loop | `GameState` + `CampaignRun`; title menu BRP (`game/new/load/save/exit`); `mission/select` + auto-resolve back to Campaign; victory = all zones, defeat = none |
-| 32 | TUI client | `cindertide-play` binary; ratatui TUI with briefing/debrief/finale screens; single-command boot (server thread + TUI on main thread) |
-| 33 | Linear faction campaign | Replaced territory system with 5-mission linear structure; Combine/Ironborn/Architect factions; `GlobalProgress` tracking; Architect handler unlock after either base campaign |
-| 34 | Narrative content | `assets/narrative.toml` data file with all mission briefings and debriefs; BRP endpoints `narrative/mission`, `narrative/debrief`, `narrative/finale` |
+### Engine & Scaffolding
+- Bevy 0.15 with `DefaultPlugins`, isometric orthographic 3D camera
+- WASD + edge-scroll camera pan; scroll wheel zoom; proper isometric angle
+- Feature-gated render module; `MinimalPlugins` path retained for headless tests
+- BRP (Bevy Remote Protocol) scaffold on port 15703 for headless test access
+- Save/load: in-memory slots, snapshot/restore of factions/units/tiles
 
----
+### Map & World
+- `Tile`, `Zone`, `ControlPoint`, `GridPos` ECS components; full terrain type set
+- 8-directional A* pathfinding with diagonal movement and corner-cutting prevention
+- Baked NavMesh with flat cost arrays; incremental update when buildings are placed
+- Control point capture (contested rules, per-faction trickle bonuses)
+- Fog of war with per-unit vision radius from `UnitStats`
 
-## Phase 6 — Playable surface (steps 32–34)
+### Economy
+- Fuel / Scrap / Manpower per faction; trickle rates, caps, spend/refund
+- 16 building types with grid-snap placement, construction time, health
+- Per-building production queues (cap 5); manpower gates unit emergence
+- Population cap: base 20 + 10 per built SupplyDepot; heroes excluded
+- RepairBay passive-heals nearby allied vehicles (scrap-gated)
 
-_Steps 32–34 completed. See Completed table above._
+### Units & Combat
+- Four unit types: Riflemen, HeavyWeapons, LightVehicle, HeavyArmor
+- Health, AttackDamage, range check, cover damage reduction
+- Cover (`InCover`), flanking/facing (`Facing`, `AttackAngle`), suppression/morale (`Pinned`, `Routing`, `MoraleState`)
+- Heroes: aura suppression-resist, charge meter, Rally/AreaDamage abilities; `HeroDowned` state
+- Tech tree: Tier 1/2/3 at Command Bunker; doctrine branch (Assault/Fortification/Salvage) at Tier 2
 
----
+### AI
+- Strategic AI: phase-aware build orders, 90-second attack waves, scouting, defensive intercept, retreat at < 25% HP
+- Unit AI: threat response (return fire), routing retreat via pathfinding to HomeBase
+- Hero AI: ability fires when charge full and 3+ enemies in range; retreats below 25% HP
 
-## Phase 1 — RTS economy loop (steps 8–12)
+### Procedural Map Generation
+- Archetype system: S-expression `.lisp` files in `assets/archetypes/`
+- No-recompile extensibility: drop a new `.lisp` to add an archetype
+- 10 step types: fill, river, bridges, forests, rubble, urban-ruins, ridgelines, islands, spawn-zones, resources
+- 6 spawn layouts: corners, sides, triangle, ring, mirror, ffa-center
+- Map sizes keyed to mission type: Defense/Survival 80×52, Assault/Control 128×80, Extraction 160×100
 
-Goal: a headless match in which two factions can gather, build, and fight.
-At the end of phase 1, an automated test can run a small skirmish entirely
-through BRP and observe a winner emerge.
+### Campaign & Mission Systems
+- Linear faction campaign: 5 missions per faction, played in order
+- Combine, Ironborn, and Architect campaigns; Architect unlocks after completing both base campaigns
+- Campaign progress saved to `~/.cindertide/progress.toml`
+- Campaign TOML files in `assets/campaigns/` — no code changes to add a campaign
+- 15 hand-authored mission maps in `assets/maps/` with pre-placed units, buildings, and scripted events
+- Mission win/loss conditions per type; terminal Won/Lost state
 
-### Step 8 — Resources
-- `Resources { fuel, scrap, manpower }` per faction (component on a Faction entity)
-- Pure functions: `can_afford(cost, pool)`, `spend(cost, pool)`, `refund`
-- Trickle rates configurable; manpower caps production rate
-- BRP: `resources/status { faction }` → totals + trickle rates
+### Mission Script System
+- TOML scripts in `assets/scripts/`; loaded by faction + mission name
+- Triggers: `time` (elapsed seconds), `beat` (HeroGoesDown, LastStand, AncientUnification)
+- Actions: dialogue (bottom bar, 4s display with queue), spawn_units, objective/change_objective, win_mission, lose_mission
 
-### Step 9 — Control point capture
-- Capture progress over time when only one side has units on the point
-- Contested → both sides present → no progress either way
-- Held point adds a trickle to that faction's resources (wires steps 2 + 8)
-- Per-faction bonus rates per `mechanics.md` (Combine fuel, Ironborn scrap)
-- BRP: `point/status { entity }` → owner, progress, type
+### Authored Beats
+- `HeroGoesDown`, `LastStand`, `AncientUnification` beat IDs
+- State watchers fire beats from ECS observers; beat outcomes consumed by script system
 
-### Step 10 — Buildings & grid placement
-- Building components per `mechanics.md` table (Refinery, Barracks, Motor Pool, …)
-- Grid-snap placement validation: not on void, not on water, not overlapping
-- Construction time + resource cost; building has its own `Health`
-- Adjacency bonus hooks (motor pool ↔ barracks) — placeholder, no effect yet
-- BRP: `building/place`, `building/status`
+### Hollow Faction
+- Corruption zone spawners; spawn rate scales with map corruption coverage
+- Act 3 `AncientUnification` beat doubles spawn rate and enables hero priority targeting
 
-### Step 11 — Production queues
-- Per-building queues, cap 5
-- Manpower trickle gates how fast queued units actually emerge
-- Unit spawns at building's exit tile
-- BRP: `production/enqueue { building, unit_type }`, `production/queue_status`
+### 3D Client (full feature set)
+- Full campaign flow: title → campaign picker → briefing → in-mission → debrief → game over
+- Standard RTS controls: box/drag select, shift-click toggle, right-click move/attack, A+click attack-move, S stop, H hold, Space pause, Tab cycle units
+- Unit facing (smooth rotation), death flash effects, building rubble on destruction
+- HUD: resource bar, unit info panel, production queue, minimap, mission objectives
+- Unit ability (Q key), tech tree panel (T key)
+- Audio event infrastructure ready (no .ogg assets yet)
+- LAN multiplayer MVP: host (H) or join (J) from title, TCP state sync at 10 Hz
+- `CINDERTIDE_MODEL_PATH` loads GLB models; falls back to colored cubes
 
-### Step 12 — Unit variety
-- Heavy weapons (suppression specialists, high `suppression_value`)
-- Light vehicles (fast, flank-oriented)
-- Heavy armor (T3, frontline)
-- Reuse `RiflemanBundle` pattern for each
-- Stats per `units.md` (currently a stub — populate as part of this step if needed)
+### Map Editor
+- Access via E (title) or Space→E (in-game pause); Escape returns to paused game
+- Tools: paint terrain, place unit, place building, erase, script editor, campaign editor
+- G: generate from archetype panel (8 archetypes, adjustable size/seed)
+- Ctrl+S save / Ctrl+L load map TOML
+- P: playtest current map as live mission
 
 ---
 
-## Phase 2 — Combat depth (steps 13–17)
+## What Remains
 
-### Step 13 — Heroes
-- `Hero` marker, `SignatureAbility { charge, max, ability_kind }`, `Aura { radius, effects }`
-- Aura applies passive modifiers to nearby allied units (e.g. suppression resist)
-- Charge meter accumulates over time and from unit kills nearby
-- "Goes down" state — `HeroDowned` instead of `Dead`; recoverable
-- BRP: `hero/ability_use { entity }`, `hero/status { entity }`
+Priority order — highest first.
 
-### Step 14 — Tech tree
-- Tier 1/2/3 progression at Command Bunker (resource cost + research time)
-- Doctrine branch chosen at tier 2 (Assault / Fortification / Salvage), mutually exclusive
-- Gates unit and building availability per `mechanics.md`
-- BRP: `tech/research { branch }`, `tech/status { faction }`
+### High Priority
 
-### Step 15 — Unit AI (autonomous behavior)
-- Threat response: return fire when attacked and no active order
-- Cover seek: under fire with no order → move to nearest cover within short range
-- Morale rout: broken units already gain `Routing` (step 7) — this step makes them actually move toward their base
-- Attack-move targeting: nearest enemy by default, hero target overrides
+| Item | Notes |
+|---|---|
+| Real audio assets | Infrastructure exists; needs `.ogg` files in `assets/audio/` |
+| Unit animations | Walk and attack cycles; units are currently static cubes/models |
+| Balance pass | Unit stats exist but are not tuned for fun |
 
-### Step 16 — Repair & reinforcement
-- `RepairBay` building heals nearby vehicles/robots over time (scrap cost)
-- Engineer unit can field-repair (scrap cost, manual order)
-- Barracks reinforce squads back to full size
-- BRP: `repair/start { entity }`, `reinforce/start { squad }`
+### Medium Priority
 
-### Step 17 — Population cap
-- Supply Depot raises cap by a fixed amount (per `mechanics.md`)
-- Cap shared across infantry, vehicles, robots
-- Heroes excluded
-- Production blocks (queue freezes, doesn't reject) when cap reached
+| Item | Notes |
+|---|---|
+| Multiplayer lobby hardening | TCP MVP works; needs slot-based team assignment and reconnect handling |
+| Real 3D model assets | Pipeline exists via `CINDERTIDE_MODEL_PATH`; no models converted yet |
+| Architect finale text adaptation | Unlock logic exists; finale text branching on which faction was beaten first is stubbed, not authored |
+| Save/load mid-mission resume | In-memory slots work; mid-mission resume not fully tested |
+
+### Lower Priority
+
+| Item | Notes |
+|---|---|
+| Co-op player controls | Architecture supports it; second-player controls not wired |
+| Faction asymmetry depth | Combine fuel-radius supply system and Ironborn Foundry scrap recycling are structural, not yet mechanically distinct at depth |
+| Hero recruitment variety | Per-faction acquisition paths; currently Rifleman bundle model for all |
+| Additional campaigns | Data-driven; just needs TOML + maps |
+| Additional archetypes | Drop a `.lisp` in `assets/archetypes/` |
 
 ---
 
-## Phase 3 — AI opponent (steps 18–22)
+## How to Run
 
-Per `agents.md`. AI plays by player rules — no stat inflation, only smarter
-decisions and faster reactions.
+```sh
+# Default: 3D client, colored cube placeholder mode
+cargo run --bin cindertide
 
-### Step 18 — Economic AI
-- Prioritizes nearby fuel/scrap nodes early
-- Expands toward control points: fuel depot → strategic → high ground
-- Builds Supply Depots in step with production
-- Salvages battlefield scrap when safe
+# With GLB models
+CINDERTIDE_MODEL_PATH=/path/to/models cargo run --bin cindertide
+```
 
-### Step 19 — Production AI
-- Maintains unit-type ratios per chosen doctrine
-- Reacts to opponent composition: heavy armor seen → anti-tank; heavy infantry → suppression
-- Never idles a production building if resources allow
+Headless tests use `MinimalPlugins` and remain independent of the render path:
 
-### Step 20 — Tactical AI
-- 3 groups: **attack**, **defend**, **harass**
-- Attack pushes opponent's weakest front; defend holds base + key points; harass targets resource nodes
-- Rebalance every 60 sim seconds
-- Mortar/MG suppress before infantry advances; flank with light vehicles
-
-### Step 21 — Hero AI
-- Hero attached to attack group
-- Ability fires when charge full and 3+ enemies in range
-- Retreats to Repair Bay below 25% HP
-
-### Step 22 — Doctrine consistency
-- Doctrine chosen at match start, never switched
-- Tier advancement at fixed resource thresholds
-- Research priority order within doctrine is static
-
----
-
-## Phase 4 — Campaign & procedural (steps 23–27)
-
-### Step 23 — Procedural map generation
-- 3–5 zones per map per `world.md`
-- Authored chokepoints (always 1–2) — flagged for AI
-- Mission-type shapes the layout: linear (assault) / open (control) / radial (defense) / asymmetric (extraction) / compact (survival)
-- BRP: `map/generate { seed, mission_type }` returns map summary
-
-### Step 24 — Mission types & win conditions
-- Per-type win/lose triggers wired to ECS observers
-- Defeat = base destroyed (assault), points lost (control), waves survived (survival), etc.
-- BRP: `mission/status` returns objective progress
-
-### Step 25 — Living world
-- Campaign-level territory grid; faction borders shift on outcomes
-- Hollow corruption spreads one zone per mission in Act 2+
-- Mission options generated from current territory state (2–3 per turn)
-
-### Step 26 — Authored beat triggers
-- State watchers per the table in `agents.md` (robot save, betrayal, etc.)
-- Beat outcomes flex based on win/loss path per `campaign.md`
-- BRP: `campaign/state` returns acts, flags, fired beats
-
-### Step 27 — Hollow faction
-- Corruption zones spawn Hollow units on a timer
-- Spawn rate scales with map corruption coverage
-- Behavioral modes match zone type: consuming / subsuming / indifferent
-- Act 3: United Voice — all modes simultaneous, doubled spawn rate, hero priority targeting
-
----
-
-## Phase 5 — Tools & presentation (steps 28–30)
-
-### Step 28 — Level editor (data-driven)
-- Map data as JSON or RON; no code in maps (per `world.md`)
-- BRP methods: `editor/set_tile`, `editor/place_object`, `editor/save_map`, `editor/load_map`
-- Validation rules from `world.md`: 3–6 zones, 1–2 chokepoints, defensible bases
-
-### Step 29 — Save / load
-- Serialize world state (entities, components, queued production, campaign state)
-- Resume mid-mission and mid-campaign
-- BRP: `save/write { slot }`, `save/read { slot }`
-
-### Step 30 — Rendering pass
-- Add a non-headless run mode using `DefaultPlugins`
-- Tests stay on `MinimalPlugins`
-- Synty assets per `world.md`
-- This is the *only* step that requires non-headless work
-
----
-
-## Phase 7 — Player agency (steps 35–37)
-
-### Step 35 — In-mission player controls
-- Unit selection, move/attack orders, and building construction via TUI
-- Player can issue commands to their faction; AI continues to drive the opponent
-
-### Step 36 — Faction asymmetry
-- Combine fuel-radius supply system
-- Ironborn scrap recycling via Foundry
-- Covenant morale aura damage modifier
-
-### Step 37 — Hero recruitment and abilities
-- Per-faction acquisition paths
-- Signature abilities per hero
-
----
-
-## How to use this roadmap
-
-- One step per commit; commit message format `step N: short title`.
-- Each step adds: pure functions + tests, ECS components/systems, BRP method(s), and at least one BRP integration test in `tests/`.
-- If a step grows past ~500 lines diff, split it.
-- If a step needs a foundation that hasn't been built, build the foundation first as its own step — don't inline it.
-- Update this file when a step lands (move it from "next" into "completed").
+```sh
+cargo test
+```
