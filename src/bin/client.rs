@@ -39,6 +39,7 @@ use cindertide::{
 use std::collections::{HashMap, HashSet};
 use std::io::{Read as IoRead, Write};
 use std::net::{TcpListener, TcpStream};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{self, Receiver, Sender};
 use serde::{Serialize, Deserialize};
@@ -70,12 +71,14 @@ fn main() {
         .init_resource::<MultiplayerRole>()
         .init_resource::<NetIdCounter>()
         .init_resource::<RemoteGameState>()
+        .init_resource::<ModelAssets>()
         .insert_resource(MinimapTimer(0.0))
         .insert_resource(NetBroadcastTimer(0.0))
         .add_systems(Startup, setup_scene)
         .add_systems(Startup, setup_ui)
         .add_systems(Startup, load_narrative)
         .add_systems(Startup, startup_load_progress)
+        .add_systems(Startup, load_model_assets)
         .add_systems(Update, render_tiles)
         .add_systems(Update, sync_rendered_tile_colors)
         .add_systems(Update, spawn_unit_visuals)
@@ -505,6 +508,66 @@ struct NetChannels {
 /// Timer for state broadcast cadence (host only).
 #[derive(Resource)]
 struct NetBroadcastTimer(f32);
+
+// ── 3D model asset loading ────────────────────────────────────────────────────
+
+/// Holds the resolved directory path for GLB model files.
+/// `path` is `Some` only when `CINDERTIDE_MODEL_PATH` is set and the directory exists.
+/// When `None`, all visuals fall back to colored placeholder cuboids.
+#[derive(Resource, Default)]
+struct ModelAssets {
+    path: Option<PathBuf>,
+}
+
+/// Map a `UnitType` to its expected GLB scene filename (relative to the model directory).
+fn unit_model_name(unit_type: &UnitType) -> &'static str {
+    match unit_type {
+        UnitType::Riflemen     => "unit_riflemen.glb#Scene0",
+        UnitType::HeavyWeapons => "unit_heavy_weapons.glb#Scene0",
+        UnitType::LightVehicle => "unit_light_vehicle.glb#Scene0",
+        UnitType::HeavyArmor   => "unit_heavy_armor.glb#Scene0",
+    }
+}
+
+/// Map a `BuildingType` to its expected GLB scene filename.
+fn building_model_name(building_type: &BuildingType) -> &'static str {
+    match building_type {
+        BuildingType::CommandBunker       => "building_command_bunker.glb#Scene0",
+        BuildingType::Barracks            => "building_barracks.glb#Scene0",
+        BuildingType::Refinery            => "building_refinery.glb#Scene0",
+        BuildingType::Scrapyard           => "building_scrapyard.glb#Scene0",
+        BuildingType::RecruitmentOffice   => "building_recruitment_office.glb#Scene0",
+        BuildingType::MotorPool           => "building_motor_pool.glb#Scene0",
+        BuildingType::Foundry             => "building_foundry.glb#Scene0",
+        BuildingType::Airfield            => "building_airfield.glb#Scene0",
+        BuildingType::Workshop            => "building_workshop.glb#Scene0",
+        BuildingType::ResearchLab         => "building_research_lab.glb#Scene0",
+        BuildingType::SupplyDepot         => "building_supply_depot.glb#Scene0",
+        BuildingType::Watchtower          => "building_watchtower.glb#Scene0",
+        BuildingType::RepairBay           => "building_repair_bay.glb#Scene0",
+        BuildingType::Pillbox             => "building_pillbox.glb#Scene0",
+        BuildingType::AAGun               => "building_aa_gun.glb#Scene0",
+        BuildingType::TankTrap            => "building_tank_trap.glb#Scene0",
+    }
+}
+
+/// Startup system: resolve `CINDERTIDE_MODEL_PATH` and populate `ModelAssets`.
+fn load_model_assets(mut model_assets: ResMut<ModelAssets>) {
+    match std::env::var("CINDERTIDE_MODEL_PATH") {
+        Ok(val) => {
+            let path = PathBuf::from(&val);
+            if path.is_dir() {
+                info!("3D models loaded from: {}", val);
+                model_assets.path = Some(path);
+            } else {
+                info!("CINDERTIDE_MODEL_PATH set but directory not found — using placeholder geometry");
+            }
+        }
+        Err(_) => {
+            info!("CINDERTIDE_MODEL_PATH not set — using placeholder geometry");
+        }
+    }
+}
 
 /// Latest game state received from host (client only).
 #[derive(Resource, Default)]
@@ -1472,19 +1535,44 @@ fn spawn_unit_visuals(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut visual_entities: ResMut<VisualEntities>,
-    units: Query<(Entity, &UnitPos, &Faction), Added<UnitType>>,
+    model_assets: Res<ModelAssets>,
+    asset_server: Res<AssetServer>,
+    units: Query<(Entity, &UnitPos, &Faction, &UnitType), Added<UnitType>>,
 ) {
-    for (entity, pos, faction) in &units {
-        let color = faction_color(faction);
+    for (entity, pos, faction, unit_type) in &units {
         let world_pos = grid_to_world(pos.pos.x, pos.pos.y) + Vec3::Y * 0.75;
-        let visual = commands.spawn((
-            Mesh3d(meshes.add(Cuboid::new(0.6, 1.5, 0.6))),
-            MeshMaterial3d(materials.add(StandardMaterial {
-                base_color: color,
-                ..default()
-            })),
-            Transform::from_translation(world_pos),
-        )).id();
+
+        // Attempt to load a GLB model if CINDERTIDE_MODEL_PATH is set.
+        // Scale factor 0.01 assumes Synty-style centimetre-unit exports — tune per asset pack.
+        let visual = if let Some(ref dir) = model_assets.path {
+            let glb_name = unit_model_name(unit_type);
+            // Strip the "#Scene0" fragment to get the bare file name for existence check.
+            let file_name = glb_name.split('#').next().unwrap_or(glb_name);
+            let full_path = dir.join(file_name);
+            if full_path.exists() {
+                commands.spawn((
+                    SceneRoot(asset_server.load(format!("{}/{}", dir.display(), glb_name))),
+                    Transform::from_translation(world_pos).with_scale(Vec3::splat(0.01)),
+                )).id()
+            } else {
+                // File missing — fall back to cuboid placeholder.
+                let color = faction_color(faction);
+                commands.spawn((
+                    Mesh3d(meshes.add(Cuboid::new(0.6, 1.5, 0.6))),
+                    MeshMaterial3d(materials.add(StandardMaterial { base_color: color, ..default() })),
+                    Transform::from_translation(world_pos),
+                )).id()
+            }
+        } else {
+            // No model path configured — use colored cuboid.
+            let color = faction_color(faction);
+            commands.spawn((
+                Mesh3d(meshes.add(Cuboid::new(0.6, 1.5, 0.6))),
+                MeshMaterial3d(materials.add(StandardMaterial { base_color: color, ..default() })),
+                Transform::from_translation(world_pos),
+            )).id()
+        };
+
         visual_entities.units.insert(entity, visual);
     }
 }
@@ -1539,22 +1627,46 @@ fn spawn_building_visuals(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut visual_entities: ResMut<VisualEntities>,
-    buildings: Query<(Entity, &BuildingPos, &Faction), Added<BuildingType>>,
+    model_assets: Res<ModelAssets>,
+    asset_server: Res<AssetServer>,
+    buildings: Query<(Entity, &BuildingPos, &Faction, &BuildingType), Added<BuildingType>>,
 ) {
-    for (entity, pos, faction) in &buildings {
+    for (entity, pos, faction, building_type) in &buildings {
         if visual_entities.buildings.contains_key(&entity) {
             continue;
         }
-        let color = faction_color(faction).mix(&Color::WHITE, 0.25);
         let world_pos = grid_to_world(pos.pos.x, pos.pos.y) + Vec3::Y * 0.5;
-        let visual = commands.spawn((
-            Mesh3d(meshes.add(Cuboid::new(0.9, 1.0, 0.9))),
-            MeshMaterial3d(materials.add(StandardMaterial {
-                base_color: color,
-                ..default()
-            })),
-            Transform::from_translation(world_pos),
-        )).id();
+
+        // Attempt to load a GLB model if CINDERTIDE_MODEL_PATH is set.
+        // Scale factor 0.015 assumes Synty-style centimetre-unit exports — tune per asset pack.
+        let visual = if let Some(ref dir) = model_assets.path {
+            let glb_name = building_model_name(building_type);
+            let file_name = glb_name.split('#').next().unwrap_or(glb_name);
+            let full_path = dir.join(file_name);
+            if full_path.exists() {
+                commands.spawn((
+                    SceneRoot(asset_server.load(format!("{}/{}", dir.display(), glb_name))),
+                    Transform::from_translation(world_pos).with_scale(Vec3::splat(0.015)),
+                )).id()
+            } else {
+                // File missing — fall back to cuboid placeholder.
+                let color = faction_color(faction).mix(&Color::WHITE, 0.25);
+                commands.spawn((
+                    Mesh3d(meshes.add(Cuboid::new(0.9, 1.0, 0.9))),
+                    MeshMaterial3d(materials.add(StandardMaterial { base_color: color, ..default() })),
+                    Transform::from_translation(world_pos),
+                )).id()
+            }
+        } else {
+            // No model path configured — use colored cuboid.
+            let color = faction_color(faction).mix(&Color::WHITE, 0.25);
+            commands.spawn((
+                Mesh3d(meshes.add(Cuboid::new(0.9, 1.0, 0.9))),
+                MeshMaterial3d(materials.add(StandardMaterial { base_color: color, ..default() })),
+                Transform::from_translation(world_pos),
+            )).id()
+        };
+
         visual_entities.buildings.insert(entity, visual);
     }
 }

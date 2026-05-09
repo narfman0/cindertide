@@ -61,3 +61,53 @@ See: [campaign.md](campaign.md)
 
 ## Factions
 See: [factions.md](factions.md)
+
+---
+
+## 3D Model Assets
+
+The client runs in **placeholder mode** by default — all units and buildings appear as colored cuboids. This requires no setup and is fully playable.
+
+### Enabling GLB Models
+
+Set the `CINDERTIDE_MODEL_PATH` environment variable to a directory containing `.glb` model files before launching the client:
+
+```sh
+CINDERTIDE_MODEL_PATH=/path/to/models cargo run --bin cindertide
+```
+
+The game logs either `3D models loaded from: <path>` or `CINDERTIDE_MODEL_PATH not set — using placeholder geometry` on startup.
+
+### File Naming Convention
+
+Each unit and building type maps to a specific filename. Place the corresponding `.glb` files in the model directory:
+
+| Unit type | File |
+|-----------|------|
+| Riflemen | `unit_riflemen.glb` |
+| HeavyWeapons | `unit_heavy_weapons.glb` |
+| LightVehicle | `unit_light_vehicle.glb` |
+| HeavyArmor | `unit_heavy_armor.glb` |
+
+| Building type | File |
+|---------------|------|
+| CommandBunker | `building_command_bunker.glb` |
+| Barracks | `building_barracks.glb` |
+| Refinery | `building_refinery.glb` |
+| Scrapyard | `building_scrapyard.glb` |
+| RecruitmentOffice | `building_recruitment_office.glb` |
+| MotorPool | `building_motor_pool.glb` |
+| Foundry | `building_foundry.glb` |
+| Airfield | `building_airfield.glb` |
+| Workshop | `building_workshop.glb` |
+| ResearchLab | `building_research_lab.glb` |
+| SupplyDepot | `building_supply_depot.glb` |
+| Watchtower | `building_watchtower.glb` |
+| RepairBay | `building_repair_bay.glb` |
+| Pillbox | `building_pillbox.glb` |
+| AAGun | `building_aa_gun.glb` |
+| TankTrap | `building_tank_trap.glb` |
+
+Missing files fall back to the placeholder cuboid silently — you can supply models incrementally without breaking anything.
+
+The `assets/models/` directory is gitignored so large binary asset packs are never committed.
