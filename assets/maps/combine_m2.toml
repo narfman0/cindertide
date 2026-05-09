@@ -1,0 +1,12 @@
+mission_type = "Defense"
+player_faction = "Combine"
+opponent_faction = "Ironborn"
+deadline_seconds = 1800.0
+mission_index_override = 2
+briefing_override = "Survey team at grid 7-Pale went silent forty hours ago. A second team confirmed their last position before also going silent. You are being sent to secure the site and extract whatever they found. Command has reviewed the anomalous readings — they are not sharing the review. Your orders are simple: secure, extract, do not interact with structures. If you see something that doesn't look right, that is not your problem. Bring back the equipment."
+win_override = "Site secured. Equipment recovered. Three members of your unit have been placed on medical observation — standard protocol for prolonged exposure to industrial contaminants. Command thanks you for your service. The site has been reclassified."
+loss_override = "We've lost the site. Whatever the Ironborn found there — Command is more concerned about that than your casualties. File your report. Leave out anything you can't explain."
+script_events = []
+tiles = []
+units = []
+buildings = []

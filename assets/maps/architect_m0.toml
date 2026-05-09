@@ -1,0 +1,12 @@
+mission_type = "Extraction"
+player_faction = "Combine"
+opponent_faction = "Ironborn"
+deadline_seconds = 1800.0
+mission_index_override = 0
+briefing_override = "I filed the survey documentation with both offices on the same morning. Different forms, same coordinates. The Combine moves on paperwork; the Ironborn moves on presence. I needed a first contact that neither side would forgive. This is the ignition point. Both sides will remember who threw the first punch. Neither will know I handed them the match."
+win_override = "First variable resolved. Blood in the Ironfields. The ground has accepted it — I can feel the reading shift. Seven more sites to prepare."
+loss_override = "The wrong side holds the depot. Adjusting second contact point accordingly. The ritual is not about outcomes. It is about accumulation."
+script_events = []
+tiles = []
+units = []
+buildings = []

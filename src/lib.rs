@@ -1592,6 +1592,8 @@ fn handle_game_new(In(params): In<Option<Value>>, world: &mut World) -> BrpResul
             current_mission: 0,
             outcomes: Vec::new(),
             complete: false,
+            campaign_id: String::new(),
+            mission_maps: Vec::new(),
         }),
         current_mission_entity: None,
         missions_won: 0,
@@ -1708,6 +1710,8 @@ fn handle_game_load(In(params): In<Option<Value>>, world: &mut World) -> BrpResu
                 current_mission: r["current_mission"].as_u64().unwrap_or(0) as usize,
                 complete: r["complete"].as_bool().unwrap_or(false),
                 outcomes,
+                campaign_id: String::new(),
+                mission_maps: Vec::new(),
             })
         };
         *world.resource_mut::<ActiveRun>() = ActiveRun {
@@ -1727,6 +1731,7 @@ fn handle_game_load(In(params): In<Option<Value>>, world: &mut World) -> BrpResu
             handler_unlocked: gp["handler_unlocked"].as_bool().unwrap_or(false),
             handler_beaten: gp["handler_beaten"].as_bool().unwrap_or(false),
             first_beaten,
+            campaigns_beaten: Default::default(),
         };
     }
 
@@ -2134,6 +2139,8 @@ fn handle_campaign_init(In(_params): In<Option<Value>>, world: &mut World) -> Br
             current_mission: 0,
             outcomes: Vec::new(),
             complete: false,
+            campaign_id: String::new(),
+            mission_maps: Vec::new(),
         }),
         current_mission_entity: None,
         missions_won: 0,

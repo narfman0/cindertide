@@ -1,0 +1,20 @@
+id = "ironborn"
+name = "Forged in Ash"
+faction = "Ironborn"
+description = "Lead the Ironborn through five missions of defiance and survival."
+unlock_requires = ""
+
+[[missions]]
+map = "maps/ironborn_m0.toml"
+
+[[missions]]
+map = "maps/ironborn_m1.toml"
+
+[[missions]]
+map = "maps/ironborn_m2.toml"
+
+[[missions]]
+map = "maps/ironborn_m3.toml"
+
+[[missions]]
+map = "maps/ironborn_m4.toml"

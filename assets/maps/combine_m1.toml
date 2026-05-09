@@ -1,0 +1,12 @@
+mission_type = "Control"
+player_faction = "Combine"
+opponent_faction = "Ironborn"
+deadline_seconds = 1800.0
+mission_index_override = 1
+briefing_override = "The Ashline bridge is the only viable northern supply route. Ironborn forces are attempting to cut it. Hold the crossing until reinforcements can widen our position. Scouts have flagged unusual readings from the ravine below — geology team is en route, not your concern. Your concern is the bridge."
+win_override = "Bridge held. Supply line intact. Geology team's report has been classified — above your clearance. Good work."
+loss_override = "Bridge lost. Northern operations are now running on reserve supply. Command wants to know why we held the ravine longer than the crossing. We'd like to know that too."
+script_events = []
+tiles = []
+units = []
+buildings = []

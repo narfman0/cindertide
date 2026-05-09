@@ -113,6 +113,8 @@ mod tests {
             current_mission: 0,
             outcomes: Vec::new(),
             complete: false,
+            campaign_id: String::new(),
+            mission_maps: Vec::new(),
         };
         assert_eq!(run.current_mission, 0);
         assert!(!run.complete);

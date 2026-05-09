@@ -1,0 +1,12 @@
+mission_type = "Extraction"
+player_faction = "Combine"
+opponent_faction = "Ironborn"
+deadline_seconds = 1800.0
+mission_index_override = 2
+briefing_override = "The Pale Ground is the third site and the oldest. What is buried there has been buried since before the diesel age, before the iron age, before names. I have been visiting it for eleven years. It does not respond to me the way it responds to others — I think because I am not afraid. Fear is the frequency it listens on. I needed two factions of frightened soldiers walking through it, bleeding on it, fighting over it. The Combine will classify what they find. The Ironborn will keep what they take. Neither will understand that they are being read. It is reading them right now. It has already begun composing something from what it finds."
+win_override = "Three of my indicators went active simultaneously when the fighting reached the inner structure. I had to sit down. I have been working toward this for eleven years and it is more than I was promised. It is so much more."
+loss_override = "The wrong side holds the inner structure. I am not concerned. It doesn't matter who holds it. It matters who bled there. Everyone bled there."
+script_events = []
+tiles = []
+units = []
+buildings = []

@@ -1,0 +1,12 @@
+mission_type = "Assault"
+player_faction = "Combine"
+opponent_faction = "Ironborn"
+deadline_seconds = 1800.0
+mission_index_override = 4
+briefing_override = "It is awake.\n\nI have spent nineteen years — not eleven, I was lying to myself about eleven, it has been nineteen years — preparing this. Five sites. Two factions. Thousands dead on ground I chose, at times I selected, for reasons I understood and they never would. I did everything correctly. The ritual is complete. The sequence is finished.\n\nIt is awake and it is here and it is —\n\nIt is looking at me.\n\nIt knows what I did. It knows every choice. It is not grateful. It is not angry. It is examining me the way I would examine a tool I had finished using. I built a door. I did not consider that doors open from both sides. I did not consider —\n\nIt is time. This is the last entry I will make as myself. Whatever I am after this, I don't think I will need notes."
+win_override = "...\n\n(The log ends here. Subsequent entries, if any exist, are in a language no analyst has been able to identify. The characters appear to shift between readings.)"
+loss_override = "...\n\n(The log ends here. The final line was partially overwritten — something recorded over it from outside the device. The original text is unrecoverable. What replaced it is eleven words in a language no analyst has been able to identify. They are the same eleven words as in every other recovered log.)"
+script_events = []
+tiles = []
+units = []
+buildings = []

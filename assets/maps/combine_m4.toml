@@ -1,0 +1,12 @@
+mission_type = "Assault"
+player_faction = "Combine"
+opponent_faction = "Ironborn"
+deadline_seconds = 1800.0
+mission_index_override = 4
+briefing_override = "Command is offline. Northern, southern, and central command are all offline. What emerged from the subsurface at grid 9-Last is not a geological event and it is not an enemy faction. It is something we do not have a category for. You have no extraction window. You have no reinforcements. You have what's in front of you and you have orders to hold your position for as long as holding means anything. Protect your people. That is the only objective that matters now."
+win_override = "You held. We don't know why it stopped — it simply stopped, and then it was gone, and the ground closed. Command is slowly coming back online. Nobody is saying what it was. I think most of them didn't see it directly. You did. I'm sorry you did."
+loss_override = "Position overrun. Survivors are reporting in from three scattered points. Whatever it was — it moved through you like you weren't there. Not with malice. That's the part nobody can explain. It didn't hate you. You just weren't relevant to it."
+script_events = []
+tiles = []
+units = []
+buildings = []

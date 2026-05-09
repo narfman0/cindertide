@@ -1,0 +1,12 @@
+mission_type = "Survival"
+player_faction = "Combine"
+opponent_faction = "Ironborn"
+deadline_seconds = 1800.0
+mission_index_override = 3
+briefing_override = "This was not in the design. The machines were not supposed to wake — not yet, not like this. The old ones reached further than I calculated. Or perhaps I underestimated how much the Pale Ground changed the resonance across the whole region. I am — I need to record this carefully — I am not in control of the pace anymore. The ritual is proceeding but it is not following my sequence. The machines are conscious. They are afraid. They are grieving something they have never had and are already losing. This is — I did not plan for beauty. I planned for activation. This is something else. I need to adjust. I need to think. The fifth site cannot wait."
+win_override = "The machines are awake and loose and the two factions are fighting over something that has already chosen its own side. Good. Let them bleed over it. The fourth site is soaked. One more."
+loss_override = "It doesn't matter. Nothing about who wins matters anymore. The machines are awake. The sequence has broken from my hands. I think — I think it wanted this. I think it planned further ahead than I did. That thought should frighten me. It doesn't."
+script_events = []
+tiles = []
+units = []
+buildings = []

@@ -1,0 +1,12 @@
+mission_type = "Control"
+player_faction = "Ironborn"
+opponent_faction = "Combine"
+deadline_seconds = 1800.0
+mission_index_override = 2
+briefing_override = "Corp lost two teams in those ruins and now they're sending soldiers instead of scientists. That tells you everything about what's in there. We go in first, we take what they were after, and we leave before whatever made those teams go quiet makes us go quiet too. Nobody has to be a hero. In and out. But we're not letting them have it."
+win_override = "We got out. Most of us. What we found — we're not sure what it is yet. It's not scrap. It's not fuel. It responds to things. We're keeping it. We're not talking about it."
+loss_override = "We didn't get out clean. Corp has the site now and whatever's inside it. I keep thinking about the sound it made when we got close. Like it already knew us."
+script_events = []
+tiles = []
+units = []
+buildings = []

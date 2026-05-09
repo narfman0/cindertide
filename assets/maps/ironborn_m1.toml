@@ -1,0 +1,12 @@
+mission_type = "Assault"
+player_faction = "Ironborn"
+opponent_faction = "Combine"
+deadline_seconds = 1800.0
+mission_index_override = 1
+briefing_override = "Push through the Ashline before they fortify the far side. Cut their northern line and they're fighting on one stomach. Something's off about the ravine — scouts won't go near the edges after dark, won't say why. Don't ask them. Just take the bridge."
+win_override = "We're through. Northern supply's cut. Nobody's talking about what they saw in the ravine and that's fine. We got what we came for."
+loss_override = "They held us. Good position, credit where it's due. We'll find another way north. The ravine stays in the back of my mind though. Something down there was watching."
+script_events = []
+tiles = []
+units = []
+buildings = []

@@ -1,0 +1,12 @@
+mission_type = "Defense"
+player_faction = "Ironborn"
+opponent_faction = "Combine"
+deadline_seconds = 1800.0
+mission_index_override = 4
+briefing_override = "The ground split open at The Last Works and something came out that none of us have words for. Corp is gone — their command, their lines, their flags. It's just us now and whatever that is. We're not running. Ironborn don't run from things they can't name — we've built our whole culture on taking what the world throws at us and standing up after. So we stand up. We hold. Not because we can win. Because this is what we do."
+win_override = "It passed over us. Through us, almost. We lost people — good people — but it moved on. Toward something else. We're still here. We're always still here. Start salvaging. We're going to need everything we can carry for what comes next."
+loss_override = "We broke. First time in memory the Ironborn broke. Nobody will say it was wrong to break — you saw what was there. We regroup. We remember. And someday, somehow, we figure out what that was and we make sure it never catches us unprepared again."
+script_events = []
+tiles = []
+units = []
+buildings = []

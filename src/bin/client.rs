@@ -5,7 +5,7 @@ use bevy::render::camera::ScalingMode;
 use cindertide::map::{Faction, GridPos, Tile};
 use cindertide::units::{UnitPos, UnitType, unit_stats};
 use cindertide::buildings::{BuildingPos, BuildingType};
-use cindertide::campaign::{CampaignRun, PlayableFaction, GlobalProgress, apply_mission_outcome, next_mission_type, save_progress, load_progress};
+use cindertide::campaign::{CampaignRun, CampaignDef, PlayableFaction, GlobalProgress, apply_mission_outcome, next_mission_type, save_progress, load_progress};
 use cindertide::game::{ActiveRun, GameState};
 use cindertide::mission::{Mission, MissionStatus};
 use cindertide::mapgen::MissionType;
@@ -75,6 +75,8 @@ fn main() {
         .init_resource::<RemoteGameState>()
         .init_resource::<ModelAssets>()
         .init_resource::<EditorEnteredFromGame>()
+        .init_resource::<LoadedCampaigns>()
+        .init_resource::<CampaignEditorState>()
         .insert_resource(MinimapTimer(0.0))
         .insert_resource(NetBroadcastTimer(0.0))
         .add_systems(Startup, setup_scene)
@@ -82,6 +84,7 @@ fn main() {
         .add_systems(Startup, load_narrative)
         .add_systems(Startup, startup_load_progress)
         .add_systems(Startup, load_model_assets)
+        .add_systems(Startup, startup_load_campaigns)
         .add_systems(Update, render_tiles)
         .add_systems(Update, sync_rendered_tile_colors)
         .add_systems(Update, spawn_unit_visuals)
@@ -96,6 +99,9 @@ fn main() {
         .add_systems(Update, handle_keyboard_commands)
         .add_systems(Update, handle_paused_menu_input)
         .add_systems(Update, handle_editor_keyboard)
+        .add_systems(Update, handle_editor_open_campaign)
+        .add_systems(Update, handle_campaign_editor_keyboard)
+        .add_systems(Update, update_campaign_editor_overlay)
         .add_systems(Update, update_paused_overlay)
         .add_systems(Update, handle_ui_input)
         .add_systems(Update, update_screen_overlay)
@@ -126,6 +132,7 @@ fn main() {
 enum ClientScreen {
     Title,
     MultiplayerMenu { hosting: bool, ip_input: String },
+    /// Campaign picker — replaces old hardcoded FactionPicker.
     FactionPicker { selected: usize },
     Briefing { title: String, briefing: String },
     InMission,
@@ -135,12 +142,50 @@ enum ClientScreen {
     Debrief { title: String, text: String, won: bool },
     GameOver { won: bool, handler_unlocked: bool },
     MapEditor,
+    CampaignEditor,
 }
 
 impl Default for ClientScreen {
     fn default() -> Self {
         ClientScreen::Title
     }
+}
+
+// ── Loaded campaigns resource ────────────────────────────────────────────────
+
+/// All campaign definitions loaded from `assets/campaigns/*.toml` at startup.
+#[derive(Resource, Default)]
+struct LoadedCampaigns(Vec<CampaignDef>);
+
+// ── Campaign editor state ────────────────────────────────────────────────────
+
+#[derive(Resource, Default)]
+struct CampaignEditorState {
+    /// Index of the selected campaign in the list.
+    campaign_selected: usize,
+    /// Index of the selected mission within the selected campaign.
+    mission_selected: usize,
+    /// If true, focus is on the mission list; if false, focus is on the campaign list.
+    focus_missions: bool,
+    /// Text input buffer (for new campaign id/name or new map path).
+    input_buffer: String,
+    /// If Some, we are currently prompting for this field.
+    input_prompt: Option<CampaignEditorPrompt>,
+    /// Status line shown at bottom.
+    status: String,
+    /// Mutable copy of loaded campaigns for editing.
+    campaigns: Vec<CampaignDef>,
+    /// Whether a delete confirmation is pending.
+    delete_confirm: bool,
+    /// New campaign name buffer (used during N: new campaign flow).
+    new_name_buffer: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum CampaignEditorPrompt {
+    NewCampaignId,
+    NewCampaignName,
+    AddMapPath,
 }
 
 // ── Map editor tool ──────────────────────────────────────────────────────────
@@ -152,6 +197,7 @@ enum EditorTool {
     PlaceBuilding,
     Erase,
     ScriptEditor,
+    CampaignEditor,
 }
 
 impl Default for EditorTool {
@@ -854,6 +900,12 @@ fn startup_load_progress(mut commands: Commands) {
     commands.insert_resource(progress);
 }
 
+/// On startup, load all campaign definitions from `assets/campaigns/*.toml`.
+fn startup_load_campaigns(mut loaded: ResMut<LoadedCampaigns>) {
+    loaded.0 = CampaignDef::load_all();
+    info!("Loaded {} campaign(s)", loaded.0.len());
+}
+
 fn setup_scene(mut commands: Commands) {
     commands.spawn((
         Camera3d::default(),
@@ -1183,6 +1235,7 @@ fn update_screen_overlay(
     screen: Res<ClientScreen>,
     progress: Res<GlobalProgress>,
     active: Res<ActiveRun>,
+    loaded_campaigns: Res<LoadedCampaigns>,
     mut overlay_vis: Query<&mut Visibility, With<ScreenOverlay>>,
     mut title_text: Query<&mut Text, (With<OverlayTitleText>, Without<OverlayBodyText>, Without<OverlayHintText>)>,
     mut body_text: Query<&mut Text, (With<OverlayBodyText>, Without<OverlayTitleText>, Without<OverlayHintText>)>,
@@ -1199,14 +1252,19 @@ fn update_screen_overlay(
     let Ok(mut hint) = hint_text.single_mut() else { return };
 
     match screen.as_ref() {
-        ClientScreen::InMission | ClientScreen::TestMission { .. } | ClientScreen::MapEditor => {
+        ClientScreen::InMission | ClientScreen::TestMission { .. } | ClientScreen::MapEditor | ClientScreen::CampaignEditor => {
             *vis = Visibility::Hidden;
         }
         ClientScreen::Title => {
             *vis = Visibility::Visible;
             **title = "CINDERTIDE".to_string();
             **body = "a dieselpunk RTS".to_string();
-            **hint = "Press Enter to begin  |  E — Map Editor  |  M — Multiplayer".to_string();
+            // Show first unlocked campaign name in the hint
+            let first_campaign_name = loaded_campaigns.0.iter()
+                .find(|c| c.is_unlocked(&progress))
+                .map(|c| c.name.as_str())
+                .unwrap_or("Campaign");
+            **hint = format!("Enter — Start [{}]  |  E — Map Editor  |  M — Multiplayer", first_campaign_name);
         }
         ClientScreen::MultiplayerMenu { hosting, ip_input } => {
             *vis = Visibility::Visible;
@@ -1221,18 +1279,26 @@ fn update_screen_overlay(
         }
         ClientScreen::FactionPicker { selected } => {
             *vis = Visibility::Visible;
-            **title = "Choose Your Faction".to_string();
-
-            let factions: &[PlayableFaction] = if progress.handler_unlocked {
-                &[PlayableFaction::Combine, PlayableFaction::Ironborn, PlayableFaction::Handler]
-            } else {
-                &[PlayableFaction::Combine, PlayableFaction::Ironborn]
-            };
+            **title = "Choose Your Campaign".to_string();
 
             let mut lines = String::new();
-            for (i, &f) in factions.iter().enumerate() {
+            for (i, campaign) in loaded_campaigns.0.iter().enumerate() {
+                let is_unlocked = campaign.is_unlocked(&progress);
                 let marker = if i == *selected { "> " } else { "  " };
-                lines.push_str(&format!("{}{}\n", marker, faction_name(f)));
+                let lock_str = if is_unlocked { "" } else { " [LOCKED]" };
+                lines.push_str(&format!("{}{}{}\n", marker, campaign.name, lock_str));
+                if i == *selected {
+                    // Show description for selected campaign
+                    if is_unlocked {
+                        lines.push_str(&format!("  {}\n", campaign.description));
+                    } else {
+                        let req = &campaign.unlock_requires;
+                        lines.push_str(&format!("  Requires: {}\n", req));
+                    }
+                }
+            }
+            if loaded_campaigns.0.is_empty() {
+                lines.push_str("No campaigns found.\n");
             }
             **body = lines.trim_end().to_string();
             **hint = "W/S or Arrow keys to select, Enter to confirm".to_string();
@@ -1284,11 +1350,12 @@ fn handle_ui_input(
     mut game_state: ResMut<GameState>,
     progress: Res<GlobalProgress>,
     narrative: Option<Res<NarrativeData>>,
+    loaded_campaigns: Res<LoadedCampaigns>,
     mut mp_role: ResMut<MultiplayerRole>,
     mut commands: Commands,
 ) {
     // Only handle UI input when not in mission or editor
-    if matches!(*screen, ClientScreen::InMission | ClientScreen::TestMission { .. } | ClientScreen::MapEditor) {
+    if matches!(*screen, ClientScreen::InMission | ClientScreen::TestMission { .. } | ClientScreen::MapEditor | ClientScreen::CampaignEditor) {
         return;
     }
 
@@ -1299,23 +1366,65 @@ fn handle_ui_input(
     match screen.clone() {
         ClientScreen::Title => {
             if enter {
-                *screen = ClientScreen::FactionPicker { selected: 0 };
+                // Find index of first unlocked campaign
+                let first_unlocked = loaded_campaigns.0.iter()
+                    .enumerate()
+                    .find(|(_, c)| c.is_unlocked(&progress))
+                    .map(|(i, _)| i)
+                    .unwrap_or(0);
+                *screen = ClientScreen::FactionPicker { selected: first_unlocked };
             } else if keys.just_pressed(KeyCode::KeyM) {
                 *screen = ClientScreen::MultiplayerMenu {
                     hosting: false,
                     ip_input: "127.0.0.1".to_string(),
                 };
             } else if keys.just_pressed(KeyCode::KeyE) {
-                // Enter map editor: wipe world, spawn blank 48×28 grass map
-                commands.queue(|world: &mut World| {
+                // Enter map editor: try loading first campaign's first map; fallback to blank map
+                let first_map_path = loaded_campaigns.0.iter()
+                    .find(|c| c.is_unlocked(&progress))
+                    .and_then(|c| c.missions.first())
+                    .map(|m| format!("assets/{}", m.map));
+
+                commands.queue(move |world: &mut World| {
                     cindertide::wipe_world_entities(world);
-                    for y in 0..28_i32 {
-                        for x in 0..48_i32 {
-                            world.spawn(Tile {
-                                pos: GridPos { x, y },
-                                terrain_type: cindertide::map::TerrainType::Grass,
-                                cover: cindertide::map::CoverDensity::None,
-                            });
+
+                    let mut loaded = false;
+                    if let Some(ref path) = first_map_path {
+                        if let Ok(content) = std::fs::read_to_string(path) {
+                            if let Ok(saved) = toml::from_str::<SavedMap>(&content) {
+                                for st in &saved.tiles {
+                                    if let Some(terrain) = parse_terrain_name(&st.terrain) {
+                                        world.spawn(Tile {
+                                            pos: GridPos { x: st.x, y: st.y },
+                                            terrain_type: terrain,
+                                            cover: cindertide::map::CoverDensity::None,
+                                        });
+                                    }
+                                }
+                                for su in &saved.units {
+                                    let faction = parse_faction_name(&su.faction).unwrap_or(Faction::Combine);
+                                    spawn_unit_world(world, su.x, su.y, faction, &su.unit_type);
+                                }
+                                for sb in &saved.buildings {
+                                    let faction = parse_faction_name(&sb.faction).unwrap_or(Faction::Combine);
+                                    spawn_building_world(world, sb.x, sb.y, faction, &sb.building_type);
+                                }
+                                loaded = true;
+                                info!("Editor: loaded first campaign map from {}", path);
+                            }
+                        }
+                    }
+
+                    if !loaded {
+                        // Blank 48×28 grass map
+                        for y in 0..28_i32 {
+                            for x in 0..48_i32 {
+                                world.spawn(Tile {
+                                    pos: GridPos { x, y },
+                                    terrain_type: cindertide::map::TerrainType::Grass,
+                                    cover: cindertide::map::CoverDensity::None,
+                                });
+                            }
                         }
                     }
                     *world.resource_mut::<ClientScreen>() = ClientScreen::MapEditor;
@@ -1354,43 +1463,54 @@ fn handle_ui_input(
                 // Client goes to faction picker too (will sync from host)
                 *screen = ClientScreen::FactionPicker { selected: 0 };
             } else if enter {
-                // Enter without hosting = just go to singleplayer faction picker
-                *screen = ClientScreen::FactionPicker { selected: 0 };
+                // Enter without hosting = just go to singleplayer campaign picker
+                let first_unlocked = loaded_campaigns.0.iter()
+                    .enumerate()
+                    .find(|(_, c)| c.is_unlocked(&progress))
+                    .map(|(i, _)| i)
+                    .unwrap_or(0);
+                *screen = ClientScreen::FactionPicker { selected: first_unlocked };
             }
         }
 
         ClientScreen::FactionPicker { selected } => {
-            let count = if progress.handler_unlocked { 3 } else { 2 };
+            let count = loaded_campaigns.0.len().max(1);
             if up {
                 let new = if selected == 0 { count - 1 } else { selected - 1 };
                 *screen = ClientScreen::FactionPicker { selected: new };
             } else if down {
                 *screen = ClientScreen::FactionPicker { selected: (selected + 1) % count };
             } else if enter {
-                let factions: &[PlayableFaction] = if progress.handler_unlocked {
-                    &[PlayableFaction::Combine, PlayableFaction::Ironborn, PlayableFaction::Handler]
-                } else {
-                    &[PlayableFaction::Combine, PlayableFaction::Ironborn]
-                };
-                let faction = factions[selected];
+                if let Some(campaign) = loaded_campaigns.0.get(selected) {
+                    if !campaign.is_unlocked(&progress) {
+                        // Can't select a locked campaign
+                        return;
+                    }
+                    let faction = campaign.playable_faction();
+                    let mission_maps: Vec<String> = campaign.missions.iter()
+                        .map(|m| m.map.clone())
+                        .collect();
 
-                // Create a new campaign run
-                let run = CampaignRun {
-                    faction,
-                    current_mission: 0,
-                    outcomes: Vec::new(),
-                    complete: false,
-                };
-                *active = ActiveRun {
-                    run: Some(run),
-                    current_mission_entity: None,
-                    missions_won: 0,
-                    missions_lost: 0,
-                };
+                    // Create a new campaign run
+                    let run = CampaignRun {
+                        faction,
+                        current_mission: 0,
+                        outcomes: Vec::new(),
+                        complete: false,
+                        campaign_id: campaign.id.clone(),
+                        mission_maps,
+                    };
+                    *active = ActiveRun {
+                        run: Some(run),
+                        current_mission_entity: None,
+                        missions_won: 0,
+                        missions_lost: 0,
+                    };
 
-                // Transition to briefing for mission 0
-                let (title, briefing) = get_mission_narrative(&narrative, faction, 0);
-                *screen = ClientScreen::Briefing { title, briefing };
+                    // Transition to briefing for mission 0
+                    let (title, briefing) = get_mission_narrative(&narrative, faction, 0);
+                    *screen = ClientScreen::Briefing { title, briefing };
+                }
             }
         }
 
@@ -1399,13 +1519,16 @@ fn handle_ui_input(
                 commands.queue(|world: &mut World| {
                     cindertide::wipe_world_entities(world);
 
-                    let (player, mission_index) = {
+                    let (player, mission_index, map_path) = {
                         let active = world.resource::<ActiveRun>();
                         let p = active.run.as_ref()
                             .map(|r| map_faction(r.faction))
                             .unwrap_or(Faction::Combine);
                         let idx = active.run.as_ref().map(|r| r.current_mission).unwrap_or(0);
-                        (p, idx)
+                        let mp = active.run.as_ref()
+                            .and_then(|r| r.mission_maps.get(idx))
+                            .cloned();
+                        (p, idx, mp)
                     };
 
                     let opponent = if player == Faction::Combine {
@@ -1430,7 +1553,41 @@ fn handle_ui_input(
                         deadline: 300.0,
                     }).id();
 
-                    cindertide::setup_demo_scenario(world, &player, mission_index);
+                    // Try to load map from file; fall back to procedural demo
+                    let mut map_loaded = false;
+                    if let Some(ref rel_path) = map_path {
+                        let full_path = format!("assets/{}", rel_path);
+                        if let Ok(content) = std::fs::read_to_string(&full_path) {
+                            if let Ok(saved) = toml::from_str::<SavedMap>(&content) {
+                                for st in &saved.tiles {
+                                    if let Some(terrain) = parse_terrain_name(&st.terrain) {
+                                        world.spawn(Tile {
+                                            pos: GridPos { x: st.x, y: st.y },
+                                            terrain_type: terrain,
+                                            cover: cindertide::map::CoverDensity::None,
+                                        });
+                                    }
+                                }
+                                for su in &saved.units {
+                                    let faction = parse_faction_name(&su.faction).unwrap_or(Faction::Combine);
+                                    spawn_unit_world(world, su.x, su.y, faction, &su.unit_type);
+                                }
+                                for sb in &saved.buildings {
+                                    let faction = parse_faction_name(&sb.faction).unwrap_or(Faction::Combine);
+                                    spawn_building_world(world, sb.x, sb.y, faction, &sb.building_type);
+                                }
+                                map_loaded = true;
+                                info!("Loaded mission map from {}", full_path);
+                            }
+                        }
+                        if !map_loaded {
+                            info!("Map file '{}' not found or invalid, falling back to procedural", full_path);
+                        }
+                    }
+
+                    if !map_loaded {
+                        cindertide::setup_demo_scenario(world, &player, mission_index);
+                    }
                     cindertide::bake_navmesh(world);
 
                     world.resource_mut::<ActiveRun>().current_mission_entity = Some(mission_entity);
@@ -1445,7 +1602,8 @@ fn handle_ui_input(
             if enter {
                 // Advance campaign
                 let done = if let Some(ref run) = active.run {
-                    run.current_mission >= 5 || run.complete
+                    let total = if run.mission_maps.is_empty() { 5 } else { run.mission_maps.len() };
+                    run.current_mission >= total || run.complete
                 } else {
                     true
                 };
@@ -1469,7 +1627,12 @@ fn handle_ui_input(
 
         ClientScreen::GameOver { .. } => {
             if enter {
-                *screen = ClientScreen::FactionPicker { selected: 0 };
+                let first_unlocked = loaded_campaigns.0.iter()
+                    .enumerate()
+                    .find(|(_, c)| c.is_unlocked(&progress))
+                    .map(|(i, _)| i)
+                    .unwrap_or(0);
+                *screen = ClientScreen::FactionPicker { selected: first_unlocked };
                 // Reset the active run
                 *active = ActiveRun::default();
                 *game_state = GameState::Title;
@@ -1479,6 +1642,7 @@ fn handle_ui_input(
         ClientScreen::InMission => {}
         ClientScreen::TestMission { .. } => {}
         ClientScreen::MapEditor => {}
+        ClientScreen::CampaignEditor => {}
         // MultiplayerMenu handled above; this arm exists so the compiler is happy
         // if we ever reach it again from a re-match (shouldn't happen).
     }
@@ -2499,6 +2663,7 @@ fn handle_editor_keyboard(
     if keys.just_pressed(KeyCode::Digit3) { editor.tool = EditorTool::PlaceBuilding; }
     if keys.just_pressed(KeyCode::Digit4) { editor.tool = EditorTool::Erase; }
     if keys.just_pressed(KeyCode::Digit5) { editor.tool = EditorTool::ScriptEditor; }
+    if keys.just_pressed(KeyCode::Digit6) { editor.tool = EditorTool::CampaignEditor; }
 
     // ── Script editor controls (only when tool 5 is active) ───────────────────
     if editor.tool == EditorTool::ScriptEditor {
@@ -2870,6 +3035,406 @@ fn handle_editor_keyboard(
     }
 }
 
+// ── Campaign editor systems ───────────────────────────────────────────────────
+
+/// Handle C key (or active CampaignEditor tool + Enter) in map editor to open campaign editor.
+fn handle_editor_open_campaign(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut screen: ResMut<ClientScreen>,
+    mut campaign_editor: ResMut<CampaignEditorState>,
+    loaded_campaigns: Res<LoadedCampaigns>,
+    editor: Res<EditorState>,
+) {
+    if *screen != ClientScreen::MapEditor {
+        return;
+    }
+    let ctrl = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
+    let open = (keys.just_pressed(KeyCode::KeyC) && !ctrl)
+        || (editor.tool == EditorTool::CampaignEditor && keys.just_pressed(KeyCode::Enter));
+    if open {
+        campaign_editor.campaigns = loaded_campaigns.0.clone();
+        campaign_editor.campaign_selected = 0;
+        campaign_editor.mission_selected = 0;
+        campaign_editor.focus_missions = false;
+        campaign_editor.input_buffer.clear();
+        campaign_editor.input_prompt = None;
+        campaign_editor.delete_confirm = false;
+        campaign_editor.status = String::new();
+        *screen = ClientScreen::CampaignEditor;
+    }
+}
+
+/// Handle keyboard input for the campaign editor overlay.
+fn handle_campaign_editor_keyboard(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut screen: ResMut<ClientScreen>,
+    mut ce: ResMut<CampaignEditorState>,
+    mut loaded_campaigns: ResMut<LoadedCampaigns>,
+) {
+    if *screen != ClientScreen::CampaignEditor {
+        return;
+    }
+
+    let ctrl = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
+    let shift = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
+
+    // Handle input prompt mode
+    if ce.input_prompt.is_some() {
+        if keys.just_pressed(KeyCode::Escape) {
+            ce.input_prompt = None;
+            ce.input_buffer.clear();
+            ce.new_name_buffer.clear();
+            ce.status = "Cancelled.".to_string();
+            return;
+        }
+        if keys.just_pressed(KeyCode::Backspace) {
+            ce.input_buffer.pop();
+            return;
+        }
+        if keys.just_pressed(KeyCode::Enter) {
+            let buf = ce.input_buffer.clone();
+            match ce.input_prompt.clone().unwrap() {
+                CampaignEditorPrompt::NewCampaignId => {
+                    // Move to name prompt
+                    ce.new_name_buffer = buf.clone();
+                    ce.input_buffer.clear();
+                    ce.input_prompt = Some(CampaignEditorPrompt::NewCampaignName);
+                    ce.status = format!("Enter name for campaign '{}':", buf);
+                    return;
+                }
+                CampaignEditorPrompt::NewCampaignName => {
+                    let id = ce.new_name_buffer.clone();
+                    let name = buf.clone();
+                    if !id.is_empty() {
+                        let new_campaign = CampaignDef {
+                            id: id.clone(),
+                            name,
+                            faction: "Combine".to_string(),
+                            description: String::new(),
+                            unlock_requires: String::new(),
+                            missions: Vec::new(),
+                        };
+                        ce.campaigns.push(new_campaign);
+                        ce.campaigns.sort_by(|a, b| a.id.cmp(&b.id));
+                        ce.campaign_selected = ce.campaigns.iter().position(|c| c.id == id).unwrap_or(0);
+                        ce.status = format!("Created campaign '{}'.", id);
+                    }
+                    ce.input_buffer.clear();
+                    ce.new_name_buffer.clear();
+                    ce.input_prompt = None;
+                    return;
+                }
+                CampaignEditorPrompt::AddMapPath => {
+                    if !buf.is_empty() {
+                        let cam_idx = ce.campaign_selected;
+                        if cam_idx < ce.campaigns.len() {
+                            ce.campaigns[cam_idx].missions.push(cindertide::campaign::CampaignMissionDef { map: buf.clone() });
+                            let new_len = ce.campaigns[cam_idx].missions.len();
+                            ce.mission_selected = new_len.saturating_sub(1);
+                            ce.status = format!("Added map: {}", buf);
+                        }
+                    }
+                    ce.input_buffer.clear();
+                    ce.input_prompt = None;
+                    return;
+                }
+            }
+        }
+        // Character input — map key codes to characters (basic ASCII)
+        let char_input = campaign_editor_char_input(&keys);
+        if let Some(ch) = char_input {
+            ce.input_buffer.push(ch);
+        }
+        return;
+    }
+
+    // Escape — back to map editor
+    if keys.just_pressed(KeyCode::Escape) {
+        ce.delete_confirm = false;
+        *screen = ClientScreen::MapEditor;
+        return;
+    }
+
+    let campaign_count = ce.campaigns.len();
+
+    // Tab — toggle focus between campaign list and mission list
+    if keys.just_pressed(KeyCode::Tab) {
+        if campaign_count > 0 {
+            ce.focus_missions = !ce.focus_missions;
+        }
+        return;
+    }
+
+    // Navigation
+    if keys.just_pressed(KeyCode::ArrowUp) || keys.just_pressed(KeyCode::KeyW) {
+        if !ce.focus_missions {
+            if ce.campaign_selected > 0 {
+                ce.campaign_selected -= 1;
+                ce.mission_selected = 0;
+            }
+        } else {
+            let cam_idx = ce.campaign_selected;
+            let mission_count = ce.campaigns.get(cam_idx).map(|c| c.missions.len()).unwrap_or(0);
+            if !shift {
+                if ce.mission_selected > 0 {
+                    ce.mission_selected -= 1;
+                }
+            } else if ce.mission_selected > 0 {
+                // Shift+Up: reorder mission up
+                let idx = ce.mission_selected;
+                if let Some(c) = ce.campaigns.get_mut(cam_idx) {
+                    c.missions.swap(idx, idx - 1);
+                }
+                ce.mission_selected -= 1;
+                ce.status = "Moved mission up.".to_string();
+            }
+            let _ = mission_count;
+        }
+    }
+
+    if keys.just_pressed(KeyCode::ArrowDown) || keys.just_pressed(KeyCode::KeyS) {
+        if !ce.focus_missions {
+            if ce.campaign_selected + 1 < campaign_count {
+                ce.campaign_selected += 1;
+                ce.mission_selected = 0;
+            }
+        } else {
+            let cam_idx = ce.campaign_selected;
+            let mission_count = ce.campaigns.get(cam_idx).map(|c| c.missions.len()).unwrap_or(0);
+            if !shift {
+                if ce.mission_selected + 1 < mission_count {
+                    ce.mission_selected += 1;
+                }
+            } else if ce.mission_selected + 1 < mission_count {
+                // Shift+Down: reorder mission down
+                let idx = ce.mission_selected;
+                if let Some(c) = ce.campaigns.get_mut(cam_idx) {
+                    c.missions.swap(idx, idx + 1);
+                }
+                ce.mission_selected += 1;
+                ce.status = "Moved mission down.".to_string();
+            }
+        }
+    }
+
+    // N — new campaign
+    if keys.just_pressed(KeyCode::KeyN) && !ctrl {
+        ce.input_prompt = Some(CampaignEditorPrompt::NewCampaignId);
+        ce.input_buffer.clear();
+        ce.status = "Enter new campaign id (e.g. 'combine'):".to_string();
+        return;
+    }
+
+    // Delete — delete selected campaign (with confirm)
+    if keys.just_pressed(KeyCode::Delete) && !ce.focus_missions {
+        if ce.delete_confirm {
+            if ce.campaign_selected < ce.campaigns.len() {
+                let cam_sel = ce.campaign_selected;
+                let removed_id = ce.campaigns[cam_sel].id.clone();
+                ce.campaigns.remove(cam_sel);
+                if cam_sel > 0 && cam_sel >= ce.campaigns.len() {
+                    ce.campaign_selected -= 1;
+                }
+                ce.mission_selected = 0;
+                ce.status = format!("Deleted campaign '{}'.", removed_id);
+            }
+            ce.delete_confirm = false;
+        } else {
+            ce.delete_confirm = true;
+            ce.status = "Press Del again to confirm deletion.".to_string();
+        }
+        return;
+    } else if keys.just_pressed(KeyCode::Delete) && ce.focus_missions {
+        // X or Del in mission focus — remove selected mission
+        let cam_idx = ce.campaign_selected;
+        let mis_idx = ce.mission_selected;
+        let mission_count = ce.campaigns.get(cam_idx).map(|c| c.missions.len()).unwrap_or(0);
+        if mis_idx < mission_count {
+            let removed_map = ce.campaigns[cam_idx].missions.remove(mis_idx).map;
+            ce.status = format!("Removed mission: {}", removed_map);
+            let new_count = ce.campaigns[cam_idx].missions.len();
+            if mis_idx > 0 && mis_idx >= new_count {
+                ce.mission_selected -= 1;
+            }
+        }
+        return;
+    }
+    ce.delete_confirm = false;
+
+    // M — add map entry to selected campaign
+    if keys.just_pressed(KeyCode::KeyM) {
+        if campaign_count > 0 {
+            ce.input_prompt = Some(CampaignEditorPrompt::AddMapPath);
+            ce.input_buffer.clear();
+            ce.status = "Enter map path (e.g. maps/combine_m0.toml):".to_string();
+        }
+        return;
+    }
+
+    // X — remove selected mission
+    if keys.just_pressed(KeyCode::KeyX) && ce.focus_missions {
+        let cam_idx = ce.campaign_selected;
+        let mis_idx = ce.mission_selected;
+        let mission_count = ce.campaigns.get(cam_idx).map(|c| c.missions.len()).unwrap_or(0);
+        if mis_idx < mission_count {
+            let removed_map = ce.campaigns[cam_idx].missions.remove(mis_idx).map;
+            ce.status = format!("Removed mission: {}", removed_map);
+            let new_count = ce.campaigns[cam_idx].missions.len();
+            if mis_idx > 0 && mis_idx >= new_count {
+                ce.mission_selected -= 1;
+            }
+        }
+        return;
+    }
+
+    // Ctrl+S — save selected campaign
+    if ctrl && keys.just_pressed(KeyCode::KeyS) {
+        let cam_idx = ce.campaign_selected;
+        if cam_idx < ce.campaigns.len() {
+            let (path, serialized) = {
+                let campaign = &ce.campaigns[cam_idx];
+                let path = format!("assets/campaigns/{}.toml", campaign.id);
+                (path, toml::to_string(campaign))
+            };
+            match serialized {
+                Ok(content) => {
+                    if let Err(e) = std::fs::create_dir_all("assets/campaigns") {
+                        ce.status = format!("Error: {e}");
+                    } else if let Err(e) = std::fs::write(&path, content) {
+                        ce.status = format!("Error saving: {e}");
+                    } else {
+                        loaded_campaigns.0 = CampaignDef::load_all();
+                        ce.status = format!("Saved to {path}");
+                    }
+                }
+                Err(e) => ce.status = format!("Serialize error: {e}"),
+            }
+        }
+        return;
+    }
+}
+
+/// Map key codes to ASCII characters for basic text input in campaign editor.
+fn campaign_editor_char_input(keys: &Res<ButtonInput<KeyCode>>) -> Option<char> {
+    let shift = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
+    // Letters
+    macro_rules! letter {
+        ($code:ident, $lower:expr, $upper:expr) => {
+            if keys.just_pressed(KeyCode::$code) {
+                return Some(if shift { $upper } else { $lower });
+            }
+        };
+    }
+    letter!(KeyA, 'a', 'A'); letter!(KeyB, 'b', 'B'); letter!(KeyC, 'c', 'C');
+    letter!(KeyD, 'd', 'D'); letter!(KeyE, 'e', 'E'); letter!(KeyF, 'f', 'F');
+    letter!(KeyG, 'g', 'G'); letter!(KeyH, 'h', 'H'); letter!(KeyI, 'i', 'I');
+    letter!(KeyJ, 'j', 'J'); letter!(KeyK, 'k', 'K'); letter!(KeyL, 'l', 'L');
+    letter!(KeyM, 'm', 'M'); letter!(KeyN, 'n', 'N'); letter!(KeyO, 'o', 'O');
+    letter!(KeyP, 'p', 'P'); letter!(KeyQ, 'q', 'Q'); letter!(KeyR, 'r', 'R');
+    letter!(KeyS, 's', 'S'); letter!(KeyT, 't', 'T'); letter!(KeyU, 'u', 'U');
+    letter!(KeyV, 'v', 'V'); letter!(KeyW, 'w', 'W'); letter!(KeyX, 'x', 'X');
+    letter!(KeyY, 'y', 'Y'); letter!(KeyZ, 'z', 'Z');
+    // Digits
+    letter!(Digit0, '0', ')'); letter!(Digit1, '1', '!'); letter!(Digit2, '2', '@');
+    letter!(Digit3, '3', '#'); letter!(Digit4, '4', '$'); letter!(Digit5, '5', '%');
+    letter!(Digit6, '6', '^'); letter!(Digit7, '7', '&'); letter!(Digit8, '8', '*');
+    letter!(Digit9, '9', '(');
+    // Common punctuation
+    if keys.just_pressed(KeyCode::Minus)     { return Some(if shift { '_' } else { '-' }); }
+    if keys.just_pressed(KeyCode::Period)    { return Some(if shift { '>' } else { '.' }); }
+    if keys.just_pressed(KeyCode::Slash)     { return Some(if shift { '?' } else { '/' }); }
+    if keys.just_pressed(KeyCode::Space)     { return Some(' '); }
+    if keys.just_pressed(KeyCode::Comma)     { return Some(if shift { '<' } else { ',' }); }
+    None
+}
+
+/// Update the campaign editor overlay (full-screen text display).
+fn update_campaign_editor_overlay(
+    screen: Res<ClientScreen>,
+    ce: Res<CampaignEditorState>,
+    progress: Res<GlobalProgress>,
+    mut overlay_vis: Query<&mut Visibility, With<ScreenOverlay>>,
+    mut title_text: Query<&mut Text, (With<OverlayTitleText>, Without<OverlayBodyText>, Without<OverlayHintText>)>,
+    mut body_text: Query<&mut Text, (With<OverlayBodyText>, Without<OverlayTitleText>, Without<OverlayHintText>)>,
+    mut hint_text: Query<&mut Text, (With<OverlayHintText>, Without<OverlayTitleText>, Without<OverlayBodyText>)>,
+) {
+    if *screen != ClientScreen::CampaignEditor {
+        return;
+    }
+
+    let Ok(mut vis) = overlay_vis.single_mut() else { return };
+    let Ok(mut title) = title_text.single_mut() else { return };
+    let Ok(mut body) = body_text.single_mut() else { return };
+    let Ok(mut hint) = hint_text.single_mut() else { return };
+
+    *vis = Visibility::Visible;
+    **title = "CAMPAIGN EDITOR".to_string();
+
+    let mut lines = Vec::<String>::new();
+
+    // Campaign list
+    lines.push(format!("Campaigns:  [N]ew  [Del]ete"));
+    lines.push(String::new());
+
+    if ce.campaigns.is_empty() {
+        lines.push("  (no campaigns)".to_string());
+    } else {
+        for (i, campaign) in ce.campaigns.iter().enumerate() {
+            let selected = i == ce.campaign_selected;
+            let focus_mark = if selected && !ce.focus_missions { ">" } else { " " };
+            let mission_count = campaign.missions.len();
+            let lock_str = if campaign.is_unlocked(&progress) { "" } else { ", LOCKED" };
+            lines.push(format!(
+                "{} {:12} \"{}\"\t[{} missions{}]",
+                focus_mark, campaign.id, campaign.name, mission_count, lock_str
+            ));
+        }
+    }
+
+    // Show selected campaign details
+    if let Some(campaign) = ce.campaigns.get(ce.campaign_selected) {
+        lines.push(String::new());
+        lines.push(format!("-- Selected: {} --", campaign.id));
+        lines.push(format!("Name: {}", campaign.name));
+        lines.push(format!("Faction: {}", campaign.faction));
+        lines.push(format!("Description: {}", campaign.description));
+        let req = if campaign.unlock_requires.is_empty() { "(none)".to_string() } else { campaign.unlock_requires.clone() };
+        lines.push(format!("Unlock requires: {}", req));
+        lines.push(String::new());
+        lines.push("Missions:".to_string());
+
+        if campaign.missions.is_empty() {
+            lines.push("  (no missions)".to_string());
+        } else {
+            for (j, mission) in campaign.missions.iter().enumerate() {
+                let sel = j == ce.mission_selected && ce.focus_missions;
+                let marker = if sel { ">" } else { " " };
+                lines.push(format!("{} [{}] {}", marker, j, mission.map));
+            }
+        }
+    }
+
+    // Input prompt
+    if let Some(ref prompt) = ce.input_prompt {
+        lines.push(String::new());
+        let label = match prompt {
+            CampaignEditorPrompt::NewCampaignId => "Campaign ID",
+            CampaignEditorPrompt::NewCampaignName => "Campaign Name",
+            CampaignEditorPrompt::AddMapPath => "Map Path",
+        };
+        lines.push(format!("{}: {}_", label, ce.input_buffer));
+    }
+
+    // Status line
+    if !ce.status.is_empty() {
+        lines.push(String::new());
+        lines.push(format!("  {}", ce.status));
+    }
+
+    **body = lines.join("\n");
+    **hint = "[Tab] focus  [↑↓] nav  [N] new  [Del] delete  [M] add map  [X] rm map  [Shift+↑↓] reorder  [Ctrl+S] save  [Esc] back".to_string();
+}
+
 fn find_latest_custom_map() -> Option<String> {
     let dir = std::fs::read_dir("assets/maps").ok()?;
     let mut entries: Vec<_> = dir
@@ -3006,6 +3571,42 @@ fn building_type_name(t: &BuildingType) -> &'static str {
         BuildingType::AAGun => "AAGun",
         BuildingType::TankTrap => "TankTrap",
     }
+}
+
+/// Spawn a unit directly into the World (used for map loading during mission start).
+fn spawn_unit_world(world: &mut World, x: i32, y: i32, faction: Faction, type_name: &str) {
+    use cindertide::units::*;
+    use cindertide::combat::*;
+    match type_name {
+        "HeavyWeapons" => { world.spawn(HeavyWeaponsBundle::with_faction(x, y, faction)); }
+        "LightVehicle"  => { world.spawn(LightVehicleBundle::with_faction(x, y, faction)); }
+        "HeavyArmor"    => { world.spawn(HeavyArmorBundle::with_faction(x, y, faction)); }
+        _               => { world.spawn(RiflemanBundle::with_faction(x, y, faction)); }
+    }
+}
+
+/// Spawn a building directly into the World (used for map loading during mission start).
+fn spawn_building_world(world: &mut World, x: i32, y: i32, faction: Faction, type_name: &str) {
+    use cindertide::buildings::BuildingBundle;
+    let bt = match type_name {
+        "Refinery" => BuildingType::Refinery,
+        "CommandBunker" => BuildingType::CommandBunker,
+        "MotorPool" => BuildingType::MotorPool,
+        "Pillbox" => BuildingType::Pillbox,
+        "Watchtower" => BuildingType::Watchtower,
+        "Scrapyard" => BuildingType::Scrapyard,
+        "RecruitmentOffice" => BuildingType::RecruitmentOffice,
+        "Foundry" => BuildingType::Foundry,
+        "Airfield" => BuildingType::Airfield,
+        "Workshop" => BuildingType::Workshop,
+        "ResearchLab" => BuildingType::ResearchLab,
+        "SupplyDepot" => BuildingType::SupplyDepot,
+        "RepairBay" => BuildingType::RepairBay,
+        "AAGun" => BuildingType::AAGun,
+        "TankTrap" => BuildingType::TankTrap,
+        _ => BuildingType::Barracks,
+    };
+    world.spawn(BuildingBundle::new(bt, faction, x, y));
 }
 
 fn spawn_editor_unit(commands: &mut Commands, x: i32, y: i32, faction: Faction, type_name: &str) {
@@ -3152,6 +3753,9 @@ fn handle_editor_mouse_input(
         EditorTool::ScriptEditor => {
             // Mouse clicks are not used in script editor mode
         }
+        EditorTool::CampaignEditor => {
+            // Mouse clicks are not used in campaign editor tool mode
+        }
     }
 }
 
@@ -3178,6 +3782,12 @@ fn update_editor_panel(
     }
 
     let Ok(mut text) = panel_text.single_mut() else { return };
+
+    // Campaign editor tool mode: show hint to open campaign editor
+    if editor.tool == EditorTool::CampaignEditor {
+        **text = "-- CAMPAIGN EDITOR --\n\n[Enter] Open campaign editor\n[C]     Open campaign editor\n\nPress Enter or C to\nlaunch the full campaign\neditor overlay.\n\n[Esc] Back to title".to_string();
+        return;
+    }
 
     // Script editor mode: show script event list
     if editor.tool == EditorTool::ScriptEditor {
@@ -3247,6 +3857,7 @@ fn update_editor_panel(
         EditorTool::PlaceBuilding => "3: Place Building",
         EditorTool::Erase        => "4: Erase",
         EditorTool::ScriptEditor => "5: Script Editor",
+        EditorTool::CampaignEditor => "6: Campaign Editor",
     };
 
     let terrain_name = terrain_type_name(&EDITOR_TERRAINS[editor.terrain_idx]);
@@ -3270,7 +3881,7 @@ fn update_editor_panel(
     };
 
     **text = format!(
-        "Tool: {tool_name}\n\nTerrain: {terrain_name}\nFaction: {faction_name_str}\nUnit: {unit_name}\nBuilding: {building_name}\n\nTiles: {tile_count}\nUnits: {unit_count}\nBuildings: {building_count}\n\n--- Keys ---\n1-5: tool\nF: faction\nT: unit type\nB: building\nR-click: cycle terrain\nDel: clear map\nCtrl+S: save\nCtrl+L: load\nP: test mission\nEsc: exit{del_hint}"
+        "Tool: {tool_name}\n\nTerrain: {terrain_name}\nFaction: {faction_name_str}\nUnit: {unit_name}\nBuilding: {building_name}\n\nTiles: {tile_count}\nUnits: {unit_count}\nBuildings: {building_count}\n\n--- Keys ---\n1-6: tool\nF: faction\nT: unit type\nB: building\nR-click: cycle terrain\nDel: clear map\nCtrl+S: save\nCtrl+L: load\nP: test mission\nC/6: campaign editor\nEsc: exit{del_hint}"
     );
 }
 

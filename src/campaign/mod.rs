@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 use serde::{Serialize, Deserialize};
+use std::collections::HashSet;
 use crate::mapgen::MissionType;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -22,6 +23,12 @@ pub struct CampaignRun {
     pub current_mission: usize,
     pub outcomes: Vec<MissionOutcome>,
     pub complete: bool,
+    /// The id of the campaign definition this run belongs to (e.g. "combine").
+    /// Empty string means legacy/unknown.
+    #[allow(dead_code)]
+    pub campaign_id: String,
+    /// Ordered list of map paths for this campaign's missions (relative to assets/).
+    pub mission_maps: Vec<String>,
 }
 
 #[derive(Resource, Debug, Clone, Default, Serialize, Deserialize)]
@@ -32,6 +39,86 @@ pub struct GlobalProgress {
     pub handler_beaten: bool,
     #[serde(skip)]
     pub first_beaten: Option<PlayableFaction>,
+    #[serde(default)]
+    pub campaigns_beaten: HashSet<String>,
+}
+
+// ── Data-driven campaign definitions ────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CampaignMissionDef {
+    pub map: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CampaignDef {
+    pub id: String,
+    pub name: String,
+    pub faction: String,
+    pub description: String,
+    #[serde(default)]
+    pub unlock_requires: String,
+    pub missions: Vec<CampaignMissionDef>,
+}
+
+impl CampaignDef {
+    pub fn load(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        let text = std::fs::read_to_string(path)?;
+        Ok(toml::from_str(&text)?)
+    }
+
+    /// Scan `assets/campaigns/*.toml`, load each file, sort by id.
+    pub fn load_all() -> Vec<CampaignDef> {
+        let dir = match std::fs::read_dir("assets/campaigns") {
+            Ok(d) => d,
+            Err(_) => return Vec::new(),
+        };
+        let mut campaigns: Vec<CampaignDef> = dir
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                let name = e.file_name();
+                let s = name.to_string_lossy();
+                s.ends_with(".toml")
+            })
+            .filter_map(|e| {
+                let path = e.path();
+                let path_str = path.to_string_lossy().to_string();
+                match CampaignDef::load(&path_str) {
+                    Ok(c) => Some(c),
+                    Err(err) => {
+                        eprintln!("CampaignDef::load_all: failed to load {path_str}: {err}");
+                        None
+                    }
+                }
+            })
+            .collect();
+        campaigns.sort_by(|a, b| a.id.cmp(&b.id));
+        campaigns
+    }
+
+    /// Returns true if this campaign is unlocked given the current progress.
+    /// `unlock_requires` is a comma-separated list of campaign ids that must be beaten.
+    pub fn is_unlocked(&self, progress: &GlobalProgress) -> bool {
+        if self.unlock_requires.is_empty() {
+            return true;
+        }
+        for required in self.unlock_requires.split(',') {
+            let req = required.trim();
+            if !req.is_empty() && !progress.campaigns_beaten.contains(req) {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Return the `PlayableFaction` for this campaign's faction string.
+    pub fn playable_faction(&self) -> PlayableFaction {
+        match self.faction.as_str() {
+            "Ironborn" => PlayableFaction::Ironborn,
+            "Handler" | "Architect" => PlayableFaction::Handler,
+            _ => PlayableFaction::Combine,
+        }
+    }
 }
 
 /// Path to the player's progress file.
@@ -101,11 +188,13 @@ fn faction_sequence(faction: &PlayableFaction) -> [MissionType; 5] {
 }
 
 pub fn next_mission_type(run: &CampaignRun) -> Option<MissionType> {
-    if run.current_mission >= 5 {
+    let total = if run.mission_maps.is_empty() { 5 } else { run.mission_maps.len() };
+    if run.current_mission >= total {
         return None;
     }
     let seq = faction_sequence(&run.faction);
-    seq.into_iter().nth(run.current_mission)
+    // Wrap around the hardcoded sequence if the campaign has more than 5 missions.
+    seq.into_iter().nth(run.current_mission % 5)
 }
 
 pub fn apply_mission_outcome(
@@ -120,8 +209,14 @@ pub fn apply_mission_outcome(
         mission_type,
     });
     run.current_mission += 1;
-    if run.current_mission >= 5 {
+    let total_missions = if run.mission_maps.is_empty() { 5 } else { run.mission_maps.len() };
+    if run.current_mission >= total_missions {
         run.complete = true;
+        // Record campaign beaten by id (data-driven).
+        if !run.campaign_id.is_empty() {
+            progress.campaigns_beaten.insert(run.campaign_id.clone());
+        }
+        // Also update legacy boolean flags for backwards compat.
         match run.faction {
             PlayableFaction::Combine => {
                 if !progress.combine_beaten {
@@ -162,7 +257,14 @@ mod tests {
     use super::*;
 
     fn fresh_run(faction: PlayableFaction) -> CampaignRun {
-        CampaignRun { faction, current_mission: 0, outcomes: Vec::new(), complete: false }
+        CampaignRun {
+            faction,
+            current_mission: 0,
+            outcomes: Vec::new(),
+            complete: false,
+            campaign_id: String::new(),
+            mission_maps: Vec::new(),
+        }
     }
 
     #[test]

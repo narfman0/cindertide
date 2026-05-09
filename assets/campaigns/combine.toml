@@ -1,0 +1,20 @@
+id = "combine"
+name = "The Iron Pact"
+faction = "Combine"
+description = "Command the Combine war machine across five theaters of operation."
+unlock_requires = ""
+
+[[missions]]
+map = "maps/combine_m0.toml"
+
+[[missions]]
+map = "maps/combine_m1.toml"
+
+[[missions]]
+map = "maps/combine_m2.toml"
+
+[[missions]]
+map = "maps/combine_m3.toml"
+
+[[missions]]
+map = "maps/combine_m4.toml"

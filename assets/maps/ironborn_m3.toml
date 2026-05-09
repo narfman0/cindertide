@@ -1,0 +1,12 @@
+mission_type = "Assault"
+player_faction = "Ironborn"
+opponent_faction = "Combine"
+deadline_seconds = 1800.0
+mission_index_override = 3
+briefing_override = "Combine's war machines went strange near the old forge and they sent a clean-up crew instead of engineers. That's fear, not protocol. A rogue machine that makes its own choices is either the most dangerous thing on this battlefield or the most useful — and we've never been the kind of people who destroy something useful out of fear. Get to the forge before they do. Find out what's in there. If the machines want to talk, let them talk."
+win_override = "7-G didn't fight us. It watched us. Then it walked with us. We're not calling it a prisoner and we're not calling it a soldier. We don't have a word for it yet. We'll figure that out later. Right now it's on our side and that's enough."
+loss_override = "Combine got there first. Shut it all down. I heard 7-G was destroyed in containment — fought back at the end. Didn't feel like a machine malfunction. Felt like something else. Something we should have gotten to first."
+script_events = []
+tiles = []
+units = []
+buildings = []

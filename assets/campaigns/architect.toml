@@ -1,0 +1,20 @@
+id = "architect"
+name = "The Long Design"
+faction = "Handler"
+description = "The hidden hand behind the conflict reveals their true design across five missions."
+unlock_requires = "combine,ironborn"
+
+[[missions]]
+map = "maps/architect_m0.toml"
+
+[[missions]]
+map = "maps/architect_m1.toml"
+
+[[missions]]
+map = "maps/architect_m2.toml"
+
+[[missions]]
+map = "maps/architect_m3.toml"
+
+[[missions]]
+map = "maps/architect_m4.toml"

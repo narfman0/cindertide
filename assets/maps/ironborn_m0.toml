@@ -1,0 +1,12 @@
+mission_type = "Defense"
+player_faction = "Ironborn"
+opponent_faction = "Combine"
+deadline_seconds = 1800.0
+mission_index_override = 0
+briefing_override = "Three weeks we've been running that depot. Our fuel, our hands, our dead keeping the pipes clear. Corp showed up with paperwork this morning. You know what we do with paperwork. Take it back. Hold it. Nobody from the Ironfields surrenders a working refinery to a suit."
+win_override = "Depot's ours. Corp pulled back — for now. Word's going to spread that we held. That matters more than the fuel."
+loss_override = "They took it. Put their flag on our work. We'll remember this one. The Ironfields remembers everything."
+script_events = []
+tiles = []
+units = []
+buildings = []

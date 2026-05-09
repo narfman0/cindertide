@@ -1,0 +1,12 @@
+mission_type = "Assault"
+player_faction = "Combine"
+opponent_faction = "Ironborn"
+deadline_seconds = 1800.0
+mission_index_override = 0
+briefing_override = "Refinery Seven has been occupied by salvagers claiming prior survey rights. Legal has reviewed the claim. It does not hold. You are authorized to remove them. Secure the facility intact — fuel infrastructure is not expendable. Do not escalate beyond what's necessary to establish control."
+win_override = "Refinery Seven is operational. The survey dispute has been resolved. Command notes the engagement ran longer than projected — review your unit deployment."
+loss_override = "Refinery Seven is lost. We are filing an injunction. In the meantime, Command expects a full incident report. This is not acceptable."
+script_events = []
+tiles = []
+units = []
+buildings = []

@@ -1,0 +1,12 @@
+mission_type = "Survival"
+player_faction = "Combine"
+opponent_faction = "Ironborn"
+deadline_seconds = 1800.0
+mission_index_override = 1
+briefing_override = "The bridge is irrelevant. The ravine is the second site. I needed a sustained engagement directly above it — hours of artillery, boots on the stone, enough fear and pressure to register. The Combine geologists will find trace evidence and classify it. The Ironborn will feel it and not report it. Both reactions are correct. Both are necessary. I have been waiting three years for someone to fight over this particular bridge."
+win_override = "The ravine registered. I felt it from four kilometers away — a low hum, like recognition. The second site is primed. Five more."
+loss_override = "Outcome irrelevant. The engagement lasted long enough. The site is marked. Moving on."
+script_events = []
+tiles = []
+units = []
+buildings = []
