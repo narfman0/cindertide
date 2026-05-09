@@ -18,6 +18,8 @@ bevy = { version = "0.16", default-features = false, features = [
     "bevy_winit",
     "bevy_core_pipeline",
     "bevy_mesh_picking_backend",
+    "bevy_ui",
+    "bevy_text",
     "x11",
     "default_font",
 ] }

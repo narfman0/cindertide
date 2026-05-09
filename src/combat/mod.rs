@@ -70,6 +70,16 @@ pub struct PlayerAttackOrder {
     pub target: Entity,
 }
 
+/// Attack-move order: unit moves toward a grid position while attacking enemies in range.
+#[derive(Component, Debug, Clone)]
+pub struct AttackMoveOrder {
+    pub target: GridPos,
+}
+
+/// Hold-position marker: unit will attack enemies in range but will not move.
+#[derive(Component, Debug)]
+pub struct HoldPosition;
+
 /// Records the most recent attacker. Used by unit AI for threat response.
 /// Refreshed on every successful hit; cleared by ai cleanup after a window.
 #[derive(Component, Debug, Clone)]
@@ -566,9 +576,61 @@ pub fn clear_took_damage_system(
     }
 }
 
+/// Attack-move system: units with AttackMoveOrder move toward their target position
+/// but will pause to attack any enemy unit they encounter within range.
+pub fn attack_move_system(
+    mut commands: Commands,
+    attackers: Query<(Entity, &AttackMoveOrder, &UnitPos, &AttackRange, Option<&UnitKind>), (Without<Dead>, Without<HoldPosition>)>,
+    enemies: Query<(Entity, &UnitPos), (Without<Dead>, With<crate::map::Faction>)>,
+    tiles: Query<&Tile>,
+) {
+    let tile_map: std::collections::HashMap<(i32, i32), TerrainType> = tiles
+        .iter()
+        .map(|t| ((t.pos.x, t.pos.y), t.terrain_type.clone()))
+        .collect();
+    let max_x = tile_map.keys().map(|(x, _)| *x).max().unwrap_or(32);
+    let max_y = tile_map.keys().map(|(_, y)| *y).max().unwrap_or(32);
+
+    for (attacker_entity, order, unit_pos, range, unit_kind) in &attackers {
+        // Check if destination reached
+        if unit_pos.pos.x == order.target.x && unit_pos.pos.y == order.target.y {
+            commands.entity(attacker_entity).remove::<AttackMoveOrder>();
+            continue;
+        }
+
+        // Find nearest enemy in range
+        let nearest_enemy = enemies.iter()
+            .filter(|(_, epos)| is_in_range(&unit_pos.pos, &epos.pos, range.tiles))
+            .min_by_key(|(_, epos)| chebyshev_distance(&unit_pos.pos, &epos.pos) as i32);
+
+        if let Some((enemy_entity, _)) = nearest_enemy {
+            // Attack the nearby enemy; pause movement
+            commands.entity(attacker_entity)
+                .insert(AttackTarget { entity: enemy_entity });
+        } else {
+            // No enemy nearby: pathfind toward destination
+            let pf_kind = match unit_kind {
+                Some(UnitKind::Vehicle) => PfUnitKind::Vehicle,
+                _ => PfUnitKind::Infantry,
+            };
+            let grid = PathfindingGrid {
+                width: max_x + 1,
+                height: max_y + 1,
+                tiles: tile_map.clone(),
+                unit_type: pf_kind,
+            };
+            if let Some(path) = grid.find_path(unit_pos.pos.clone(), order.target.clone()) {
+                commands.entity(attacker_entity)
+                    .insert(MoveTarget { target: order.target.clone() })
+                    .insert(MoveProgress { path, current_step: 0, elapsed: 0.0 });
+            }
+        }
+    }
+}
+
 pub fn player_attack_order_system(
     mut commands: Commands,
-    attackers: Query<(Entity, &PlayerAttackOrder, &UnitPos, &AttackRange, Option<&UnitKind>), Without<Dead>>,
+    attackers: Query<(Entity, &PlayerAttackOrder, &UnitPos, &AttackRange, Option<&UnitKind>), (Without<Dead>, Without<HoldPosition>)>,
     targets: Query<(&UnitPos, Option<&Health>), Without<Dead>>,
     tiles: Query<&Tile>,
 ) {
@@ -631,6 +693,7 @@ impl Plugin for CombatPlugin {
                 morale_decay_system,
                 death_system,
                 player_attack_order_system,
+                attack_move_system,
             )
                 .chain(),
         );
