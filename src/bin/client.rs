@@ -12,7 +12,7 @@ use cindertide::mapgen::MissionType;
 use cindertide::narrative::NarrativeData;
 use cindertide::resources::{FactionBundle, FactionEntity, ResourcePool};
 use cindertide::tech::{Tech, ResearchInProgress, ResearchTarget, Tier, Doctrine, start_research};
-use cindertide::combat::{PlayerAttackOrder, AttackMoveOrder, HoldPosition, AttackTarget, Health, Suppressed, AbilityCooldowns};
+use cindertide::combat::{PlayerAttackOrder, AttackMoveOrder, HoldPosition, AttackTarget, Health, Suppressed, AbilityCooldowns, JustDied, Dead};
 use cindertide::units::{MoveTarget, MoveProgress, UnitKind};
 use cindertide::buildings::Built;
 use cindertide::production::{ProductionQueue, unit_production_seconds};
@@ -62,6 +62,7 @@ fn main() {
         .init_resource::<EditorState>()
         .init_resource::<TechPanelVisible>()
         .init_resource::<FogOfWar>()
+        .init_resource::<AudioEventQueue>()
         .insert_resource(MinimapTimer(0.0))
         .add_systems(Startup, setup_scene)
         .add_systems(Startup, setup_ui)
@@ -95,6 +96,9 @@ fn main() {
         .add_systems(Update, handle_ability_input)
         .add_systems(Update, update_tech_panel)
         .add_systems(Update, update_fog_of_war)
+        .add_systems(Update, handle_unit_death)
+        .add_systems(Update, tick_death_flashes)
+        .add_systems(Update, process_audio_events)
         .run();
 }
 
@@ -313,6 +317,32 @@ struct TechPanelVisible {
     visible: bool,
     selected_idx: usize,
 }
+
+/// Visual death flash spawned when a unit dies. Fades/shrinks over `timer` seconds.
+#[derive(Component)]
+struct DeathFlash {
+    timer: f32,
+}
+
+// ── Audio event infrastructure ────────────────────────────────────────────────
+// Load .ogg files into `assets/audio/` and add `asset_server.load(...)` calls
+// here once real audio files are available. Wire each AudioEvent variant to a
+// corresponding Handle<AudioSource> stored in a resource, then play it from
+// `process_audio_events`.
+
+#[derive(Debug, Clone)]
+enum AudioEvent {
+    UnitSelected,
+    UnitMoved,
+    Combat,
+    BuildingComplete,
+    UiClick,
+    MissionStart,
+    MissionEnd,
+}
+
+#[derive(Resource, Default)]
+struct AudioEventQueue(Vec<AudioEvent>);
 
 // ── Resources ────────────────────────────────────────────────────────────────
 
@@ -1003,6 +1033,7 @@ fn poll_mission_end(
     mut progress: ResMut<GlobalProgress>,
     missions: Query<&Mission>,
     narrative: Option<Res<NarrativeData>>,
+    mut audio_queue: ResMut<AudioEventQueue>,
 ) {
     if *screen != ClientScreen::InMission {
         return;
@@ -1048,6 +1079,8 @@ fn poll_mission_end(
 
     // Persist progress to disk on each debrief transition
     save_progress(&progress);
+
+    audio_queue.0.push(AudioEvent::MissionEnd);
 
     *screen = ClientScreen::Debrief {
         title,
@@ -1129,16 +1162,46 @@ fn spawn_unit_visuals(
 }
 
 fn sync_unit_positions(
-    units: Query<(Entity, &UnitPos), With<UnitType>>,
+    units: Query<(Entity, &UnitPos, Option<&AttackTarget>, Option<&MoveTarget>), With<UnitType>>,
+    unit_positions: Query<&UnitPos, With<UnitType>>,
     visual_entities: Res<VisualEntities>,
     mut transforms: Query<&mut Transform>,
 ) {
-    for (entity, pos) in &units {
-        if let Some(&visual) = visual_entities.units.get(&entity) {
-            if let Ok(mut transform) = transforms.get_mut(visual) {
-                let target = grid_to_world(pos.pos.x, pos.pos.y) + Vec3::Y * 0.75;
-                transform.translation = transform.translation.lerp(target, 0.15);
+    for (entity, pos, attack_target, move_target) in &units {
+        let Some(&visual) = visual_entities.units.get(&entity) else { continue };
+        let Ok(mut transform) = transforms.get_mut(visual) else { continue };
+
+        let target_world = grid_to_world(pos.pos.x, pos.pos.y) + Vec3::Y * 0.75;
+        transform.translation = transform.translation.lerp(target_world, 0.15);
+
+        // Determine facing direction: attack target takes priority over movement.
+        let desired_rot: Option<Quat> = if let Some(at) = attack_target {
+            // Face toward the attack target's world position.
+            if let Ok(target_pos) = unit_positions.get(at.entity) {
+                let target_w = grid_to_world(target_pos.pos.x, target_pos.pos.y) + Vec3::Y * 0.75;
+                let dir = (target_w - transform.translation).with_y(0.0);
+                if dir.length_squared() > 0.0001 {
+                    Some(Quat::from_rotation_arc(Vec3::Z, dir.normalize()))
+                } else {
+                    None
+                }
+            } else {
+                None
             }
+        } else if move_target.is_some() {
+            // Face toward movement destination.
+            let dir = (target_world - transform.translation).with_y(0.0);
+            if dir.length_squared() > 0.0001 {
+                Some(Quat::from_rotation_arc(Vec3::Z, dir.normalize()))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        if let Some(rot) = desired_rot {
+            transform.rotation = transform.rotation.slerp(rot, 0.15);
         }
     }
 }
@@ -1186,6 +1249,7 @@ fn handle_mouse_input(
     mut drag_state: ResMut<DragState>,
     attack_move_mode: Res<AttackMoveMode>,
     screen: Res<ClientScreen>,
+    mut audio_queue: ResMut<AudioEventQueue>,
 ) {
     // Only handle mouse input during mission
     if *screen != ClientScreen::InMission {
@@ -1321,6 +1385,7 @@ fn handle_mouse_input(
 
                     if let Some(unit_entity) = clicked_unit {
                         selected.entities.push(unit_entity);
+                        audio_queue.0.push(AudioEvent::UnitSelected);
                         if let Ok((_, pos, _)) = units.get(unit_entity) {
                             let ring_pos = grid_to_world(pos.pos.x, pos.pos.y) - Vec3::Y * 0.35;
                             commands.spawn((
@@ -1423,6 +1488,7 @@ fn handle_mouse_input(
             let max_x = tile_map.keys().map(|(x, _)| *x).max().unwrap_or(40);
             let max_y = tile_map.keys().map(|(_, y)| *y).max().unwrap_or(25);
 
+            let mut any_moved = false;
             for &unit_entity in &selected_entities {
                 let unit_kind = units.get(unit_entity).ok().and_then(|(_, _, _)| {
                     None::<cindertide::units::UnitKind>
@@ -1445,7 +1511,11 @@ fn handle_mouse_input(
                         .remove::<HoldPosition>()
                         .insert(MoveTarget { target: target_pos.clone() })
                         .insert(MoveProgress { path, current_step: 0, elapsed: 0.0 });
+                    any_moved = true;
                 }
+            }
+            if any_moved {
+                audio_queue.0.push(AudioEvent::UnitMoved);
             }
         }
     }
@@ -3131,4 +3201,104 @@ fn update_tech_panel(
     }
 
     **text = lines.join("\n");
+}
+
+// ── Death effects ─────────────────────────────────────────────────────────────
+
+/// Detects units that just died (have `JustDied` marker), spawns a flash sphere,
+/// and despawns the unit entity along with its visual.
+fn handle_unit_death(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut visual_entities: ResMut<VisualEntities>,
+    dying_units: Query<(Entity, &UnitPos), (With<JustDied>, With<Dead>, With<UnitType>)>,
+    dying_buildings: Query<(Entity, &BuildingPos), (With<JustDied>, With<Dead>, With<BuildingType>)>,
+    mut audio_queue: ResMut<AudioEventQueue>,
+) {
+    for (entity, pos) in &dying_units {
+        let world_pos = grid_to_world(pos.pos.x, pos.pos.y) + Vec3::Y * 0.75;
+
+        // Spawn a brief white/yellow semi-transparent death flash sphere.
+        commands.spawn((
+            Mesh3d(meshes.add(Sphere::new(0.6))),
+            MeshMaterial3d(materials.add(StandardMaterial {
+                base_color: Color::srgba(1.0, 0.95, 0.3, 0.75),
+                emissive: LinearRgba::new(2.0, 1.8, 0.2, 1.0),
+                alpha_mode: AlphaMode::Blend,
+                ..default()
+            })),
+            Transform::from_translation(world_pos),
+            DeathFlash { timer: 0.3 },
+        ));
+
+        // Despawn visual entity.
+        if let Some(&vis) = visual_entities.units.get(&entity) {
+            commands.entity(vis).despawn();
+        }
+        visual_entities.units.remove(&entity);
+
+        // Despawn logic entity.
+        commands.entity(entity).despawn();
+
+        audio_queue.0.push(AudioEvent::Combat);
+    }
+
+    for (entity, pos) in &dying_buildings {
+        let world_pos = grid_to_world(pos.pos.x, pos.pos.y) + Vec3::Y * 0.5;
+
+        // Replace building visual with a small rubble cube (dark gray/brown).
+        commands.spawn((
+            Mesh3d(meshes.add(Cuboid::new(0.5, 0.3, 0.5))),
+            MeshMaterial3d(materials.add(StandardMaterial {
+                base_color: Color::srgb(0.28, 0.22, 0.18),
+                perceptual_roughness: 1.0,
+                ..default()
+            })),
+            Transform::from_translation(world_pos - Vec3::Y * 0.35),
+        ));
+
+        // Despawn visual entity.
+        if let Some(&vis) = visual_entities.buildings.get(&entity) {
+            commands.entity(vis).despawn();
+        }
+        visual_entities.buildings.remove(&entity);
+
+        // Despawn logic entity.
+        commands.entity(entity).despawn();
+
+        audio_queue.0.push(AudioEvent::Combat);
+    }
+}
+
+/// Ticks DeathFlash timers, shrinks flashes toward zero, then despawns them.
+fn tick_death_flashes(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut flashes: Query<(Entity, &mut DeathFlash, &mut Transform)>,
+) {
+    let dt = time.delta_secs();
+    for (entity, mut flash, mut transform) in &mut flashes {
+        flash.timer -= dt;
+        if flash.timer <= 0.0 {
+            commands.entity(entity).despawn();
+        } else {
+            // Scale from 1.0 down to 0.0 as timer expires (timer starts at 0.3).
+            let frac = (flash.timer / 0.3).clamp(0.0, 1.0);
+            transform.scale = Vec3::splat(frac);
+        }
+    }
+}
+
+// ── Audio event processing ────────────────────────────────────────────────────
+// Load .ogg files into `assets/audio/` and add `asset_server.load(...)` calls
+// here once real audio files are available. For each AudioEvent variant, store
+// a Handle<AudioSource> in a resource and call `commands.spawn(AudioPlayer(handle))`
+// (or equivalent Bevy audio API) in the match below.
+
+fn process_audio_events(mut queue: ResMut<AudioEventQueue>) {
+    for event in queue.0.drain(..) {
+        trace!("audio event: {:?}", event);
+        // TODO: match event { AudioEvent::Combat => play combat_sfx, ... }
+    }
 }

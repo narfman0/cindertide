@@ -458,13 +458,20 @@ pub fn suppression_pin_system(
     }
 }
 
+/// Marker inserted on a unit the frame its health hits zero.
+/// The client `handle_unit_death` system reads this, spawns a death effect,
+/// then despawns the unit entity.
+#[derive(Component, Debug)]
+pub struct JustDied;
+
 pub fn death_system(
     mut commands: Commands,
-    query: Query<(Entity, &Health), (Without<Dead>, Without<crate::heroes::Hero>)>,
+    query: Query<(Entity, &Health), (Without<Dead>, Without<JustDied>, Without<crate::heroes::Hero>)>,
 ) {
     for (entity, health) in &query {
         if health.current <= 0.0 {
-            commands.entity(entity).insert(Dead).remove::<AttackTarget>();
+            // Insert JustDied so the client can react before full despawn.
+            commands.entity(entity).insert(Dead).insert(JustDied).remove::<AttackTarget>();
         }
     }
 }
