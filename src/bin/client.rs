@@ -671,6 +671,8 @@ pub struct LobbyConfig {
     pub win_condition: String,        // "Control", "Assault", "Ffa", "KingOfTheHill", "Assassination"
     pub selected_slot: usize,         // cursor in the lobby UI
     pub selected_field: LobbyField,   // which field is being edited
+    pub available_maps: Vec<String>,  // relative paths like "maps/combine_m0.toml"
+    pub selected_map: usize,          // index into available_maps
 }
 
 #[derive(Default, Clone, PartialEq, Debug, Serialize, Deserialize)]
@@ -679,6 +681,7 @@ pub enum LobbyField {
     Team,
     Faction,
     Controller,
+    Map,
     WinCondition,
 }
 
@@ -693,8 +696,63 @@ impl LobbyConfig {
             win_condition: "Assault".into(),
             selected_slot: 0,
             selected_field: LobbyField::Slot,
+            available_maps: Vec::new(),
+            selected_map: 0,
         }
     }
+}
+
+/// Build lobby slots from a map's spawn_zones. Falls back to 2 default slots if
+/// the map has no spawn zones or cannot be loaded.
+fn lobby_slots_from_map(map_path: &str) -> Vec<LobbySlot> {
+    let full_path = format!("assets/{}", map_path);
+    if let Ok(content) = std::fs::read_to_string(&full_path) {
+        if let Ok(saved) = toml::from_str::<SavedMap>(&content) {
+            if !saved.spawn_zones.is_empty() {
+                return saved.spawn_zones.iter().map(|zone| {
+                    let team_idx = zone.suggested_team.unwrap_or(zone.id % 8);
+                    LobbySlot {
+                        id: zone.id,
+                        spawn_zone: zone.id,
+                        team: LOBBY_TEAMS[team_idx.min(LOBBY_TEAMS.len() - 1)].to_string(),
+                        faction: LOBBY_FACTIONS[zone.id % LOBBY_FACTIONS.len()].to_string(),
+                        controller: if zone.id == 0 {
+                            SlotController::Human
+                        } else {
+                            SlotController::Ai("normal".into())
+                        },
+                    }
+                }).collect();
+            }
+        }
+    }
+    // fallback: 2 default slots
+    vec![
+        LobbySlot { id: 0, team: "Alpha".into(), faction: "Combine".into(), controller: SlotController::Human, spawn_zone: 0 },
+        LobbySlot { id: 1, team: "Bravo".into(), faction: "Ironborn".into(), controller: SlotController::Ai("normal".into()), spawn_zone: 1 },
+    ]
+}
+
+/// Scan assets/maps/*.toml and return sorted relative paths (maps/foo.toml).
+fn scan_available_maps() -> Vec<String> {
+    let mut maps: Vec<String> = std::fs::read_dir("assets/maps")
+        .map(|rd| {
+            rd.filter_map(|e| e.ok())
+              .filter_map(|e| {
+                  let p = e.path();
+                  if p.extension().and_then(|x| x.to_str()) == Some("toml") {
+                      p.file_name()
+                       .and_then(|n| n.to_str())
+                       .map(|n| format!("maps/{}", n))
+                  } else {
+                      None
+                  }
+              })
+              .collect()
+        })
+        .unwrap_or_default();
+    maps.sort();
+    maps
 }
 
 const LOBBY_TEAMS: &[&str] = &["Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf", "Hotel"];
@@ -1396,6 +1454,12 @@ fn update_screen_overlay(
 
             let mut lines = String::new();
 
+            // Map selector row
+            let map_marker = if lobby.selected_field == LobbyField::Map { ">" } else { " " };
+            let map_display = lobby.map_path.as_deref().unwrap_or("(none)");
+            let slot_count = lobby.slots.len();
+            lines.push_str(&format!("{}  Map: [{}]  ←→ change ({} slots)\n\n", map_marker, map_display, slot_count));
+
             // Win condition row
             let wc = &lobby.win_condition;
             let wc_marker = if lobby.selected_field == LobbyField::WinCondition { ">" } else { " " };
@@ -1429,7 +1493,7 @@ fn update_screen_overlay(
             lines.push_str(&net_status);
 
             **body = lines;
-            **hint = "↑↓ slot  ←→ cycle field  Tab: next field  N: add slot  Del: remove  H: host  J: join  Enter: start  Esc: back".to_string();
+            **hint = "↑↓ slot  ←→ cycle field  Tab: next field  ←→ on Map: change map  H: host  J: join  Enter: start  Esc: back".to_string();
         }
         ClientScreen::FactionPicker { selected } => {
             *vis = Visibility::Visible;
@@ -1530,7 +1594,20 @@ fn handle_ui_input(
                     .unwrap_or(0);
                 *screen = ClientScreen::FactionPicker { selected: first_unlocked };
             } else if keys.just_pressed(KeyCode::KeyM) {
-                *lobby = LobbyConfig::default_2_slot();
+                let available_maps = scan_available_maps();
+                let map_path = available_maps.first().cloned();
+                let slots = map_path.as_deref()
+                    .map(lobby_slots_from_map)
+                    .unwrap_or_else(|| LobbyConfig::default_2_slot().slots);
+                *lobby = LobbyConfig {
+                    slots,
+                    map_path,
+                    win_condition: "Assault".into(),
+                    selected_slot: 0,
+                    selected_field: LobbyField::Slot,
+                    available_maps,
+                    selected_map: 0,
+                };
                 *screen = ClientScreen::MultiplayerLobby {
                     hosting: false,
                     ip_input: "127.0.0.1".to_string(),
@@ -1644,35 +1721,6 @@ fn handle_ui_input(
             let right = keys.just_pressed(KeyCode::ArrowRight);
             let tab = keys.just_pressed(KeyCode::Tab);
 
-            // N: add slot (up to 8)
-            if keys.just_pressed(KeyCode::KeyN) {
-                if lobby.slots.len() < 8 {
-                    let id = lobby.slots.len();
-                    let teams = &["Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf", "Hotel"];
-                    lobby.slots.push(LobbySlot {
-                        id,
-                        team: teams.get(id).unwrap_or(&"Hotel").to_string(),
-                        faction: "Combine".into(),
-                        controller: SlotController::Open,
-                        spawn_zone: id,
-                    });
-                    // Re-index ids
-                    for (i, s) in lobby.slots.iter_mut().enumerate() { s.id = i; }
-                }
-            }
-
-            // Delete: remove selected slot (keep at least 1)
-            if keys.just_pressed(KeyCode::Delete) {
-                let sel = lobby.selected_slot;
-                if lobby.slots.len() > 1 {
-                    lobby.slots.remove(sel);
-                    for (i, s) in lobby.slots.iter_mut().enumerate() { s.id = i; }
-                    if lobby.selected_slot >= lobby.slots.len() {
-                        lobby.selected_slot = lobby.slots.len() - 1;
-                    }
-                }
-            }
-
             // Up/Down: move selected_slot
             if up {
                 if lobby.selected_slot > 0 { lobby.selected_slot -= 1; }
@@ -1688,7 +1736,8 @@ fn handle_ui_input(
                     LobbyField::Slot        => LobbyField::Team,
                     LobbyField::Team        => LobbyField::Faction,
                     LobbyField::Faction     => LobbyField::Controller,
-                    LobbyField::Controller  => LobbyField::WinCondition,
+                    LobbyField::Controller  => LobbyField::Map,
+                    LobbyField::Map         => LobbyField::WinCondition,
                     LobbyField::WinCondition => LobbyField::Slot,
                 };
             }
@@ -1697,6 +1746,17 @@ fn handle_ui_input(
             if left || right {
                 let step: i32 = if right { 1 } else { -1 };
                 match lobby.selected_field {
+                    LobbyField::Map => {
+                        if !lobby.available_maps.is_empty() {
+                            let new_idx = ((lobby.selected_map as i32 + step)
+                                .rem_euclid(lobby.available_maps.len() as i32)) as usize;
+                            lobby.selected_map = new_idx;
+                            let map_path = lobby.available_maps[new_idx].clone();
+                            lobby.slots = lobby_slots_from_map(&map_path);
+                            lobby.map_path = Some(map_path);
+                            lobby.selected_slot = 0;
+                        }
+                    }
                     LobbyField::WinCondition => {
                         let idx = LOBBY_WIN_CONDITIONS.iter().position(|&w| w == lobby.win_condition.as_str()).unwrap_or(0);
                         let new_idx = ((idx as i32 + step).rem_euclid(LOBBY_WIN_CONDITIONS.len() as i32)) as usize;
@@ -1866,6 +1926,8 @@ fn handle_ui_input(
                         win_condition: wc,
                         selected_slot: 0,
                         selected_field: LobbyField::Slot,
+                        available_maps: Vec::new(),
+                        selected_map: 0,
                     };
                 }
 
