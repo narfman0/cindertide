@@ -697,7 +697,7 @@ impl LobbyConfig {
     }
 }
 
-const LOBBY_TEAMS: &[&str] = &["Alpha", "Bravo", "Charlie", "Delta", "FFA-0", "FFA-1", "FFA-2", "FFA-3"];
+const LOBBY_TEAMS: &[&str] = &["Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf", "Hotel"];
 const LOBBY_FACTIONS: &[&str] = &["Combine", "Ironborn", "Covenant", "Hollow"];
 const LOBBY_WIN_CONDITIONS: &[&str] = &["Assault", "Control", "Ffa", "KingOfTheHill", "Assassination", "Defense"];
 const LOBBY_CONTROLLERS: &[SlotController] = &[
@@ -1644,14 +1644,14 @@ fn handle_ui_input(
             let right = keys.just_pressed(KeyCode::ArrowRight);
             let tab = keys.just_pressed(KeyCode::Tab);
 
-            // N: add slot (up to 4)
+            // N: add slot (up to 8)
             if keys.just_pressed(KeyCode::KeyN) {
-                if lobby.slots.len() < 4 {
+                if lobby.slots.len() < 8 {
                     let id = lobby.slots.len();
-                    let zones = &["Alpha", "Bravo", "Charlie", "Delta"];
+                    let teams = &["Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf", "Hotel"];
                     lobby.slots.push(LobbySlot {
                         id,
-                        team: zones.get(id).unwrap_or(&"Delta").to_string(),
+                        team: teams.get(id).unwrap_or(&"Hotel").to_string(),
                         faction: "Combine".into(),
                         controller: SlotController::Open,
                         spawn_zone: id,
