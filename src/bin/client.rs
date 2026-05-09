@@ -10,9 +10,11 @@ use cindertide::game::{ActiveRun, GameState};
 use cindertide::mission::{Mission, MissionStatus};
 use cindertide::mapgen::MissionType;
 use cindertide::narrative::NarrativeData;
-use cindertide::resources::FactionBundle;
-use cindertide::combat::{PlayerAttackOrder, AttackMoveOrder, HoldPosition};
+use cindertide::resources::{FactionBundle, FactionEntity, ResourcePool};
+use cindertide::combat::{PlayerAttackOrder, AttackMoveOrder, HoldPosition, AttackTarget, Health};
 use cindertide::units::{MoveTarget, MoveProgress, UnitKind};
+use cindertide::buildings::Built;
+use cindertide::production::{ProductionQueue, unit_production_seconds};
 use cindertide::{
     map::MapPlugin,
     units::UnitPlugin,
@@ -78,6 +80,10 @@ fn main() {
         .add_systems(Update, update_screen_overlay)
         .add_systems(Update, poll_mission_end)
         .add_systems(Update, update_editor_panel)
+        .add_systems(Update, update_hud_visibility)
+        .add_systems(Update, update_resource_bar)
+        .add_systems(Update, update_unit_info_panel)
+        .add_systems(Update, update_production_queue)
         .run();
 }
 
@@ -253,6 +259,22 @@ struct EditorPanel;
 /// Text inside the editor panel.
 #[derive(Component)]
 struct EditorPanelText;
+
+/// Root node of the in-mission HUD (parent of the three HUD panels).
+#[derive(Component)]
+struct HudRoot;
+
+/// Text node for the top resource bar.
+#[derive(Component)]
+struct ResourceBarText;
+
+/// Text node for the bottom unit info panel.
+#[derive(Component)]
+struct UnitInfoText;
+
+/// Text node for the bottom-right production queue panel.
+#[derive(Component)]
+struct ProductionQueueText;
 
 // ── Resources ────────────────────────────────────────────────────────────────
 
@@ -475,6 +497,81 @@ fn setup_ui(mut commands: Commands) {
                 TextFont { font_size: 20.0, ..default() },
                 OverlayHintText,
             ));
+        });
+
+        // ── In-mission HUD ──────────────────────────────────────────────────
+        parent.spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(0.0),
+                top: Val::Px(0.0),
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                ..default()
+            },
+            Visibility::Hidden,
+            HudRoot,
+        )).with_children(|hud| {
+            // Top resource bar
+            hud.spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(0.0),
+                    top: Val::Px(0.0),
+                    width: Val::Percent(100.0),
+                    padding: UiRect::axes(Val::Px(16.0), Val::Px(6.0)),
+                    ..default()
+                },
+                BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.65)),
+            )).with_children(|bar| {
+                bar.spawn((
+                    Text::new("FUEL: 0   SCRAP: 0   MANPOWER: 0"),
+                    TextColor(Color::srgb(0.95, 0.90, 0.40)),
+                    TextFont { font_size: 18.0, ..default() },
+                    ResourceBarText,
+                ));
+            });
+
+            // Bottom unit info panel (center)
+            hud.spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    bottom: Val::Px(0.0),
+                    left: Val::Percent(20.0),
+                    width: Val::Percent(60.0),
+                    padding: UiRect::all(Val::Px(10.0)),
+                    ..default()
+                },
+                BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.65)),
+            )).with_children(|panel| {
+                panel.spawn((
+                    Text::new(""),
+                    TextColor(Color::srgb(0.85, 0.95, 0.85)),
+                    TextFont { font_size: 16.0, ..default() },
+                    UnitInfoText,
+                ));
+            });
+
+            // Bottom-right production queue panel
+            hud.spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    bottom: Val::Px(0.0),
+                    right: Val::Px(0.0),
+                    width: Val::Px(260.0),
+                    padding: UiRect::all(Val::Px(10.0)),
+                    flex_direction: FlexDirection::Column,
+                    ..default()
+                },
+                BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.65)),
+            )).with_children(|panel| {
+                panel.spawn((
+                    Text::new(""),
+                    TextColor(Color::srgb(0.75, 0.85, 1.0)),
+                    TextFont { font_size: 14.0, ..default() },
+                    ProductionQueueText,
+                ));
+            });
         });
 
         // Editor side panel (right side)
@@ -1888,6 +1985,207 @@ fn update_editor_panel(
     **text = format!(
         "Tool: {tool_name}\n\nTerrain: {terrain_name}\nFaction: {faction_name_str}\nUnit: {unit_name}\nBuilding: {building_name}\n\nTiles: {tile_count}\nUnits: {unit_count}\nBuildings: {building_count}\n\n--- Keys ---\n1-4: tool\nF: faction\nT: unit type\nB: building\nR-click: cycle terrain\nDel: clear map\nCtrl+S: save\nCtrl+L: load\nEsc: exit{del_hint}"
     );
+}
+
+// ── HUD systems ───────────────────────────────────────────────────────────────
+
+/// Show/hide the entire HUD root based on ClientScreen.
+fn update_hud_visibility(
+    screen: Res<ClientScreen>,
+    mut hud_vis: Query<&mut Visibility, With<HudRoot>>,
+) {
+    if !screen.is_changed() {
+        return;
+    }
+    let in_mission = *screen == ClientScreen::InMission;
+    for mut vis in &mut hud_vis {
+        *vis = if in_mission { Visibility::Visible } else { Visibility::Hidden };
+    }
+}
+
+/// Update the top resource bar with player faction's current resources.
+fn update_resource_bar(
+    screen: Res<ClientScreen>,
+    player_faction: Option<Res<PlayerFaction>>,
+    faction_entities: Query<(&FactionEntity, &ResourcePool)>,
+    mut text_q: Query<&mut Text, With<ResourceBarText>>,
+) {
+    if *screen != ClientScreen::InMission {
+        return;
+    }
+    let Ok(mut text) = text_q.single_mut() else { return };
+    let Some(pf) = player_faction else { return };
+
+    // Find the FactionEntity that matches the player faction
+    for (fe, pool) in &faction_entities {
+        if fe.faction == pf.0 {
+            **text = format!(
+                "FUEL: {:.0}   SCRAP: {:.0}   MANPOWER: {:.0}",
+                pool.fuel, pool.scrap, pool.manpower
+            );
+            return;
+        }
+    }
+}
+
+/// Update the bottom unit info panel for selected units.
+fn update_unit_info_panel(
+    screen: Res<ClientScreen>,
+    selected: Res<SelectedUnits>,
+    units: Query<(
+        &UnitType,
+        Option<&Health>,
+        Option<&MoveTarget>,
+        Option<&AttackTarget>,
+        Option<&HoldPosition>,
+    ), With<UnitType>>,
+    mut text_q: Query<&mut Text, With<UnitInfoText>>,
+) {
+    if *screen != ClientScreen::InMission {
+        return;
+    }
+    let Ok(mut text) = text_q.single_mut() else { return };
+
+    if selected.entities.is_empty() {
+        **text = String::new();
+        return;
+    }
+
+    let count = selected.entities.len();
+
+    if count == 1 {
+        let entity = selected.entities[0];
+        if let Ok((unit_type, health, move_target, attack_target, hold)) = units.get(entity) {
+            let type_name = match unit_type {
+                UnitType::Riflemen => "Riflemen",
+                UnitType::HeavyWeapons => "Heavy Weapons",
+                UnitType::LightVehicle => "Light Vehicle",
+                UnitType::HeavyArmor => "Heavy Armor",
+            };
+
+            let health_str = if let Some(h) = health {
+                let frac = (h.current / h.max).clamp(0.0, 1.0);
+                let filled = (frac * 20.0).round() as usize;
+                let empty = 20 - filled;
+                format!(
+                    "HP: {:.0}/{:.0} [{}{}]",
+                    h.current, h.max,
+                    "#".repeat(filled),
+                    "-".repeat(empty)
+                )
+            } else {
+                "HP: --".to_string()
+            };
+
+            let order = if hold.is_some() {
+                "Holding"
+            } else if attack_target.is_some() {
+                "Attacking"
+            } else if move_target.is_some() {
+                "Moving"
+            } else {
+                "Idle"
+            };
+
+            **text = format!("{}\n{}\nOrder: {}", type_name, health_str, order);
+        } else {
+            **text = String::new();
+        }
+    } else {
+        // Multiple units selected: show count + aggregate health
+        let mut total_hp = 0.0f32;
+        let mut total_max = 0.0f32;
+        let mut valid = 0usize;
+
+        for &entity in &selected.entities {
+            if let Ok((_, health, _, _, _)) = units.get(entity) {
+                if let Some(h) = health {
+                    total_hp += h.current;
+                    total_max += h.max;
+                    valid += 1;
+                }
+            }
+        }
+
+        let health_str = if valid > 0 && total_max > 0.0 {
+            let frac = (total_hp / total_max).clamp(0.0, 1.0);
+            let filled = (frac * 20.0).round() as usize;
+            let empty = 20 - filled;
+            format!(
+                "HP: {:.0}/{:.0} [{}{}]",
+                total_hp, total_max,
+                "#".repeat(filled),
+                "-".repeat(empty)
+            )
+        } else {
+            "HP: --".to_string()
+        };
+
+        **text = format!("{} units selected\n{}", count, health_str);
+    }
+}
+
+/// Update the bottom-right production queue panel for player-faction buildings.
+fn update_production_queue(
+    screen: Res<ClientScreen>,
+    player_faction: Option<Res<PlayerFaction>>,
+    buildings: Query<(&BuildingType, &Faction, &ProductionQueue), With<Built>>,
+    mut text_q: Query<&mut Text, With<ProductionQueueText>>,
+) {
+    if *screen != ClientScreen::InMission {
+        return;
+    }
+    let Ok(mut text) = text_q.single_mut() else { return };
+    let Some(pf) = player_faction else { return };
+
+    let mut lines: Vec<String> = Vec::new();
+
+    for (bt, faction, queue) in &buildings {
+        if *faction != pf.0 {
+            continue;
+        }
+        if queue.jobs.is_empty() {
+            continue;
+        }
+
+        let building_name = match bt {
+            BuildingType::Barracks => "Barracks",
+            BuildingType::MotorPool => "Motor Pool",
+            _ => continue, // only show producing buildings
+        };
+
+        let producing = match &queue.jobs[0] {
+            UnitType::Riflemen => "Riflemen",
+            UnitType::HeavyWeapons => "Heavy Weapons",
+            UnitType::LightVehicle => "Light Vehicle",
+            UnitType::HeavyArmor => "Heavy Armor",
+        };
+
+        let duration = unit_production_seconds(&queue.jobs[0]);
+        let frac = (queue.progress / duration).clamp(0.0, 1.0);
+        let filled = (frac * 16.0).round() as usize;
+        let empty = 16 - filled;
+        let bar = format!("[{}{}]", "#".repeat(filled), "-".repeat(empty));
+
+        let queue_count = queue.jobs.len();
+        let queue_str = if queue_count > 1 {
+            format!(" (+{})", queue_count - 1)
+        } else {
+            String::new()
+        };
+
+        lines.push(format!(
+            "{}: {}{}\n{} {:.0}%",
+            building_name, producing, queue_str,
+            bar, frac * 100.0
+        ));
+    }
+
+    **text = if lines.is_empty() {
+        String::new()
+    } else {
+        lines.join("\n\n")
+    };
 }
 
 // ── Color helpers ──────────────────────────────────────────────────────────────
