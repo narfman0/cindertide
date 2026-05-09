@@ -2681,7 +2681,16 @@ fn spawn_built_building(
 }
 
 fn spawn_unit_at(world: &mut World, faction: Faction, x: i32, y: i32) {
-    let id = world.spawn(RiflemanBundle::with_faction(x, y, faction)).id();
+    spawn_unit_type_at(world, faction, units::UnitType::Riflemen, x, y);
+}
+
+fn spawn_unit_type_at(world: &mut World, faction: Faction, unit_type: units::UnitType, x: i32, y: i32) {
+    let id = match unit_type {
+        units::UnitType::Riflemen => world.spawn(RiflemanBundle::with_faction(x, y, faction)).id(),
+        units::UnitType::HeavyWeapons => world.spawn(units::HeavyWeaponsBundle::with_faction(x, y, faction)).id(),
+        units::UnitType::LightVehicle => world.spawn(units::LightVehicleBundle::with_faction(x, y, faction)).id(),
+        units::UnitType::HeavyArmor => world.spawn(units::HeavyArmorBundle::with_faction(x, y, faction)).id(),
+    };
     if let Ok(mut em) = world.get_entity_mut(id) {
         em.insert(units::HomeBase { pos: GridPos { x, y } });
     }
@@ -2697,26 +2706,33 @@ fn apply_faction_loadout(world: &mut World, faction: &Faction, base: &GridPos) {
             spawn_built_building(world, BuildingType::CommandBunker, faction.clone(), bx, by);
             spawn_built_building(world, BuildingType::Refinery, faction.clone(), bx + 2, by);
             spawn_built_building(world, BuildingType::Barracks, faction.clone(), bx, by + 2);
+            spawn_built_building(world, BuildingType::Scrapyard, faction.clone(), bx + 2, by + 2);
+            spawn_built_building(world, BuildingType::SupplyDepot, faction.clone(), bx - 1, by + 1);
             for i in 0..4 {
-                spawn_unit_at(world, faction.clone(), bx + i, by + 4);
+                spawn_unit_type_at(world, faction.clone(), units::UnitType::Riflemen, bx + i, by + 4);
             }
-        }
-        Faction::Covenant => {
-            spawn_built_building(world, BuildingType::CommandBunker, faction.clone(), bx, by);
-            spawn_built_building(world, BuildingType::Pillbox, faction.clone(), bx + 2, by - 1);
-            spawn_built_building(world, BuildingType::Pillbox, faction.clone(), bx + 2, by + 1);
-            for i in 0..3 {
-                spawn_unit_at(world, faction.clone(), bx + 1, by + 3 + i);
-            }
+            spawn_unit_type_at(world, faction.clone(), units::UnitType::HeavyWeapons, bx + 4, by + 4);
         }
         Faction::Ironborn => {
             spawn_built_building(world, BuildingType::Foundry, faction.clone(), bx, by);
+            spawn_built_building(world, BuildingType::Scrapyard, faction.clone(), bx + 2, by);
+            spawn_built_building(world, BuildingType::RepairBay, faction.clone(), bx, by + 2);
             for i in 0..5 {
-                spawn_unit_at(world, faction.clone(), bx + i, by + 3);
+                spawn_unit_type_at(world, faction.clone(), units::UnitType::Riflemen, bx + i, by + 4);
+            }
+            spawn_unit_type_at(world, faction.clone(), units::UnitType::LightVehicle, bx + 5, by + 4);
+        }
+        Faction::Covenant => {
+            spawn_built_building(world, BuildingType::CommandBunker, faction.clone(), bx, by);
+            spawn_built_building(world, BuildingType::Pillbox, faction.clone(), bx + 3, by - 1);
+            spawn_built_building(world, BuildingType::Pillbox, faction.clone(), bx + 3, by + 1);
+            spawn_built_building(world, BuildingType::Watchtower, faction.clone(), bx + 3, by + 3);
+            spawn_built_building(world, BuildingType::Workshop, faction.clone(), bx, by + 2);
+            for i in 0..5 {
+                spawn_unit_type_at(world, faction.clone(), units::UnitType::Riflemen, bx + i, by + 4);
             }
         }
         Faction::Hollow => {
-            // No buildings — just a Hive Heart spawner.
             world.spawn(HollowSpawner::new(hollow::HollowMode::Consuming, bx, by));
         }
     }

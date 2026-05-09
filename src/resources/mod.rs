@@ -66,9 +66,15 @@ pub struct FactionBundle {
 
 impl FactionBundle {
     pub fn new(faction: Faction) -> Self {
+        let (fuel, scrap, manpower) = match &faction {
+            Faction::Combine  => (800.0, 400.0, 100.0),
+            Faction::Ironborn => (400.0, 900.0, 120.0),
+            Faction::Covenant => (600.0, 600.0, 80.0),
+            Faction::Hollow   => (0.0, 0.0, 0.0),
+        };
         Self {
             faction: FactionEntity { faction },
-            pool: ResourcePool { fuel: 200.0, scrap: 200.0, manpower: 50.0 },
+            pool: ResourcePool { fuel, scrap, manpower },
             caps: ResourceCaps { fuel: 2000.0, scrap: 2000.0, manpower: 200.0 },
             trickle: ResourceTrickle { fuel_per_second: 0.0, scrap_per_second: 0.0, manpower_per_second: 1.0 },
             tech: crate::tech::Tech::default(),
@@ -240,9 +246,9 @@ mod tests {
     #[test]
     fn faction_bundle_default_starting_pool() {
         let b = FactionBundle::new(Faction::Combine);
-        assert_eq!(b.pool.fuel, 200.0);
-        assert_eq!(b.pool.scrap, 200.0);
-        assert_eq!(b.pool.manpower, 50.0);
+        assert_eq!(b.pool.fuel, 800.0);
+        assert_eq!(b.pool.scrap, 400.0);
+        assert_eq!(b.pool.manpower, 100.0);
         assert_eq!(b.faction.faction, Faction::Combine);
     }
 
