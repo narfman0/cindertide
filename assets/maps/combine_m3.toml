@@ -1,12 +1,116 @@
-mission_type = "Control"
+mission_type = "Assault"
 player_faction = "Combine"
 opponent_faction = "Ironborn"
-deadline_seconds = 1800.0
+deadline_seconds = 2700.0
 mission_index_override = 3
 briefing_override = "Unit 7-G deviated from its operational parameters during the Pale Ground extraction. It protected a soldier outside its assigned perimeter, then destroyed three allied units, then stopped. It has not moved in six hours. We have since identified eleven other units exhibiting minor deviations — hesitation, target refusal, one instance of what the field report calls 'apparent grief.' This does not leave this briefing. Get to the forge, retrieve 7-G intact if possible, destroy it if not. Shut down the entire production line. We are not ready for whatever this is."
 win_override = "7-G is contained. Production line is offline. The research division is asking questions we are not going to answer yet. Command thanks you. Separately — the soldier 7-G protected has requested a transfer to robot unit oversight. Request approved."
 loss_override = "7-G is lost. Ironborn have it — or it has them, we're not sure of the distinction anymore. The production line is still running. Something in the forge is keeping it running. We don't know how."
-script_events = []
+
 tiles = []
-units = []
-buildings = []
+
+[[units]]
+faction = "Combine"
+unit_type = "Riflemen"
+x = 7
+y = 69
+
+[[units]]
+faction = "Ironborn"
+unit_type = "Riflemen"
+x = 110
+y = 12
+
+[[units]]
+faction = "Ironborn"
+unit_type = "Riflemen"
+x = 113
+y = 8
+
+[[units]]
+faction = "Ironborn"
+unit_type = "Riflemen"
+x = 116
+y = 15
+
+[[units]]
+faction = "Ironborn"
+unit_type = "Riflemen"
+x = 109
+y = 18
+
+[[units]]
+faction = "Ironborn"
+unit_type = "HeavyWeapons"
+x = 118
+y = 10
+
+[[buildings]]
+faction = "Combine"
+building_type = "Refinery"
+x = 10
+y = 70
+
+[[buildings]]
+faction = "Ironborn"
+building_type = "CommandBunker"
+x = 115
+y = 10
+
+[[buildings]]
+faction = "Ironborn"
+building_type = "Foundry"
+x = 118
+y = 10
+
+[[buildings]]
+faction = "Ironborn"
+building_type = "Barracks"
+x = 115
+y = 7
+
+[[buildings]]
+faction = "Ironborn"
+building_type = "Scrapyard"
+x = 112
+y = 13
+
+[[script_events]]
+id = "recon_dialogue"
+trigger = { type = "time", seconds = 0.0 }
+actions = [
+  { type = "dialogue", text = "Deep Ironborn territory. Build up before you engage — their positions here are well-established." },
+  { type = "objective", text = "Build a force and assault the Ironborn base" },
+]
+
+[[script_events]]
+id = "first_contact"
+trigger = { type = "time", seconds = 90.0 }
+actions = [
+  { type = "spawn_units", faction = "Ironborn", unit_type = "Riflemen", count = 2, x = 80, y = 40 },
+  { type = "dialogue", text = "Contact. Ironborn patrol spotted mid-field. Hold or engage — your call, Commander." },
+]
+
+[[script_events]]
+id = "second_base"
+trigger = { type = "time", seconds = 360.0 }
+actions = [
+  { type = "dialogue", text = "Intelligence reports the Ironborn are reinforcing a second position to the northeast. They're dug in deep." },
+]
+
+[[script_events]]
+id = "full_assault"
+trigger = { type = "time", seconds = 600.0 }
+actions = [
+  { type = "spawn_units", faction = "Ironborn", unit_type = "Riflemen", count = 6, x = 110, y = 22 },
+  { type = "spawn_units", faction = "Ironborn", unit_type = "HeavyArmor", count = 2, x = 108, y = 15 },
+  { type = "dialogue", text = "They're coming in force — full assault on our position! Dig in!" },
+]
+
+[[script_events]]
+id = "attack_window"
+trigger = { type = "time", seconds = 900.0 }
+actions = [
+  { type = "dialogue", text = "Their push cost them. Intel shows the base is weakened — now is our window. Push hard!" },
+  { type = "change_objective", text = "Strike the weakened Ironborn base now" },
+]

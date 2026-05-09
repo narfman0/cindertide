@@ -1,0 +1,32 @@
+[[events]]
+id = "beyond_control"
+trigger = { type = "time", seconds = 0.0 }
+actions = [
+  { type = "dialogue", text = "They grow beyond my control — temporarily. The Hollow nest must be destroyed before they consume my embedded agents. Move quickly." },
+  { type = "objective", text = "Destroy the Hollow Nest" },
+]
+
+[[events]]
+id = "hollow_patrol"
+trigger = { type = "time", seconds = 60.0 }
+actions = [
+  { type = "spawn_units", faction = "Hollow", unit_type = "Riflemen", count = 2, x = 80, y = 40 },
+  { type = "dialogue", text = "Hollow patrol in mid-territory. Eliminate them — leave no witnesses to our approach." },
+]
+
+[[events]]
+id = "nest_defense_awakens"
+trigger = { type = "time", seconds = 240.0 }
+actions = [
+  { type = "spawn_units", faction = "Hollow", unit_type = "Riflemen", count = 4, x = 105, y = 22 },
+  { type = "spawn_units", faction = "Hollow", unit_type = "HeavyWeapons", count = 1, x = 108, y = 18 },
+  { type = "dialogue", text = "The nest knows we're coming. Its defenders are awakening — push through before they can fully mobilize!" },
+]
+
+[[events]]
+id = "contingency_assets"
+trigger = { type = "condition", condition = "beat", beat_id = "LastStand" }
+actions = [
+  { type = "spawn_units", faction = "Covenant", unit_type = "HeavyWeapons", count = 2, x = 8, y = 65 },
+  { type = "dialogue", text = "Deploying contingency assets. I prepared for this possibility. Heavy teams inbound — do not waste them." },
+]

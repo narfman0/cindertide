@@ -1,12 +1,105 @@
-mission_type = "Defense"
+mission_type = "Assault"
 player_faction = "Ironborn"
 opponent_faction = "Combine"
-deadline_seconds = 1800.0
+deadline_seconds = 3600.0
 mission_index_override = 4
 briefing_override = "The ground split open at The Last Works and something came out that none of us have words for. Corp is gone — their command, their lines, their flags. It's just us now and whatever that is. We're not running. Ironborn don't run from things they can't name — we've built our whole culture on taking what the world throws at us and standing up after. So we stand up. We hold. Not because we can win. Because this is what we do."
 win_override = "It passed over us. Through us, almost. We lost people — good people — but it moved on. Toward something else. We're still here. We're always still here. Start salvaging. We're going to need everything we can carry for what comes next."
 loss_override = "We broke. First time in memory the Ironborn broke. Nobody will say it was wrong to break — you saw what was there. We regroup. We remember. And someday, somehow, we figure out what that was and we make sure it never catches us unprepared again."
-script_events = []
+
 tiles = []
-units = []
-buildings = []
+
+[[units]]
+faction = "Ironborn"
+unit_type = "Riflemen"
+x = 7
+y = 69
+
+[[units]]
+faction = "Combine"
+unit_type = "Riflemen"
+x = 110
+y = 12
+
+[[units]]
+faction = "Combine"
+unit_type = "Riflemen"
+x = 113
+y = 8
+
+[[units]]
+faction = "Combine"
+unit_type = "Riflemen"
+x = 116
+y = 15
+
+[[units]]
+faction = "Combine"
+unit_type = "Riflemen"
+x = 109
+y = 18
+
+[[units]]
+faction = "Combine"
+unit_type = "HeavyWeapons"
+x = 118
+y = 10
+
+[[buildings]]
+faction = "Combine"
+building_type = "CommandBunker"
+x = 115
+y = 10
+
+[[buildings]]
+faction = "Combine"
+building_type = "Refinery"
+x = 118
+y = 10
+
+[[buildings]]
+faction = "Combine"
+building_type = "Barracks"
+x = 115
+y = 7
+
+[[buildings]]
+faction = "Combine"
+building_type = "SupplyDepot"
+x = 112
+y = 13
+
+[[script_events]]
+id = "we_end_this"
+trigger = { type = "time", seconds = 0.0 }
+actions = [
+  { type = "dialogue", text = "We end this here. The Combine Command Bunker falls today. Raze it to the ground." },
+  { type = "objective", text = "Destroy the Combine Command Bunker" },
+]
+
+[[script_events]]
+id = "defense_wave"
+trigger = { type = "time", seconds = 150.0 }
+actions = [
+  { type = "spawn_units", faction = "Combine", unit_type = "Riflemen", count = 4, x = 100, y = 35 },
+  { type = "spawn_units", faction = "Combine", unit_type = "HeavyArmor", count = 1, x = 105, y = 28 },
+  { type = "dialogue", text = "Corp rallying their defense — they're not giving up that bunker without a fight." },
+]
+
+[[script_events]]
+id = "veteran_squad"
+trigger = { type = "condition", condition = "beat", beat_id = "LastStand" }
+actions = [
+  { type = "spawn_units", faction = "Ironborn", unit_type = "HeavyArmor", count = 2, x = 8, y = 65 },
+  { type = "dialogue", text = "Veteran armor crews arriving from the depot. They heard the call. Get them into the fight!" },
+]
+
+[[script_events]]
+id = "massive_reinforcement"
+trigger = { type = "time", seconds = 600.0 }
+actions = [
+  { type = "spawn_units", faction = "Ironborn", unit_type = "Riflemen", count = 5, x = 8, y = 62 },
+  { type = "spawn_units", faction = "Combine", unit_type = "Riflemen", count = 6, x = 112, y = 20 },
+  { type = "spawn_units", faction = "Combine", unit_type = "HeavyWeapons", count = 2, x = 110, y = 15 },
+  { type = "dialogue", text = "Both sides throwing everything into this fight. This is the moment the Ironfields was built for — push through!" },
+]

@@ -1,45 +1,43 @@
 [[events]]
-id = "opening_dialogue"
+id = "intro"
 trigger = { type = "time", seconds = 0.0 }
 actions = [
-  { type = "dialogue", text = "Commander, the Ironborn are massing at the eastern perimeter. Hold the line." },
-  { type = "objective", text = "Defend the Command Bunker" },
+  { type = "dialogue", text = "Commander, the perimeter is breached. Ironborn are pressing from the east — they don't intend to negotiate." },
+  { type = "objective", text = "Secure Refinery Seven — hold the facility" },
 ]
 
 [[events]]
 id = "first_wave"
-trigger = { type = "time", seconds = 45.0 }
+trigger = { type = "time", seconds = 60.0 }
 actions = [
   { type = "spawn_units", faction = "Ironborn", unit_type = "Riflemen", count = 4, x = 110, y = 20 },
   { type = "dialogue", text = "Ironborn infantry advancing from the east! Engage at range!" },
 ]
 
 [[events]]
-id = "flanking_force"
-trigger = { type = "condition", condition = "beat", beat_id = "LastStand" }
+id = "armor_threat"
+trigger = { type = "time", seconds = 180.0 }
 actions = [
-  { type = "spawn_units", faction = "Combine", unit_type = "HeavyWeapons", count = 2, x = 5, y = 40 },
-  { type = "dialogue", text = "Combine reinforcements inbound. Heavy weapons teams deploying now. Hold on!" },
-  { type = "objective", text = "Survive until the heavy weapons teams arrive" },
+  { type = "spawn_units", faction = "Ironborn", unit_type = "HeavyArmor", count = 1, x = 112, y = 15 },
+  { type = "spawn_units", faction = "Ironborn", unit_type = "Riflemen", count = 3, x = 115, y = 18 },
+  { type = "dialogue", text = "Armor on the field! We need heavy weapons on that tank, now!" },
+  { type = "objective", text = "Destroy the Ironborn armor" },
 ]
 
 [[events]]
-id = "second_wave"
-trigger = { type = "time", seconds = 120.0 }
+id = "last_stand_reinforcements"
+trigger = { type = "condition", condition = "beat", beat_id = "LastStand" }
 actions = [
-  { type = "spawn_units", faction = "Ironborn", unit_type = "Riflemen", count = 6, x = 115, y = 25 },
-  { type = "spawn_units", faction = "Ironborn", unit_type = "HeavyArmor", count = 1, x = 112, y = 30 },
-  { type = "dialogue", text = "Second wave incoming! Armor spotted. Get the heavy weapons on that tank!" },
-  { type = "objective", text = "Destroy the Ironborn armor and hold the line" },
+  { type = "spawn_units", faction = "Combine", unit_type = "Riflemen", count = 2, x = 5, y = 68 },
+  { type = "dialogue", text = "Reinforcements inbound! Two squads deploying to your position — hold the line!" },
 ]
 
 [[events]]
 id = "final_push"
-trigger = { type = "time", seconds = 240.0 }
+trigger = { type = "time", seconds = 300.0 }
 actions = [
-  { type = "spawn_units", faction = "Ironborn", unit_type = "HeavyArmor", count = 2, x = 110, y = 35 },
-  { type = "spawn_units", faction = "Ironborn", unit_type = "Riflemen", count = 6, x = 115, y = 40 },
-  { type = "spawn_units", faction = "Ironborn", unit_type = "Riflemen", count = 4, x = 108, y = 15 },
+  { type = "spawn_units", faction = "Ironborn", unit_type = "HeavyArmor", count = 2, x = 110, y = 10 },
+  { type = "spawn_units", faction = "Ironborn", unit_type = "Riflemen", count = 6, x = 113, y = 22 },
   { type = "dialogue", text = "All units — full assault incoming. This is their final push. Destroy them here." },
-  { type = "change_objective", text = "Repel the final Ironborn assault — destroy all enemy forces" },
+  { type = "change_objective", text = "Repel the final Ironborn assault — hold Refinery Seven" },
 ]

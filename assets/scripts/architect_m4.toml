@@ -1,75 +1,4 @@
-mission_type = "Assault"
-player_faction = "Covenant"
-opponent_faction = "Hollow"
-deadline_seconds = 3600.0
-mission_index_override = 4
-briefing_override = "It is awake.\n\nI have spent nineteen years — not eleven, I was lying to myself about eleven, it has been nineteen years — preparing this. Five sites. Two factions. Thousands dead on ground I chose, at times I selected, for reasons I understood and they never would. I did everything correctly. The ritual is complete. The sequence is finished.\n\nIt is awake and it is here and it is —\n\nIt is looking at me.\n\nIt knows what I did. It knows every choice. It is not grateful. It is not angry. It is examining me the way I would examine a tool I had finished using. I built a door. I did not consider that doors open from both sides. I did not consider —\n\nIt is time. This is the last entry I will make as myself. Whatever I am after this, I don't think I will need notes."
-win_override = "...\n\n(The log ends here. Subsequent entries, if any exist, are in a language no analyst has been able to identify. The characters appear to shift between readings.)"
-loss_override = "...\n\n(The log ends here. The final line was partially overwritten — something recorded over it from outside the device. The original text is unrecoverable. What replaced it is eleven words in a language no analyst has been able to identify. They are the same eleven words as in every other recovered log.)"
-
-tiles = []
-
-[[units]]
-faction = "Covenant"
-unit_type = "Riflemen"
-x = 7
-y = 69
-
-[[units]]
-faction = "Hollow"
-unit_type = "Riflemen"
-x = 110
-y = 12
-
-[[units]]
-faction = "Hollow"
-unit_type = "Riflemen"
-x = 113
-y = 8
-
-[[units]]
-faction = "Hollow"
-unit_type = "Riflemen"
-x = 116
-y = 15
-
-[[units]]
-faction = "Hollow"
-unit_type = "Riflemen"
-x = 109
-y = 18
-
-[[units]]
-faction = "Hollow"
-unit_type = "HeavyWeapons"
-x = 118
-y = 10
-
-[[buildings]]
-faction = "Hollow"
-building_type = "CommandBunker"
-x = 115
-y = 10
-
-[[buildings]]
-faction = "Hollow"
-building_type = "Barracks"
-x = 115
-y = 7
-
-[[buildings]]
-faction = "Hollow"
-building_type = "Watchtower"
-x = 112
-y = 7
-
-[[buildings]]
-faction = "Hollow"
-building_type = "Watchtower"
-x = 118
-y = 13
-
-[[script_events]]
+[[events]]
 id = "miscalculation"
 trigger = { type = "time", seconds = 0.0 }
 actions = [
@@ -77,7 +6,7 @@ actions = [
   { type = "objective", text = "Destroy the Ancient One's core" },
 ]
 
-[[script_events]]
+[[events]]
 id = "hollow_counterattack"
 trigger = { type = "time", seconds = 120.0 }
 actions = [
@@ -86,14 +15,14 @@ actions = [
   { type = "dialogue", text = "The Hollow surge in its defense — it is directing them. I didn't account for tactical intelligence at this scale." },
 ]
 
-[[script_events]]
+[[events]]
 id = "this_is_what_i_wanted"
 trigger = { type = "time", seconds = 300.0 }
 actions = [
   { type = "dialogue", text = "This is what I wanted... wasn't it? I spent nineteen years building toward this moment. I should feel triumph. I don't feel triumph." },
 ]
 
-[[script_events]]
+[[events]]
 id = "desperate_reinforcements"
 trigger = { type = "condition", condition = "beat", beat_id = "LastStand" }
 actions = [
@@ -102,7 +31,7 @@ actions = [
   { type = "dialogue", text = "I won't let it end like this. Not after nineteen years. Every remaining asset — deploy everything. We finish this now." },
 ]
 
-[[script_events]]
+[[events]]
 id = "final_revelation"
 trigger = { type = "time", seconds = 600.0 }
 actions = [
@@ -112,7 +41,7 @@ actions = [
   { type = "dialogue", text = "It planned further ahead than I did. Every site, every engagement, every death — it was already composing something from what it found. And I was the last piece it needed." },
 ]
 
-[[script_events]]
+[[events]]
 id = "last_entry"
 trigger = { type = "time", seconds = 2400.0 }
 actions = [

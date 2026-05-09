@@ -1,12 +1,122 @@
-mission_type = "Survival"
-player_faction = "Combine"
-opponent_faction = "Ironborn"
-deadline_seconds = 1800.0
+mission_type = "Control"
+player_faction = "Covenant"
+opponent_faction = "Hollow"
+deadline_seconds = 2400.0
 mission_index_override = 1
 briefing_override = "The bridge is irrelevant. The ravine is the second site. I needed a sustained engagement directly above it — hours of artillery, boots on the stone, enough fear and pressure to register. The Combine geologists will find trace evidence and classify it. The Ironborn will feel it and not report it. Both reactions are correct. Both are necessary. I have been waiting three years for someone to fight over this particular bridge."
 win_override = "The ravine registered. I felt it from four kilometers away — a low hum, like recognition. The second site is primed. Five more."
 loss_override = "Outcome irrelevant. The engagement lasted long enough. The site is marked. Moving on."
-script_events = []
+
 tiles = []
-units = []
-buildings = []
+
+[[units]]
+faction = "Covenant"
+unit_type = "Riflemen"
+x = 8
+y = 68
+
+[[units]]
+faction = "Covenant"
+unit_type = "Riflemen"
+x = 11
+y = 65
+
+[[units]]
+faction = "Hollow"
+unit_type = "Riflemen"
+x = 110
+y = 12
+
+[[units]]
+faction = "Hollow"
+unit_type = "Riflemen"
+x = 113
+y = 8
+
+[[units]]
+faction = "Hollow"
+unit_type = "Riflemen"
+x = 116
+y = 15
+
+[[units]]
+faction = "Hollow"
+unit_type = "Riflemen"
+x = 109
+y = 18
+
+[[units]]
+faction = "Hollow"
+unit_type = "HeavyWeapons"
+x = 118
+y = 10
+
+[[buildings]]
+faction = "Covenant"
+building_type = "CommandBunker"
+x = 10
+y = 70
+
+[[buildings]]
+faction = "Covenant"
+building_type = "Workshop"
+x = 13
+y = 70
+
+[[buildings]]
+faction = "Hollow"
+building_type = "CommandBunker"
+x = 115
+y = 10
+
+[[buildings]]
+faction = "Hollow"
+building_type = "Barracks"
+x = 115
+y = 7
+
+[[buildings]]
+faction = "Hollow"
+building_type = "Watchtower"
+x = 112
+y = 7
+
+[[buildings]]
+faction = "Hollow"
+building_type = "Watchtower"
+x = 118
+y = 7
+
+[[script_events]]
+id = "sacrifices_necessary"
+trigger = { type = "time", seconds = 0.0 }
+actions = [
+  { type = "dialogue", text = "The sacrifices were necessary. Hold the ritual sites — every minute of combat above the ravine feeds the second site's activation." },
+  { type = "objective", text = "Hold the ritual sites" },
+]
+
+[[script_events]]
+id = "first_emergence"
+trigger = { type = "time", seconds = 90.0 }
+actions = [
+  { type = "spawn_units", faction = "Hollow", unit_type = "Riflemen", count = 3, x = 95, y = 40 },
+  { type = "dialogue", text = "First Hollow emergence from the eastern approach. Engage — their fear feeds the process." },
+]
+
+[[script_events]]
+id = "data_point"
+trigger = { type = "time", seconds = 240.0 }
+actions = [
+  { type = "dialogue", text = "Another data point collected. The site's resonance has increased by a measurable factor. Maintain combat pressure." },
+]
+
+[[script_events]]
+id = "hollow_convergence"
+trigger = { type = "time", seconds = 480.0 }
+actions = [
+  { type = "spawn_units", faction = "Hollow", unit_type = "Riflemen", count = 5, x = 100, y = 35 },
+  { type = "spawn_units", faction = "Hollow", unit_type = "HeavyWeapons", count = 1, x = 103, y = 30 },
+  { type = "spawn_units", faction = "Hollow", unit_type = "HeavyArmor", count = 1, x = 105, y = 25 },
+  { type = "dialogue", text = "Full convergence on the ritual site. They can sense what's happening here. Hold them back — the reading is almost complete." },
+  { type = "change_objective", text = "Defend the ritual sites through the Hollow convergence" },
+]

@@ -1,12 +1,127 @@
-mission_type = "Assault"
+mission_type = "Extraction"
 player_faction = "Ironborn"
 opponent_faction = "Combine"
-deadline_seconds = 1800.0
+deadline_seconds = 3600.0
 mission_index_override = 3
 briefing_override = "Combine's war machines went strange near the old forge and they sent a clean-up crew instead of engineers. That's fear, not protocol. A rogue machine that makes its own choices is either the most dangerous thing on this battlefield or the most useful — and we've never been the kind of people who destroy something useful out of fear. Get to the forge before they do. Find out what's in there. If the machines want to talk, let them talk."
 win_override = "7-G didn't fight us. It watched us. Then it walked with us. We're not calling it a prisoner and we're not calling it a soldier. We don't have a word for it yet. We'll figure that out later. Right now it's on our side and that's enough."
 loss_override = "Combine got there first. Shut it all down. I heard 7-G was destroyed in containment — fought back at the end. Didn't feel like a machine malfunction. Felt like something else. Something we should have gotten to first."
-script_events = []
+
 tiles = []
-units = []
-buildings = []
+
+[[units]]
+faction = "Ironborn"
+unit_type = "Riflemen"
+x = 7
+y = 92
+
+[[units]]
+faction = "Ironborn"
+unit_type = "LightVehicle"
+x = 10
+y = 90
+
+[[units]]
+faction = "Ironborn"
+unit_type = "LightVehicle"
+x = 13
+y = 90
+
+[[units]]
+faction = "Ironborn"
+unit_type = "LightVehicle"
+x = 16
+y = 90
+
+[[units]]
+faction = "Combine"
+unit_type = "Riflemen"
+x = 142
+y = 8
+
+[[units]]
+faction = "Combine"
+unit_type = "Riflemen"
+x = 145
+y = 12
+
+[[units]]
+faction = "Combine"
+unit_type = "Riflemen"
+x = 148
+y = 8
+
+[[units]]
+faction = "Combine"
+unit_type = "Riflemen"
+x = 141
+y = 15
+
+[[units]]
+faction = "Combine"
+unit_type = "HeavyWeapons"
+x = 150
+y = 10
+
+[[buildings]]
+faction = "Ironborn"
+building_type = "Foundry"
+x = 10
+y = 92
+
+[[buildings]]
+faction = "Combine"
+building_type = "CommandBunker"
+x = 148
+y = 10
+
+[[buildings]]
+faction = "Combine"
+building_type = "Refinery"
+x = 151
+y = 10
+
+[[buildings]]
+faction = "Combine"
+building_type = "Barracks"
+x = 148
+y = 7
+
+[[buildings]]
+faction = "Combine"
+building_type = "SupplyDepot"
+x = 145
+y = 13
+
+[[script_events]]
+id = "get_the_vehicles_across"
+trigger = { type = "time", seconds = 0.0 }
+actions = [
+  { type = "dialogue", text = "Get those vehicles across the territory to the northern extraction point. Don't lose a single one." },
+  { type = "objective", text = "Extract 3 vehicles to the northern extraction zone" },
+]
+
+[[script_events]]
+id = "patrol_spotted"
+trigger = { type = "time", seconds = 120.0 }
+actions = [
+  { type = "spawn_units", faction = "Combine", unit_type = "Riflemen", count = 2, x = 80, y = 50 },
+  { type = "dialogue", text = "Corp patrol spotted in the mid-territory. They haven't seen us yet — keep the vehicles moving." },
+]
+
+[[script_events]]
+id = "intercept_force"
+trigger = { type = "time", seconds = 300.0 }
+actions = [
+  { type = "spawn_units", faction = "Combine", unit_type = "Riflemen", count = 4, x = 100, y = 40 },
+  { type = "spawn_units", faction = "Combine", unit_type = "LightVehicle", count = 2, x = 105, y = 35 },
+  { type = "dialogue", text = "Corp intercept force deploying ahead — they know what we're moving. Break through fast!" },
+]
+
+[[script_events]]
+id = "extraction_zone_clear"
+trigger = { type = "time", seconds = 600.0 }
+actions = [
+  { type = "dialogue", text = "Extraction zone ahead — get the vehicles through! Don't stop for anything!" },
+  { type = "change_objective", text = "Move all vehicles into the northern extraction zone" },
+]

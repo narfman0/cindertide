@@ -1,12 +1,147 @@
-mission_type = "Extraction"
-player_faction = "Combine"
-opponent_faction = "Ironborn"
+mission_type = "Survival"
+player_faction = "Covenant"
+opponent_faction = "Hollow"
 deadline_seconds = 1800.0
 mission_index_override = 0
 briefing_override = "I filed the survey documentation with both offices on the same morning. Different forms, same coordinates. The Combine moves on paperwork; the Ironborn moves on presence. I needed a first contact that neither side would forgive. This is the ignition point. Both sides will remember who threw the first punch. Neither will know I handed them the match."
 win_override = "First variable resolved. Blood in the Ironfields. The ground has accepted it — I can feel the reading shift. Seven more sites to prepare."
 loss_override = "The wrong side holds the depot. Adjusting second contact point accordingly. The ritual is not about outcomes. It is about accumulation."
-script_events = []
+
 tiles = []
-units = []
-buildings = []
+
+[[units]]
+faction = "Covenant"
+unit_type = "Riflemen"
+x = 8
+y = 40
+
+[[units]]
+faction = "Covenant"
+unit_type = "Riflemen"
+x = 11
+y = 43
+
+[[units]]
+faction = "Covenant"
+unit_type = "Riflemen"
+x = 7
+y = 44
+
+[[units]]
+faction = "Covenant"
+unit_type = "HeavyWeapons"
+x = 14
+y = 38
+
+[[units]]
+faction = "Hollow"
+unit_type = "Riflemen"
+x = 65
+y = 8
+
+[[units]]
+faction = "Hollow"
+unit_type = "Riflemen"
+x = 68
+y = 12
+
+[[units]]
+faction = "Hollow"
+unit_type = "Riflemen"
+x = 71
+y = 8
+
+[[units]]
+faction = "Hollow"
+unit_type = "Riflemen"
+x = 65
+y = 15
+
+[[units]]
+faction = "Hollow"
+unit_type = "HeavyWeapons"
+x = 72
+y = 10
+
+[[buildings]]
+faction = "Covenant"
+building_type = "CommandBunker"
+x = 10
+y = 42
+
+[[buildings]]
+faction = "Covenant"
+building_type = "Workshop"
+x = 13
+y = 42
+
+[[buildings]]
+faction = "Covenant"
+building_type = "Barracks"
+x = 10
+y = 39
+
+[[buildings]]
+faction = "Hollow"
+building_type = "CommandBunker"
+x = 70
+y = 10
+
+[[buildings]]
+faction = "Hollow"
+building_type = "Barracks"
+x = 70
+y = 7
+
+[[buildings]]
+faction = "Hollow"
+building_type = "Watchtower"
+x = 67
+y = 7
+
+[[buildings]]
+faction = "Hollow"
+building_type = "Watchtower"
+x = 73
+y = 7
+
+[[script_events]]
+id = "everything_proceeds"
+trigger = { type = "time", seconds = 0.0 }
+actions = [
+  { type = "dialogue", text = "Everything proceeds as planned. The incursion is a side effect of the ritual — manageable, contained. Survive, gather data, and do not interfere with the process." },
+  { type = "objective", text = "Survive the ritual's side effects" },
+]
+
+[[script_events]]
+id = "first_scouts"
+trigger = { type = "time", seconds = 30.0 }
+actions = [
+  { type = "spawn_units", faction = "Hollow", unit_type = "Riflemen", count = 2, x = 50, y = 26 },
+  { type = "dialogue", text = "Hollow scouts at the perimeter. Expected. Engage as needed." },
+]
+
+[[script_events]]
+id = "hollow_wave"
+trigger = { type = "time", seconds = 120.0 }
+actions = [
+  { type = "spawn_units", faction = "Hollow", unit_type = "Riflemen", count = 4, x = 55, y = 24 },
+  { type = "dialogue", text = "The ritual is drawing them in larger numbers. Fascinating. Hold the perimeter." },
+]
+
+[[script_events]]
+id = "data_gathering"
+trigger = { type = "time", seconds = 300.0 }
+actions = [
+  { type = "dialogue", text = "Fascinating... the ritual is working. The resonance is building exactly as modeled. A few minutes more." },
+]
+
+[[script_events]]
+id = "hollow_surge"
+trigger = { type = "time", seconds = 500.0 }
+actions = [
+  { type = "spawn_units", faction = "Hollow", unit_type = "Riflemen", count = 5, x = 52, y = 22 },
+  { type = "spawn_units", faction = "Hollow", unit_type = "HeavyWeapons", count = 1, x = 55, y = 18 },
+  { type = "dialogue", text = "Surge pattern exceeds projections. Adjust defensive positioning — do not let them reach the ritual site." },
+  { type = "change_objective", text = "Hold the perimeter until the ritual completes" },
+]

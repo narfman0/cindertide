@@ -1,0 +1,39 @@
+[[events]]
+id = "recon_dialogue"
+trigger = { type = "time", seconds = 0.0 }
+actions = [
+  { type = "dialogue", text = "Deep Ironborn territory. Build up before you engage — their positions here are well-established." },
+  { type = "objective", text = "Build a force and assault the Ironborn base" },
+]
+
+[[events]]
+id = "first_contact"
+trigger = { type = "time", seconds = 90.0 }
+actions = [
+  { type = "spawn_units", faction = "Ironborn", unit_type = "Riflemen", count = 2, x = 80, y = 40 },
+  { type = "dialogue", text = "Contact. Ironborn patrol spotted mid-field. Hold or engage — your call, Commander." },
+]
+
+[[events]]
+id = "second_base_intel"
+trigger = { type = "time", seconds = 360.0 }
+actions = [
+  { type = "dialogue", text = "Intelligence reports the Ironborn are reinforcing a second position to the northeast. They're dug in deep." },
+]
+
+[[events]]
+id = "full_assault"
+trigger = { type = "time", seconds = 600.0 }
+actions = [
+  { type = "spawn_units", faction = "Ironborn", unit_type = "Riflemen", count = 6, x = 110, y = 22 },
+  { type = "spawn_units", faction = "Ironborn", unit_type = "HeavyArmor", count = 2, x = 108, y = 15 },
+  { type = "dialogue", text = "They're coming in force — full assault on our position! Dig in!" },
+]
+
+[[events]]
+id = "attack_window"
+trigger = { type = "time", seconds = 900.0 }
+actions = [
+  { type = "dialogue", text = "Their push cost them. Intel shows the base is weakened — now is our window. Push hard!" },
+  { type = "change_objective", text = "Strike the weakened Ironborn base now" },
+]

@@ -1,12 +1,148 @@
 mission_type = "Defense"
 player_faction = "Ironborn"
 opponent_faction = "Combine"
-deadline_seconds = 1800.0
+deadline_seconds = 1200.0
 mission_index_override = 0
 briefing_override = "Three weeks we've been running that depot. Our fuel, our hands, our dead keeping the pipes clear. Corp showed up with paperwork this morning. You know what we do with paperwork. Take it back. Hold it. Nobody from the Ironfields surrenders a working refinery to a suit."
 win_override = "Depot's ours. Corp pulled back — for now. Word's going to spread that we held. That matters more than the fuel."
 loss_override = "They took it. Put their flag on our work. We'll remember this one. The Ironfields remembers everything."
-script_events = []
+
 tiles = []
-units = []
-buildings = []
+
+[[units]]
+faction = "Ironborn"
+unit_type = "Riflemen"
+x = 8
+y = 40
+
+[[units]]
+faction = "Ironborn"
+unit_type = "Riflemen"
+x = 11
+y = 43
+
+[[units]]
+faction = "Ironborn"
+unit_type = "Riflemen"
+x = 7
+y = 44
+
+[[units]]
+faction = "Ironborn"
+unit_type = "HeavyWeapons"
+x = 14
+y = 38
+
+[[units]]
+faction = "Combine"
+unit_type = "Riflemen"
+x = 65
+y = 8
+
+[[units]]
+faction = "Combine"
+unit_type = "Riflemen"
+x = 68
+y = 12
+
+[[units]]
+faction = "Combine"
+unit_type = "Riflemen"
+x = 71
+y = 8
+
+[[units]]
+faction = "Combine"
+unit_type = "Riflemen"
+x = 65
+y = 15
+
+[[units]]
+faction = "Combine"
+unit_type = "HeavyWeapons"
+x = 73
+y = 10
+
+[[buildings]]
+faction = "Ironborn"
+building_type = "Foundry"
+x = 10
+y = 42
+
+[[buildings]]
+faction = "Ironborn"
+building_type = "Scrapyard"
+x = 13
+y = 42
+
+[[buildings]]
+faction = "Ironborn"
+building_type = "Barracks"
+x = 10
+y = 39
+
+[[buildings]]
+faction = "Combine"
+building_type = "CommandBunker"
+x = 70
+y = 10
+
+[[buildings]]
+faction = "Combine"
+building_type = "Refinery"
+x = 73
+y = 10
+
+[[buildings]]
+faction = "Combine"
+building_type = "Barracks"
+x = 70
+y = 7
+
+[[buildings]]
+faction = "Combine"
+building_type = "SupplyDepot"
+x = 67
+y = 13
+
+[[script_events]]
+id = "forge_master_dialogue"
+trigger = { type = "time", seconds = 0.0 }
+actions = [
+  { type = "dialogue", text = "Corp thinks paperwork makes it theirs. We're going to remind them who actually built this place. Hold the foundry." },
+  { type = "objective", text = "Hold the Foundry against the Combine assault" },
+]
+
+[[script_events]]
+id = "combine_probe"
+trigger = { type = "time", seconds = 45.0 }
+actions = [
+  { type = "spawn_units", faction = "Combine", unit_type = "Riflemen", count = 3, x = 55, y = 26 },
+  { type = "dialogue", text = "Corp infantry probing the perimeter. Show them the cost of trespass." },
+]
+
+[[script_events]]
+id = "armored_push"
+trigger = { type = "time", seconds = 150.0 }
+actions = [
+  { type = "spawn_units", faction = "Combine", unit_type = "HeavyArmor", count = 1, x = 60, y = 22 },
+  { type = "spawn_units", faction = "Combine", unit_type = "Riflemen", count = 2, x = 58, y = 26 },
+  { type = "dialogue", text = "They brought armor. Get the welders on that hull — we've cracked tougher shells than that." },
+]
+
+[[script_events]]
+id = "emergency_repair"
+trigger = { type = "condition", condition = "beat", beat_id = "LastStand" }
+actions = [
+  { type = "dialogue", text = "Emergency Repair Protocol activated — all crews to the foundry walls! We hold or we lose everything we built!" },
+  { type = "change_objective", text = "Emergency: hold the foundry perimeter" },
+]
+
+[[script_events]]
+id = "final_assault"
+trigger = { type = "time", seconds = 240.0 }
+actions = [
+  { type = "spawn_units", faction = "Combine", unit_type = "Riflemen", count = 5, x = 62, y = 24 },
+  { type = "spawn_units", faction = "Combine", unit_type = "HeavyArmor", count = 1, x = 60, y = 18 },
+  { type = "dialogue", text = "Full Corp assault on the foundry! This is their big push — if we break them here, they don't come back." },
+]

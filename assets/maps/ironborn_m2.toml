@@ -1,12 +1,116 @@
-mission_type = "Control"
+mission_type = "Assault"
 player_faction = "Ironborn"
 opponent_faction = "Combine"
-deadline_seconds = 1800.0
+deadline_seconds = 2700.0
 mission_index_override = 2
 briefing_override = "Corp lost two teams in those ruins and now they're sending soldiers instead of scientists. That tells you everything about what's in there. We go in first, we take what they were after, and we leave before whatever made those teams go quiet makes us go quiet too. Nobody has to be a hero. In and out. But we're not letting them have it."
 win_override = "We got out. Most of us. What we found — we're not sure what it is yet. It's not scrap. It's not fuel. It responds to things. We're keeping it. We're not talking about it."
 loss_override = "We didn't get out clean. Corp has the site now and whatever's inside it. I keep thinking about the sound it made when we got close. Like it already knew us."
-script_events = []
+
 tiles = []
-units = []
-buildings = []
+
+[[units]]
+faction = "Ironborn"
+unit_type = "Riflemen"
+x = 7
+y = 69
+
+[[units]]
+faction = "Combine"
+unit_type = "Riflemen"
+x = 110
+y = 12
+
+[[units]]
+faction = "Combine"
+unit_type = "Riflemen"
+x = 113
+y = 8
+
+[[units]]
+faction = "Combine"
+unit_type = "Riflemen"
+x = 116
+y = 15
+
+[[units]]
+faction = "Combine"
+unit_type = "Riflemen"
+x = 109
+y = 18
+
+[[units]]
+faction = "Combine"
+unit_type = "HeavyWeapons"
+x = 118
+y = 10
+
+[[buildings]]
+faction = "Ironborn"
+building_type = "Foundry"
+x = 10
+y = 70
+
+[[buildings]]
+faction = "Combine"
+building_type = "CommandBunker"
+x = 115
+y = 10
+
+[[buildings]]
+faction = "Combine"
+building_type = "Refinery"
+x = 118
+y = 10
+
+[[buildings]]
+faction = "Combine"
+building_type = "Barracks"
+x = 115
+y = 7
+
+[[buildings]]
+faction = "Combine"
+building_type = "Pillbox"
+x = 112
+y = 13
+
+[[script_events]]
+id = "tactical_briefing"
+trigger = { type = "time", seconds = 0.0 }
+actions = [
+  { type = "dialogue", text = "Corp's lines are fortified — but they're holding a static defense. Hit them on the move, don't let them dig in further." },
+  { type = "objective", text = "Break through the Combine fortified lines" },
+]
+
+[[script_events]]
+id = "pillbox_warning"
+trigger = { type = "time", seconds = 60.0 }
+actions = [
+  { type = "dialogue", text = "Pillbox sighted ahead — suppress it before you advance. That thing'll shred infantry in the open." },
+]
+
+[[script_events]]
+id = "combine_counterattack"
+trigger = { type = "time", seconds = 180.0 }
+actions = [
+  { type = "spawn_units", faction = "Combine", unit_type = "Riflemen", count = 4, x = 100, y = 35 },
+  { type = "spawn_units", faction = "Combine", unit_type = "HeavyArmor", count = 1, x = 105, y = 28 },
+  { type = "dialogue", text = "Combine counterattack — armor and infantry pushing our left flank!" },
+]
+
+[[script_events]]
+id = "salvage_team"
+trigger = { type = "time", seconds = 420.0 }
+actions = [
+  { type = "spawn_units", faction = "Ironborn", unit_type = "LightVehicle", count = 2, x = 8, y = 65 },
+  { type = "dialogue", text = "Salvage team inbound with light vehicles — use them to punch through their remaining positions." },
+]
+
+[[script_events]]
+id = "final_push_window"
+trigger = { type = "time", seconds = 600.0 }
+actions = [
+  { type = "dialogue", text = "Their line is cracking. Push everything through the gap now — don't give them time to reinforce." },
+  { type = "change_objective", text = "Destroy the Combine Command Bunker and end their operation" },
+]

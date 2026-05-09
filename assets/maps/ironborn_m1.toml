@@ -1,12 +1,114 @@
 mission_type = "Assault"
 player_faction = "Ironborn"
 opponent_faction = "Combine"
-deadline_seconds = 1800.0
+deadline_seconds = 2400.0
 mission_index_override = 1
 briefing_override = "Push through the Ashline before they fortify the far side. Cut their northern line and they're fighting on one stomach. Something's off about the ravine — scouts won't go near the edges after dark, won't say why. Don't ask them. Just take the bridge."
 win_override = "We're through. Northern supply's cut. Nobody's talking about what they saw in the ravine and that's fine. We got what we came for."
 loss_override = "They held us. Good position, credit where it's due. We'll find another way north. The ravine stays in the back of my mind though. Something down there was watching."
-script_events = []
+
 tiles = []
-units = []
-buildings = []
+
+[[units]]
+faction = "Ironborn"
+unit_type = "Riflemen"
+x = 8
+y = 68
+
+[[units]]
+faction = "Ironborn"
+unit_type = "Riflemen"
+x = 11
+y = 65
+
+[[units]]
+faction = "Combine"
+unit_type = "Riflemen"
+x = 110
+y = 12
+
+[[units]]
+faction = "Combine"
+unit_type = "Riflemen"
+x = 113
+y = 8
+
+[[units]]
+faction = "Combine"
+unit_type = "Riflemen"
+x = 116
+y = 15
+
+[[units]]
+faction = "Combine"
+unit_type = "Riflemen"
+x = 109
+y = 18
+
+[[units]]
+faction = "Combine"
+unit_type = "HeavyWeapons"
+x = 118
+y = 10
+
+[[buildings]]
+faction = "Ironborn"
+building_type = "Foundry"
+x = 10
+y = 70
+
+[[buildings]]
+faction = "Ironborn"
+building_type = "Scrapyard"
+x = 13
+y = 70
+
+[[buildings]]
+faction = "Combine"
+building_type = "CommandBunker"
+x = 115
+y = 10
+
+[[buildings]]
+faction = "Combine"
+building_type = "Refinery"
+x = 118
+y = 10
+
+[[buildings]]
+faction = "Combine"
+building_type = "Barracks"
+x = 115
+y = 7
+
+[[buildings]]
+faction = "Combine"
+building_type = "Scrapyard"
+x = 112
+y = 13
+
+[[script_events]]
+id = "opening"
+trigger = { type = "time", seconds = 0.0 }
+actions = [
+  { type = "dialogue", text = "That scrapyard is ours by right — salvagers worked those piles before Corp even knew this territory existed. Take it back." },
+  { type = "objective", text = "Capture the Combine Scrapyard" },
+]
+
+[[script_events]]
+id = "combine_patrol"
+trigger = { type = "time", seconds = 90.0 }
+actions = [
+  { type = "spawn_units", faction = "Combine", unit_type = "Riflemen", count = 2, x = 95, y = 35 },
+  { type = "dialogue", text = "Corp patrol between us and the objective. Cut through them." },
+]
+
+[[script_events]]
+id = "combine_reinforcements"
+trigger = { type = "time", seconds = 240.0 }
+actions = [
+  { type = "spawn_units", faction = "Combine", unit_type = "Riflemen", count = 4, x = 110, y = 20 },
+  { type = "spawn_units", faction = "Combine", unit_type = "HeavyWeapons", count = 1, x = 112, y = 15 },
+  { type = "dialogue", text = "Corp spotted our advance on the scrapyard — they're rushing reinforcements to cut us off!" },
+  { type = "change_objective", text = "Fight through the reinforcements and capture the Scrapyard" },
+]

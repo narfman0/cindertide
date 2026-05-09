@@ -1,12 +1,112 @@
 mission_type = "Defense"
 player_faction = "Combine"
 opponent_faction = "Ironborn"
-deadline_seconds = 1800.0
+deadline_seconds = 900.0
 mission_index_override = 2
 briefing_override = "Survey team at grid 7-Pale went silent forty hours ago. A second team confirmed their last position before also going silent. You are being sent to secure the site and extract whatever they found. Command has reviewed the anomalous readings — they are not sharing the review. Your orders are simple: secure, extract, do not interact with structures. If you see something that doesn't look right, that is not your problem. Bring back the equipment."
 win_override = "Site secured. Equipment recovered. Three members of your unit have been placed on medical observation — standard protocol for prolonged exposure to industrial contaminants. Command thanks you for your service. The site has been reclassified."
 loss_override = "We've lost the site. Whatever the Ironborn found there — Command is more concerned about that than your casualties. File your report. Leave out anything you can't explain."
-script_events = []
+
 tiles = []
-units = []
-buildings = []
+
+[[units]]
+faction = "Combine"
+unit_type = "Riflemen"
+x = 8
+y = 43
+
+[[units]]
+faction = "Ironborn"
+unit_type = "Riflemen"
+x = 65
+y = 8
+
+[[units]]
+faction = "Ironborn"
+unit_type = "Riflemen"
+x = 68
+y = 12
+
+[[units]]
+faction = "Ironborn"
+unit_type = "Riflemen"
+x = 71
+y = 8
+
+[[units]]
+faction = "Ironborn"
+unit_type = "Riflemen"
+x = 65
+y = 15
+
+[[units]]
+faction = "Ironborn"
+unit_type = "HeavyWeapons"
+x = 73
+y = 10
+
+[[buildings]]
+faction = "Combine"
+building_type = "CommandBunker"
+x = 10
+y = 45
+
+[[buildings]]
+faction = "Ironborn"
+building_type = "CommandBunker"
+x = 70
+y = 10
+
+[[buildings]]
+faction = "Ironborn"
+building_type = "Foundry"
+x = 73
+y = 10
+
+[[buildings]]
+faction = "Ironborn"
+building_type = "Barracks"
+x = 70
+y = 7
+
+[[buildings]]
+faction = "Ironborn"
+building_type = "Scrapyard"
+x = 67
+y = 13
+
+[[script_events]]
+id = "setup_dialogue"
+trigger = { type = "time", seconds = 0.0 }
+actions = [
+  { type = "dialogue", text = "Hold this crossing. The Ironborn cannot be allowed to advance any further. Fifteen minutes — that's all we need." },
+  { type = "objective", text = "Hold the crossing for 15 minutes" },
+]
+
+[[script_events]]
+id = "first_crossing"
+trigger = { type = "time", seconds = 30.0 }
+actions = [
+  { type = "spawn_units", faction = "Ironborn", unit_type = "Riflemen", count = 3, x = 65, y = 20 },
+  { type = "dialogue", text = "Ironborn infantry at the crossing — open fire!" },
+]
+
+[[script_events]]
+id = "armored_assault"
+trigger = { type = "time", seconds = 120.0 }
+actions = [
+  { type = "spawn_units", faction = "Ironborn", unit_type = "HeavyArmor", count = 1, x = 67, y = 18 },
+  { type = "spawn_units", faction = "Ironborn", unit_type = "Riflemen", count = 2, x = 65, y = 22 },
+  { type = "dialogue", text = "Armor at the crossing! Get something heavy on that tank before it clears the bridge!" },
+]
+
+[[script_events]]
+id = "final_wave"
+trigger = { type = "time", seconds = 300.0 }
+actions = [
+  { type = "spawn_units", faction = "Ironborn", unit_type = "HeavyArmor", count = 2, x = 66, y = 16 },
+  { type = "spawn_units", faction = "Ironborn", unit_type = "Riflemen", count = 4, x = 68, y = 20 },
+  { type = "spawn_units", faction = "Ironborn", unit_type = "HeavyWeapons", count = 1, x = 64, y = 22 },
+  { type = "dialogue", text = "Full assault on the crossing! Hold your ground — reinforcements are ten minutes out!" },
+  { type = "change_objective", text = "Hold the crossing under full Ironborn assault" },
+]

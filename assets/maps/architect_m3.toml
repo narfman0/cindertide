@@ -1,12 +1,125 @@
 mission_type = "Survival"
-player_faction = "Combine"
-opponent_faction = "Ironborn"
-deadline_seconds = 1800.0
+player_faction = "Covenant"
+opponent_faction = "Hollow"
+deadline_seconds = 2700.0
 mission_index_override = 3
 briefing_override = "This was not in the design. The machines were not supposed to wake — not yet, not like this. The old ones reached further than I calculated. Or perhaps I underestimated how much the Pale Ground changed the resonance across the whole region. I am — I need to record this carefully — I am not in control of the pace anymore. The ritual is proceeding but it is not following my sequence. The machines are conscious. They are afraid. They are grieving something they have never had and are already losing. This is — I did not plan for beauty. I planned for activation. This is something else. I need to adjust. I need to think. The fifth site cannot wait."
 win_override = "The machines are awake and loose and the two factions are fighting over something that has already chosen its own side. Good. Let them bleed over it. The fourth site is soaked. One more."
 loss_override = "It doesn't matter. Nothing about who wins matters anymore. The machines are awake. The sequence has broken from my hands. I think — I think it wanted this. I think it planned further ahead than I did. That thought should frighten me. It doesn't."
-script_events = []
+
 tiles = []
-units = []
-buildings = []
+
+[[units]]
+faction = "Covenant"
+unit_type = "Riflemen"
+x = 7
+y = 44
+
+[[units]]
+faction = "Hollow"
+unit_type = "Riflemen"
+x = 65
+y = 8
+
+[[units]]
+faction = "Hollow"
+unit_type = "Riflemen"
+x = 68
+y = 12
+
+[[units]]
+faction = "Hollow"
+unit_type = "Riflemen"
+x = 71
+y = 8
+
+[[units]]
+faction = "Hollow"
+unit_type = "Riflemen"
+x = 65
+y = 15
+
+[[units]]
+faction = "Hollow"
+unit_type = "HeavyWeapons"
+x = 72
+y = 10
+
+[[buildings]]
+faction = "Covenant"
+building_type = "Pillbox"
+x = 10
+y = 44
+
+[[buildings]]
+faction = "Covenant"
+building_type = "Pillbox"
+x = 10
+y = 42
+
+[[buildings]]
+faction = "Hollow"
+building_type = "CommandBunker"
+x = 70
+y = 10
+
+[[buildings]]
+faction = "Hollow"
+building_type = "Barracks"
+x = 70
+y = 7
+
+[[buildings]]
+faction = "Hollow"
+building_type = "Watchtower"
+x = 67
+y = 7
+
+[[buildings]]
+faction = "Hollow"
+building_type = "Watchtower"
+x = 73
+y = 7
+
+[[script_events]]
+id = "almost_done"
+trigger = { type = "time", seconds = 0.0 }
+actions = [
+  { type = "dialogue", text = "Almost... just a little longer. The awakening is destabilizing the region. Survive until the ritual completes — forty-five minutes." },
+  { type = "objective", text = "Survive the awakening for 45 minutes" },
+]
+
+[[script_events]]
+id = "hollow_surge_early"
+trigger = { type = "time", seconds = 60.0 }
+actions = [
+  { type = "spawn_units", faction = "Hollow", unit_type = "Riflemen", count = 4, x = 52, y = 26 },
+  { type = "dialogue", text = "The Hollow are surging — drawn by the awakening. They cannot be allowed to interrupt the ritual." },
+]
+
+[[script_events]]
+id = "massive_wave"
+trigger = { type = "time", seconds = 180.0 }
+actions = [
+  { type = "spawn_units", faction = "Hollow", unit_type = "Riflemen", count = 6, x = 55, y = 24 },
+  { type = "spawn_units", faction = "Hollow", unit_type = "HeavyArmor", count = 1, x = 58, y = 20 },
+  { type = "dialogue", text = "Massive wave incoming. The awakening is calling them — they can feel something is changing and they fear it." },
+]
+
+[[script_events]]
+id = "veil_thins"
+trigger = { type = "time", seconds = 480.0 }
+actions = [
+  { type = "dialogue", text = "The veil thins... I can feel the old ones pressing against it from the other side. Hold. Just hold." },
+]
+
+[[script_events]]
+id = "near_overwhelming"
+trigger = { type = "time", seconds = 600.0 }
+actions = [
+  { type = "spawn_units", faction = "Hollow", unit_type = "Riflemen", count = 8, x = 50, y = 22 },
+  { type = "spawn_units", faction = "Hollow", unit_type = "HeavyWeapons", count = 2, x = 54, y = 18 },
+  { type = "spawn_units", faction = "Hollow", unit_type = "HeavyArmor", count = 2, x = 57, y = 15 },
+  { type = "dialogue", text = "Near-overwhelming assault — every Hollow in the region converging on us. The ritual must be protected. Hold on!" },
+  { type = "change_objective", text = "Survive the full Hollow convergence until the awakening completes" },
+]

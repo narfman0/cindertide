@@ -1,12 +1,105 @@
 mission_type = "Assault"
 player_faction = "Combine"
 opponent_faction = "Ironborn"
-deadline_seconds = 1800.0
+deadline_seconds = 3600.0
 mission_index_override = 4
 briefing_override = "Command is offline. Northern, southern, and central command are all offline. What emerged from the subsurface at grid 9-Last is not a geological event and it is not an enemy faction. It is something we do not have a category for. You have no extraction window. You have no reinforcements. You have what's in front of you and you have orders to hold your position for as long as holding means anything. Protect your people. That is the only objective that matters now."
 win_override = "You held. We don't know why it stopped — it simply stopped, and then it was gone, and the ground closed. Command is slowly coming back online. Nobody is saying what it was. I think most of them didn't see it directly. You did. I'm sorry you did."
 loss_override = "Position overrun. Survivors are reporting in from three scattered points. Whatever it was — it moved through you like you weren't there. Not with malice. That's the part nobody can explain. It didn't hate you. You just weren't relevant to it."
-script_events = []
+
 tiles = []
-units = []
-buildings = []
+
+[[units]]
+faction = "Combine"
+unit_type = "Riflemen"
+x = 7
+y = 69
+
+[[units]]
+faction = "Ironborn"
+unit_type = "Riflemen"
+x = 110
+y = 12
+
+[[units]]
+faction = "Ironborn"
+unit_type = "Riflemen"
+x = 113
+y = 8
+
+[[units]]
+faction = "Ironborn"
+unit_type = "Riflemen"
+x = 116
+y = 15
+
+[[units]]
+faction = "Ironborn"
+unit_type = "Riflemen"
+x = 109
+y = 18
+
+[[units]]
+faction = "Ironborn"
+unit_type = "HeavyWeapons"
+x = 119
+y = 10
+
+[[buildings]]
+faction = "Ironborn"
+building_type = "CommandBunker"
+x = 115
+y = 10
+
+[[buildings]]
+faction = "Ironborn"
+building_type = "Foundry"
+x = 118
+y = 10
+
+[[buildings]]
+faction = "Ironborn"
+building_type = "Barracks"
+x = 115
+y = 7
+
+[[buildings]]
+faction = "Ironborn"
+building_type = "Scrapyard"
+x = 112
+y = 13
+
+[[script_events]]
+id = "this_is_it"
+trigger = { type = "time", seconds = 0.0 }
+actions = [
+  { type = "dialogue", text = "This is it. The Ironborn citadel — their last stronghold. Destroy every structure they have and this war ends today." },
+  { type = "objective", text = "Destroy all Ironborn structures" },
+]
+
+[[script_events]]
+id = "probing_attack"
+trigger = { type = "time", seconds = 120.0 }
+actions = [
+  { type = "spawn_units", faction = "Ironborn", unit_type = "Riflemen", count = 3, x = 90, y = 40 },
+  { type = "dialogue", text = "Ironborn probe force testing our perimeter — push them back!" },
+]
+
+[[script_events]]
+id = "airdrop_reinforcements"
+trigger = { type = "condition", condition = "beat", beat_id = "LastStand" }
+actions = [
+  { type = "spawn_units", faction = "Combine", unit_type = "HeavyWeapons", count = 3, x = 8, y = 65 },
+  { type = "dialogue", text = "Command hasn't abandoned us — heavy weapons teams inbound by air! Hold the line until they land!" },
+]
+
+[[script_events]]
+id = "massive_counterattack"
+trigger = { type = "time", seconds = 600.0 }
+actions = [
+  { type = "spawn_units", faction = "Ironborn", unit_type = "HeavyArmor", count = 3, x = 110, y = 18 },
+  { type = "spawn_units", faction = "Ironborn", unit_type = "Riflemen", count = 8, x = 112, y = 22 },
+  { type = "spawn_units", faction = "Ironborn", unit_type = "HeavyWeapons", count = 2, x = 108, y = 12 },
+  { type = "dialogue", text = "Everything they have — all of it incoming! They know they're finished and they're throwing everything at us!" },
+  { type = "change_objective", text = "Survive the Ironborn last stand — then destroy all remaining structures" },
+]

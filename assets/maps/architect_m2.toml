@@ -1,12 +1,109 @@
-mission_type = "Extraction"
-player_faction = "Combine"
-opponent_faction = "Ironborn"
-deadline_seconds = 1800.0
+mission_type = "Assault"
+player_faction = "Covenant"
+opponent_faction = "Hollow"
+deadline_seconds = 2700.0
 mission_index_override = 2
 briefing_override = "The Pale Ground is the third site and the oldest. What is buried there has been buried since before the diesel age, before the iron age, before names. I have been visiting it for eleven years. It does not respond to me the way it responds to others — I think because I am not afraid. Fear is the frequency it listens on. I needed two factions of frightened soldiers walking through it, bleeding on it, fighting over it. The Combine will classify what they find. The Ironborn will keep what they take. Neither will understand that they are being read. It is reading them right now. It has already begun composing something from what it finds."
 win_override = "Three of my indicators went active simultaneously when the fighting reached the inner structure. I had to sit down. I have been working toward this for eleven years and it is more than I was promised. It is so much more."
 loss_override = "The wrong side holds the inner structure. I am not concerned. It doesn't matter who holds it. It matters who bled there. Everyone bled there."
-script_events = []
+
 tiles = []
-units = []
-buildings = []
+
+[[units]]
+faction = "Covenant"
+unit_type = "Riflemen"
+x = 7
+y = 69
+
+[[units]]
+faction = "Hollow"
+unit_type = "Riflemen"
+x = 110
+y = 12
+
+[[units]]
+faction = "Hollow"
+unit_type = "Riflemen"
+x = 113
+y = 8
+
+[[units]]
+faction = "Hollow"
+unit_type = "Riflemen"
+x = 116
+y = 15
+
+[[units]]
+faction = "Hollow"
+unit_type = "Riflemen"
+x = 109
+y = 18
+
+[[units]]
+faction = "Hollow"
+unit_type = "HeavyWeapons"
+x = 118
+y = 10
+
+[[buildings]]
+faction = "Covenant"
+building_type = "Workshop"
+x = 10
+y = 70
+
+[[buildings]]
+faction = "Hollow"
+building_type = "CommandBunker"
+x = 115
+y = 10
+
+[[buildings]]
+faction = "Hollow"
+building_type = "Barracks"
+x = 115
+y = 7
+
+[[buildings]]
+faction = "Hollow"
+building_type = "Watchtower"
+x = 112
+y = 7
+
+[[buildings]]
+faction = "Hollow"
+building_type = "Watchtower"
+x = 118
+y = 13
+
+[[script_events]]
+id = "beyond_control"
+trigger = { type = "time", seconds = 0.0 }
+actions = [
+  { type = "dialogue", text = "They grow beyond my control — temporarily. The Hollow nest must be destroyed before they consume my embedded agents. Move quickly." },
+  { type = "objective", text = "Destroy the Hollow Nest" },
+]
+
+[[script_events]]
+id = "hollow_patrol"
+trigger = { type = "time", seconds = 60.0 }
+actions = [
+  { type = "spawn_units", faction = "Hollow", unit_type = "Riflemen", count = 2, x = 80, y = 40 },
+  { type = "dialogue", text = "Hollow patrol in mid-territory. Eliminate them — leave no witnesses to our approach." },
+]
+
+[[script_events]]
+id = "nest_defense_awakens"
+trigger = { type = "time", seconds = 240.0 }
+actions = [
+  { type = "spawn_units", faction = "Hollow", unit_type = "Riflemen", count = 4, x = 105, y = 22 },
+  { type = "spawn_units", faction = "Hollow", unit_type = "HeavyWeapons", count = 1, x = 108, y = 18 },
+  { type = "dialogue", text = "The nest knows we're coming. Its defenders are awakening — push through before they can fully mobilize!" },
+]
+
+[[script_events]]
+id = "contingency_assets"
+trigger = { type = "condition", condition = "beat", beat_id = "LastStand" }
+actions = [
+  { type = "spawn_units", faction = "Covenant", unit_type = "HeavyWeapons", count = 2, x = 8, y = 65 },
+  { type = "dialogue", text = "Deploying contingency assets. I prepared for this possibility. Heavy teams inbound — do not waste them." },
+]

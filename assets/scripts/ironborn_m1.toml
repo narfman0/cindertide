@@ -1,0 +1,25 @@
+[[events]]
+id = "opening"
+trigger = { type = "time", seconds = 0.0 }
+actions = [
+  { type = "dialogue", text = "That scrapyard is ours by right — salvagers worked those piles before Corp even knew this territory existed. Take it back." },
+  { type = "objective", text = "Capture the Combine Scrapyard" },
+]
+
+[[events]]
+id = "combine_patrol"
+trigger = { type = "time", seconds = 90.0 }
+actions = [
+  { type = "spawn_units", faction = "Combine", unit_type = "Riflemen", count = 2, x = 95, y = 35 },
+  { type = "dialogue", text = "Corp patrol between us and the objective. Cut through them." },
+]
+
+[[events]]
+id = "combine_reinforcements"
+trigger = { type = "time", seconds = 240.0 }
+actions = [
+  { type = "spawn_units", faction = "Combine", unit_type = "Riflemen", count = 4, x = 110, y = 20 },
+  { type = "spawn_units", faction = "Combine", unit_type = "HeavyWeapons", count = 1, x = 112, y = 15 },
+  { type = "dialogue", text = "Corp spotted our advance on the scrapyard — they're rushing reinforcements to cut us off!" },
+  { type = "change_objective", text = "Fight through the reinforcements and capture the Scrapyard" },
+]

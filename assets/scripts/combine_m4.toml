@@ -1,0 +1,34 @@
+[[events]]
+id = "this_is_it"
+trigger = { type = "time", seconds = 0.0 }
+actions = [
+  { type = "dialogue", text = "This is it. The Ironborn citadel — their last stronghold. Destroy every structure they have and this war ends today." },
+  { type = "objective", text = "Destroy all Ironborn structures" },
+]
+
+[[events]]
+id = "probing_attack"
+trigger = { type = "time", seconds = 120.0 }
+actions = [
+  { type = "spawn_units", faction = "Ironborn", unit_type = "Riflemen", count = 3, x = 90, y = 40 },
+  { type = "dialogue", text = "Ironborn probe force testing our perimeter — push them back!" },
+]
+
+[[events]]
+id = "airdrop_reinforcements"
+trigger = { type = "condition", condition = "beat", beat_id = "LastStand" }
+actions = [
+  { type = "spawn_units", faction = "Combine", unit_type = "HeavyWeapons", count = 3, x = 8, y = 65 },
+  { type = "dialogue", text = "Command hasn't abandoned us — heavy weapons teams inbound by air! Hold the line until they land!" },
+]
+
+[[events]]
+id = "massive_counterattack"
+trigger = { type = "time", seconds = 600.0 }
+actions = [
+  { type = "spawn_units", faction = "Ironborn", unit_type = "HeavyArmor", count = 3, x = 110, y = 18 },
+  { type = "spawn_units", faction = "Ironborn", unit_type = "Riflemen", count = 8, x = 112, y = 22 },
+  { type = "spawn_units", faction = "Ironborn", unit_type = "HeavyWeapons", count = 2, x = 108, y = 12 },
+  { type = "dialogue", text = "Everything they have — all of it incoming! They know they're finished and they're throwing everything at us!" },
+  { type = "change_objective", text = "Survive the Ironborn last stand — then destroy all remaining structures" },
+]

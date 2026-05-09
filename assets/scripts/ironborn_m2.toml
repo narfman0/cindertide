@@ -1,0 +1,39 @@
+[[events]]
+id = "tactical_briefing"
+trigger = { type = "time", seconds = 0.0 }
+actions = [
+  { type = "dialogue", text = "Corp's lines are fortified — but they're holding a static defense. Hit them on the move, don't let them dig in further." },
+  { type = "objective", text = "Break through the Combine fortified lines" },
+]
+
+[[events]]
+id = "pillbox_warning"
+trigger = { type = "time", seconds = 60.0 }
+actions = [
+  { type = "dialogue", text = "Pillbox sighted ahead — suppress it before you advance. That thing'll shred infantry in the open." },
+]
+
+[[events]]
+id = "combine_counterattack"
+trigger = { type = "time", seconds = 180.0 }
+actions = [
+  { type = "spawn_units", faction = "Combine", unit_type = "Riflemen", count = 4, x = 100, y = 35 },
+  { type = "spawn_units", faction = "Combine", unit_type = "HeavyArmor", count = 1, x = 105, y = 28 },
+  { type = "dialogue", text = "Combine counterattack — armor and infantry pushing our left flank!" },
+]
+
+[[events]]
+id = "salvage_team"
+trigger = { type = "time", seconds = 420.0 }
+actions = [
+  { type = "spawn_units", faction = "Ironborn", unit_type = "LightVehicle", count = 2, x = 8, y = 65 },
+  { type = "dialogue", text = "Salvage team inbound with light vehicles — use them to punch through their remaining positions." },
+]
+
+[[events]]
+id = "final_push_window"
+trigger = { type = "time", seconds = 600.0 }
+actions = [
+  { type = "dialogue", text = "Their line is cracking. Push everything through the gap now — don't give them time to reinforce." },
+  { type = "change_objective", text = "Destroy the Combine Command Bunker and end their operation" },
+]
