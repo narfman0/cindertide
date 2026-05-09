@@ -3,31 +3,15 @@
 use bevy::prelude::*;
 use crate::map::{GridPos, Faction, NavMesh};
 use crate::resources::{ResourceCost, ResourcePool, spend, can_afford};
+use crate::factions::LoadedFactions;
 use std::collections::HashSet;
 
 #[derive(Component, Debug, Clone, PartialEq, Eq, Hash)]
-pub enum BuildingType {
-    // Economy
-    Refinery,
-    Scrapyard,
-    RecruitmentOffice,
-    // Production
-    Barracks,
-    MotorPool,
-    Foundry,
-    Airfield,
-    // Tech
-    Workshop,
-    CommandBunker,
-    ResearchLab,
-    // Support
-    SupplyDepot,
-    Watchtower,
-    RepairBay,
-    // Defense
-    Pillbox,
-    AAGun,
-    TankTrap,
+pub struct BuildingTypeId(pub String);
+
+impl BuildingTypeId {
+    pub fn new(id: &str) -> Self { BuildingTypeId(id.to_string()) }
+    pub fn id(&self) -> &str { &self.0 }
 }
 
 #[derive(Component, Debug, Clone)]
@@ -49,55 +33,27 @@ pub struct UnderConstruction;
 #[derive(Component, Debug)]
 pub struct Built;
 
-// --- Cost / health / build-time tables ---
+// --- Cost / health / build-time functions (data-driven via LoadedFactions) ---
 
-pub fn building_cost(bt: &BuildingType) -> ResourceCost {
-    use BuildingType::*;
-    let (f, s, m) = match bt {
-        Refinery => (200.0, 50.0, 0.0),
-        Scrapyard => (50.0, 200.0, 0.0),
-        RecruitmentOffice => (50.0, 50.0, 0.0),
-        Barracks => (100.0, 150.0, 0.0),
-        MotorPool => (250.0, 200.0, 0.0),
-        Foundry => (400.0, 350.0, 0.0),
-        Airfield => (500.0, 400.0, 0.0),
-        Workshop => (150.0, 100.0, 0.0),
-        CommandBunker => (300.0, 200.0, 0.0),
-        ResearchLab => (250.0, 200.0, 0.0),
-        SupplyDepot => (100.0, 100.0, 0.0),
-        Watchtower => (50.0, 75.0, 0.0),
-        RepairBay => (100.0, 200.0, 0.0),
-        Pillbox => (50.0, 100.0, 0.0),
-        AAGun => (75.0, 150.0, 0.0),
-        TankTrap => (0.0, 50.0, 0.0),
-    };
-    ResourceCost { fuel: f, scrap: s, manpower: m }
+pub fn building_cost(bt: &BuildingTypeId, loaded: &LoadedFactions) -> ResourceCost {
+    loaded.buildings.get(bt.id())
+        .map(|def| ResourceCost { fuel: def.cost.fuel, scrap: def.cost.scrap, manpower: def.cost.manpower })
+        .unwrap_or(ResourceCost { fuel: 0.0, scrap: 100.0, manpower: 0.0 })
 }
 
-pub fn building_health(bt: &BuildingType) -> f32 {
-    use BuildingType::*;
-    match bt {
-        TankTrap => 100.0,
-        Pillbox | Watchtower | AAGun => 250.0,
-        SupplyDepot | RecruitmentOffice | Scrapyard => 350.0,
-        Refinery | Workshop | RepairBay => 500.0,
-        Barracks | MotorPool | ResearchLab => 600.0,
-        Foundry | Airfield => 800.0,
-        CommandBunker => 1200.0,
-    }
+pub fn building_health(bt: &BuildingTypeId, loaded: &LoadedFactions) -> f32 {
+    loaded.buildings.get(bt.id()).map(|d| d.health).unwrap_or(500.0)
 }
 
-pub fn building_construction_seconds(bt: &BuildingType) -> f32 {
-    use BuildingType::*;
-    match bt {
-        TankTrap => 5.0,
-        Pillbox | Watchtower => 10.0,
-        AAGun | RecruitmentOffice | SupplyDepot => 15.0,
-        Refinery | Scrapyard | Workshop | RepairBay => 25.0,
-        Barracks | MotorPool | ResearchLab => 40.0,
-        Foundry | Airfield => 60.0,
-        CommandBunker => 90.0,
-    }
+pub fn building_construction_seconds(bt: &BuildingTypeId, loaded: &LoadedFactions) -> f32 {
+    loaded.buildings.get(bt.id()).map(|d| d.build_time_seconds).unwrap_or(30.0)
+}
+
+/// Which unit IDs does this building produce?
+pub fn building_produces<'a>(bt: &BuildingTypeId, loaded: &'a LoadedFactions) -> Vec<&'a str> {
+    loaded.buildings.get(bt.id())
+        .map(|d| d.produces.iter().map(|s| s.as_str()).collect())
+        .unwrap_or_default()
 }
 
 // --- Pure placement helpers ---
@@ -116,7 +72,7 @@ pub fn can_place(
 
 #[derive(Bundle)]
 pub struct BuildingBundle {
-    pub building_type: BuildingType,
+    pub building_type: BuildingTypeId,
     pub faction: Faction,
     pub pos: BuildingPos,
     pub health: crate::combat::Health,
@@ -125,15 +81,28 @@ pub struct BuildingBundle {
 }
 
 impl BuildingBundle {
-    pub fn new(building_type: BuildingType, faction: Faction, x: i32, y: i32) -> Self {
-        let total = building_construction_seconds(&building_type);
-        let max_hp = building_health(&building_type);
+    pub fn new(building_type: BuildingTypeId, faction: Faction, x: i32, y: i32, loaded: &LoadedFactions) -> Self {
+        let total = building_construction_seconds(&building_type, loaded);
+        let max_hp = building_health(&building_type, loaded);
         Self {
             building_type,
             faction,
             pos: BuildingPos { pos: GridPos { x, y } },
             health: crate::combat::Health { current: max_hp, max: max_hp },
             construction: ConstructionProgress { elapsed: 0.0, total },
+            under_construction: UnderConstruction,
+        }
+    }
+
+    /// Convenience constructor using default stats (30s build, 500hp).
+    /// Use when LoadedFactions is not accessible (e.g. from Commands).
+    pub fn new_default(building_type: BuildingTypeId, faction: Faction, x: i32, y: i32) -> Self {
+        Self {
+            building_type,
+            faction,
+            pos: BuildingPos { pos: GridPos { x, y } },
+            health: crate::combat::Health { current: 500.0, max: 500.0 },
+            construction: ConstructionProgress { elapsed: 0.0, total: 30.0 },
             under_construction: UnderConstruction,
         }
     }
@@ -200,31 +169,82 @@ pub fn try_pay(pool: &mut ResourcePool, cost: &ResourceCost) -> Result<(), Place
 mod tests {
     use super::*;
 
+    fn make_loaded() -> LoadedFactions {
+        let mut loaded = LoadedFactions::default();
+        loaded.buildings.insert("refinery".to_string(), crate::factions::BuildingDef {
+            id: "refinery".to_string(),
+            display_name: "Refinery".to_string(),
+            health: 500.0,
+            cost: crate::factions::ResourceCostDef { fuel: 200.0, scrap: 50.0, manpower: 0.0 },
+            build_time_seconds: 25.0,
+            produces: vec![],
+            model_file: String::new(),
+            description: String::new(),
+        });
+        loaded.buildings.insert("command_bunker".to_string(), crate::factions::BuildingDef {
+            id: "command_bunker".to_string(),
+            display_name: "Command Bunker".to_string(),
+            health: 1200.0,
+            cost: crate::factions::ResourceCostDef { fuel: 300.0, scrap: 200.0, manpower: 0.0 },
+            build_time_seconds: 90.0,
+            produces: vec![],
+            model_file: String::new(),
+            description: String::new(),
+        });
+        loaded.buildings.insert("pillbox".to_string(), crate::factions::BuildingDef {
+            id: "pillbox".to_string(),
+            display_name: "Pillbox".to_string(),
+            health: 250.0,
+            cost: crate::factions::ResourceCostDef { fuel: 50.0, scrap: 100.0, manpower: 0.0 },
+            build_time_seconds: 10.0,
+            produces: vec![],
+            model_file: String::new(),
+            description: String::new(),
+        });
+        loaded.buildings.insert("tank_trap".to_string(), crate::factions::BuildingDef {
+            id: "tank_trap".to_string(),
+            display_name: "Tank Trap".to_string(),
+            health: 100.0,
+            cost: crate::factions::ResourceCostDef { fuel: 0.0, scrap: 50.0, manpower: 0.0 },
+            build_time_seconds: 5.0,
+            produces: vec![],
+            model_file: String::new(),
+            description: String::new(),
+        });
+        loaded
+    }
+
     #[test]
     fn refinery_cost() {
-        let c = building_cost(&BuildingType::Refinery);
+        let loaded = make_loaded();
+        let c = building_cost(&BuildingTypeId::new("refinery"), &loaded);
         assert_eq!(c.fuel, 200.0);
         assert_eq!(c.scrap, 50.0);
     }
 
     #[test]
     fn command_bunker_is_most_expensive() {
-        let cb = building_cost(&BuildingType::CommandBunker);
-        let tank_trap = building_cost(&BuildingType::TankTrap);
+        let loaded = make_loaded();
+        let cb = building_cost(&BuildingTypeId::new("command_bunker"), &loaded);
+        let tank_trap = building_cost(&BuildingTypeId::new("tank_trap"), &loaded);
         assert!(cb.fuel + cb.scrap > tank_trap.fuel + tank_trap.scrap);
     }
 
     #[test]
     fn command_bunker_has_highest_health() {
-        let cb = building_health(&BuildingType::CommandBunker);
-        let pillbox = building_health(&BuildingType::Pillbox);
+        let loaded = make_loaded();
+        let cb = building_health(&BuildingTypeId::new("command_bunker"), &loaded);
+        let pillbox = building_health(&BuildingTypeId::new("pillbox"), &loaded);
         assert!(cb > pillbox);
     }
 
     #[test]
     fn tank_trap_builds_fast() {
-        assert!(building_construction_seconds(&BuildingType::TankTrap)
-            < building_construction_seconds(&BuildingType::Refinery));
+        let loaded = make_loaded();
+        assert!(
+            building_construction_seconds(&BuildingTypeId::new("tank_trap"), &loaded)
+                < building_construction_seconds(&BuildingTypeId::new("refinery"), &loaded)
+        );
     }
 
     #[test]
@@ -252,8 +272,9 @@ mod tests {
 
     #[test]
     fn try_pay_succeeds_when_affordable() {
+        let loaded = make_loaded();
         let mut pool = ResourcePool { fuel: 500.0, scrap: 500.0, manpower: 50.0 };
-        let cost = building_cost(&BuildingType::Refinery);
+        let cost = building_cost(&BuildingTypeId::new("refinery"), &loaded);
         assert!(try_pay(&mut pool, &cost).is_ok());
         assert_eq!(pool.fuel, 300.0);
         assert_eq!(pool.scrap, 450.0);
@@ -261,17 +282,19 @@ mod tests {
 
     #[test]
     fn try_pay_rejects_when_unaffordable() {
+        let loaded = make_loaded();
         let mut pool = ResourcePool { fuel: 10.0, scrap: 10.0, manpower: 10.0 };
-        let cost = building_cost(&BuildingType::Refinery);
+        let cost = building_cost(&BuildingTypeId::new("refinery"), &loaded);
         assert_eq!(try_pay(&mut pool, &cost), Err(PlaceError::Unaffordable));
         assert_eq!(pool.fuel, 10.0);
     }
 
     #[test]
     fn bundle_starts_with_full_health_and_zero_progress() {
-        let b = BuildingBundle::new(BuildingType::Refinery, Faction::Combine, 5, 5);
+        let loaded = make_loaded();
+        let b = BuildingBundle::new(BuildingTypeId::new("refinery"), Faction::combine(), 5, 5, &loaded);
         assert_eq!(b.health.current, b.health.max);
         assert_eq!(b.construction.elapsed, 0.0);
-        assert_eq!(b.construction.total, building_construction_seconds(&BuildingType::Refinery));
+        assert_eq!(b.construction.total, building_construction_seconds(&BuildingTypeId::new("refinery"), &loaded));
     }
 }

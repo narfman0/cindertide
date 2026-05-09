@@ -212,7 +212,7 @@ mod tests {
 
     #[test]
     fn hero_bundle_starts_with_full_health_and_no_charge() {
-        let h = HeroBundle::new("Test", 0, 0, Faction::Combine, AbilityKind::Rally);
+        let h = HeroBundle::new("Test", 0, 0, Faction::combine(), AbilityKind::Rally);
         assert_eq!(h.health.current, h.health.max);
         assert_eq!(h.ability.charge, 0.0);
         assert_eq!(h.hero.name, "Test");
@@ -220,7 +220,7 @@ mod tests {
 
     #[test]
     fn hero_bundle_aura_has_suppression_resist() {
-        let h = HeroBundle::new("R", 0, 0, Faction::Combine, AbilityKind::Rally);
+        let h = HeroBundle::new("R", 0, 0, Faction::combine(), AbilityKind::Rally);
         assert!(h.aura.suppression_resist > 0.0);
         assert!(h.aura.radius > 0.0);
     }

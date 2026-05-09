@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use crate::map::{Faction, GridPos};
-use crate::units::{RiflemanBundle, HomeBase};
+use crate::units::{UnitBundle, HomeBase};
 
 #[derive(Component, Debug, Clone, PartialEq)]
 pub enum HollowMode {
@@ -39,7 +39,7 @@ pub fn hollow_spawn_system(
         if s.elapsed >= s.interval {
             s.elapsed = 0.0;
             let id = commands
-                .spawn(RiflemanBundle::with_faction(s.pos.x, s.pos.y, Faction::Hollow))
+                .spawn(UnitBundle::default_riflemen(Faction::hollow(), s.pos.x, s.pos.y))
                 .id();
             commands.entity(id).insert(HomeBase { pos: s.pos.clone() });
         }

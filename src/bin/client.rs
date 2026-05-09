@@ -3,8 +3,9 @@ use bevy::input::mouse::MouseWheel;
 use bevy::prelude::*;
 use bevy::render::camera::ScalingMode;
 use cindertide::map::{Faction, GridPos, Tile};
-use cindertide::units::{UnitPos, UnitType, unit_stats};
-use cindertide::buildings::{BuildingPos, BuildingType};
+use cindertide::units::{UnitPos, UnitTypeId, UnitBundle};
+use cindertide::buildings::{BuildingPos, BuildingTypeId, BuildingBundle, building_cost, building_produces};
+use cindertide::factions::LoadedFactions;
 use cindertide::campaign::{CampaignRun, CampaignDef, PlayableFaction, GlobalProgress, apply_mission_outcome, next_mission_type, save_progress, load_progress};
 use cindertide::game::{ActiveRun, GameState};
 use cindertide::mission::{Mission, MissionStatus};
@@ -293,29 +294,14 @@ const EDITOR_TERRAINS: &[cindertide::map::TerrainType] = &[
 ];
 
 /// Factions cycled with F in editor.
-const EDITOR_FACTIONS: &[Faction] = &[
-    Faction::Combine,
-    Faction::Ironborn,
-    Faction::Covenant,
-    Faction::Hollow,
-];
+const EDITOR_FACTION_IDS: &[&str] = &["combine", "ironborn", "covenant", "hollow"];
 
 /// Unit types cycled with T in editor.
-const EDITOR_UNIT_TYPES: &[UnitType] = &[
-    UnitType::Riflemen,
-    UnitType::HeavyWeapons,
-    UnitType::LightVehicle,
-    UnitType::HeavyArmor,
-];
+const EDITOR_UNIT_TYPE_IDS: &[&str] = &["riflemen", "heavy_weapons", "light_vehicle", "heavy_armor"];
 
 /// Building types cycled with B in editor.
-const EDITOR_BUILDING_TYPES: &[BuildingType] = &[
-    BuildingType::Barracks,
-    BuildingType::Refinery,
-    BuildingType::CommandBunker,
-    BuildingType::MotorPool,
-    BuildingType::Pillbox,
-    BuildingType::Watchtower,
+const EDITOR_BUILDING_TYPE_IDS: &[&str] = &[
+    "barracks", "refinery", "command_bunker", "motor_pool", "pillbox", "watchtower",
 ];
 
 #[derive(Resource)]
@@ -884,36 +870,14 @@ struct ModelAssets {
     path: Option<PathBuf>,
 }
 
-/// Map a `UnitType` to its expected GLB scene filename (relative to the model directory).
-fn unit_model_name(unit_type: &UnitType) -> &'static str {
-    match unit_type {
-        UnitType::Riflemen     => "unit_riflemen.glb#Scene0",
-        UnitType::HeavyWeapons => "unit_heavy_weapons.glb#Scene0",
-        UnitType::LightVehicle => "unit_light_vehicle.glb#Scene0",
-        UnitType::HeavyArmor   => "unit_heavy_armor.glb#Scene0",
-    }
+/// Map a unit type id to its expected GLB scene filename (relative to the model directory).
+fn unit_model_name(unit_type: &UnitTypeId) -> String {
+    format!("unit_{}.glb#Scene0", unit_type.id())
 }
 
-/// Map a `BuildingType` to its expected GLB scene filename.
-fn building_model_name(building_type: &BuildingType) -> &'static str {
-    match building_type {
-        BuildingType::CommandBunker       => "building_command_bunker.glb#Scene0",
-        BuildingType::Barracks            => "building_barracks.glb#Scene0",
-        BuildingType::Refinery            => "building_refinery.glb#Scene0",
-        BuildingType::Scrapyard           => "building_scrapyard.glb#Scene0",
-        BuildingType::RecruitmentOffice   => "building_recruitment_office.glb#Scene0",
-        BuildingType::MotorPool           => "building_motor_pool.glb#Scene0",
-        BuildingType::Foundry             => "building_foundry.glb#Scene0",
-        BuildingType::Airfield            => "building_airfield.glb#Scene0",
-        BuildingType::Workshop            => "building_workshop.glb#Scene0",
-        BuildingType::ResearchLab         => "building_research_lab.glb#Scene0",
-        BuildingType::SupplyDepot         => "building_supply_depot.glb#Scene0",
-        BuildingType::Watchtower          => "building_watchtower.glb#Scene0",
-        BuildingType::RepairBay           => "building_repair_bay.glb#Scene0",
-        BuildingType::Pillbox             => "building_pillbox.glb#Scene0",
-        BuildingType::AAGun               => "building_aa_gun.glb#Scene0",
-        BuildingType::TankTrap            => "building_tank_trap.glb#Scene0",
-    }
+/// Map a building type id to its expected GLB scene filename.
+fn building_model_name(building_type: &BuildingTypeId) -> String {
+    format!("building_{}.glb#Scene0", building_type.id())
 }
 
 /// Startup system: resolve `CINDERTIDE_MODEL_PATH` and populate `ModelAssets`.
@@ -1128,9 +1092,9 @@ fn faction_narrative_key(f: PlayableFaction) -> &'static str {
 
 fn map_faction(f: PlayableFaction) -> Faction {
     match f {
-        PlayableFaction::Combine => Faction::Combine,
-        PlayableFaction::Ironborn => Faction::Ironborn,
-        PlayableFaction::Handler => Faction::Combine, // Handler uses Combine visuals
+        PlayableFaction::Combine => Faction::combine(),
+        PlayableFaction::Ironborn => Faction::ironborn(),
+        PlayableFaction::Handler => Faction::combine(), // Handler uses Combine visuals
     }
 }
 
@@ -1773,11 +1737,11 @@ fn handle_ui_input(
                                     }
                                 }
                                 for su in &saved.units {
-                                    let faction = parse_faction_name(&su.faction).unwrap_or(Faction::Combine);
+                                    let faction = parse_faction_name(&su.faction).unwrap_or_else(Faction::combine);
                                     spawn_unit_world(world, su.x, su.y, faction, &su.unit_type);
                                 }
                                 for sb in &saved.buildings {
-                                    let faction = parse_faction_name(&sb.faction).unwrap_or(Faction::Combine);
+                                    let faction = parse_faction_name(&sb.faction).unwrap_or_else(Faction::combine);
                                     spawn_building_world(world, sb.x, sb.y, faction, &sb.building_type);
                                 }
                                 loaded = true;
@@ -2035,14 +1999,8 @@ fn handle_ui_input(
                 {
                     let active = active.as_ref();
                     let player_faction_str = active.run.as_ref()
-                        .map(|r| match map_faction(r.faction) {
-                            Faction::Ironborn => "Ironborn",
-                            Faction::Covenant => "Covenant",
-                            Faction::Hollow => "Hollow",
-                            _ => "Combine",
-                        })
-                        .unwrap_or("Combine")
-                        .to_string();
+                        .map(|r| map_faction(r.faction).id().to_string())
+                        .unwrap_or_else(|| "combine".to_string());
                     let map_path_str = active.run.as_ref().and_then(|r| {
                         let idx = r.current_mission;
                         r.mission_maps.get(idx).cloned()
@@ -2052,7 +2010,7 @@ fn handle_ui_input(
                         .map(|mt| format!("{:?}", mt))
                         .unwrap_or_else(|| "Assault".to_string());
 
-                    let opp_faction = if player_faction_str == "Combine" { "Ironborn" } else { "Combine" };
+                    let opp_faction = if player_faction_str == "combine" { "ironborn" } else { "combine" };
 
                     *lobby = LobbyConfig {
                         slots: vec![
@@ -2075,7 +2033,7 @@ fn handle_ui_input(
                         let active = world.resource::<ActiveRun>();
                         let p = active.run.as_ref()
                             .map(|r| map_faction(r.faction))
-                            .unwrap_or(Faction::Combine);
+                            .unwrap_or_else(Faction::combine);
                         let idx = active.run.as_ref().map(|r| r.current_mission).unwrap_or(0);
                         let mp = active.run.as_ref()
                             .and_then(|r| r.mission_maps.get(idx))
@@ -2083,10 +2041,10 @@ fn handle_ui_input(
                         (p, idx, mp)
                     };
 
-                    let opponent = if player == Faction::Combine {
-                        Faction::Ironborn
+                    let opponent = if player.id() == "combine" {
+                        Faction::ironborn()
                     } else {
-                        Faction::Combine
+                        Faction::combine()
                     };
 
                     let mission_type = world.resource::<ActiveRun>()
@@ -2125,11 +2083,11 @@ fn handle_ui_input(
                                     }
                                 }
                                 for su in &saved.units {
-                                    let faction = parse_faction_name(&su.faction).unwrap_or(Faction::Combine);
+                                    let faction = parse_faction_name(&su.faction).unwrap_or_else(Faction::combine);
                                     spawn_unit_world(world, su.x, su.y, faction, &su.unit_type);
                                 }
                                 for sb in &saved.buildings {
-                                    let faction = parse_faction_name(&sb.faction).unwrap_or(Faction::Combine);
+                                    let faction = parse_faction_name(&sb.faction).unwrap_or_else(Faction::combine);
                                     spawn_building_world(world, sb.x, sb.y, faction, &sb.building_type);
                                 }
                                 map_loaded = true;
@@ -2277,12 +2235,7 @@ fn parse_win_condition(s: &str) -> MissionType {
 
 /// Parse a faction string to Faction.
 fn lobby_faction_to_map(s: &str) -> Faction {
-    match s {
-        "Ironborn" => Faction::Ironborn,
-        "Covenant" => Faction::Covenant,
-        "Hollow"   => Faction::Hollow,
-        _          => Faction::Combine,
-    }
+    Faction::new(&s.to_lowercase())
 }
 
 /// Start a mission from a LobbyConfig (used by multiplayer lobby and single-player shortcut).
@@ -2291,13 +2244,13 @@ fn start_mission_from_lobby(world: &mut World, lobby: &LobbyConfig) {
 
     // Determine player faction (first Human slot, fallback Combine)
     let player_slot = lobby.slots.iter().find(|s| s.controller == SlotController::Human);
-    let player_faction = player_slot.map(|s| lobby_faction_to_map(&s.faction)).unwrap_or(Faction::Combine);
+    let player_faction = player_slot.map(|s| lobby_faction_to_map(&s.faction)).unwrap_or_else(Faction::combine);
 
     // Opponent faction: first non-Human slot, fallback Ironborn
     let opponent_faction = lobby.slots.iter()
         .find(|s| s.controller != SlotController::Human)
         .map(|s| lobby_faction_to_map(&s.faction))
-        .unwrap_or(Faction::Ironborn);
+        .unwrap_or_else(Faction::ironborn);
 
     let mission_type = parse_win_condition(&lobby.win_condition);
 
@@ -2335,11 +2288,11 @@ fn start_mission_from_lobby(world: &mut World, lobby: &LobbyConfig) {
                 }
                 // Spawn units from the map, but also place faction starting units at spawn zones
                 for su in &saved.units {
-                    let faction = parse_faction_name(&su.faction).unwrap_or(Faction::Combine);
+                    let faction = parse_faction_name(&su.faction).unwrap_or_else(Faction::combine);
                     spawn_unit_world(world, su.x, su.y, faction, &su.unit_type);
                 }
                 for sb in &saved.buildings {
-                    let faction = parse_faction_name(&sb.faction).unwrap_or(Faction::Combine);
+                    let faction = parse_faction_name(&sb.faction).unwrap_or_else(Faction::combine);
                     spawn_building_world(world, sb.x, sb.y, faction, &sb.building_type);
                 }
 
@@ -2537,7 +2490,7 @@ fn spawn_unit_visuals(
     mut visual_entities: ResMut<VisualEntities>,
     model_assets: Res<ModelAssets>,
     asset_server: Res<AssetServer>,
-    units: Query<(Entity, &UnitPos, &Faction, &UnitType), Added<UnitType>>,
+    units: Query<(Entity, &UnitPos, &Faction, &UnitTypeId), Added<UnitTypeId>>,
 ) {
     for (entity, pos, faction, unit_type) in &units {
         let world_pos = grid_to_world(pos.pos.x, pos.pos.y) + Vec3::Y * 0.75;
@@ -2547,7 +2500,7 @@ fn spawn_unit_visuals(
         let visual = if let Some(ref dir) = model_assets.path {
             let glb_name = unit_model_name(unit_type);
             // Strip the "#Scene0" fragment to get the bare file name for existence check.
-            let file_name = glb_name.split('#').next().unwrap_or(glb_name);
+            let file_name = glb_name.split('#').next().unwrap_or(&glb_name);
             let full_path = dir.join(file_name);
             if full_path.exists() {
                 commands.spawn((
@@ -2578,8 +2531,8 @@ fn spawn_unit_visuals(
 }
 
 fn sync_unit_positions(
-    units: Query<(Entity, &UnitPos, Option<&AttackTarget>, Option<&MoveTarget>), With<UnitType>>,
-    unit_positions: Query<&UnitPos, With<UnitType>>,
+    units: Query<(Entity, &UnitPos, Option<&AttackTarget>, Option<&MoveTarget>), With<UnitTypeId>>,
+    unit_positions: Query<&UnitPos, With<UnitTypeId>>,
     visual_entities: Res<VisualEntities>,
     mut transforms: Query<&mut Transform>,
 ) {
@@ -2629,7 +2582,7 @@ fn spawn_building_visuals(
     mut visual_entities: ResMut<VisualEntities>,
     model_assets: Res<ModelAssets>,
     asset_server: Res<AssetServer>,
-    buildings: Query<(Entity, &BuildingPos, &Faction, &BuildingType), Added<BuildingType>>,
+    buildings: Query<(Entity, &BuildingPos, &Faction, &BuildingTypeId), Added<BuildingTypeId>>,
 ) {
     for (entity, pos, faction, building_type) in &buildings {
         if visual_entities.buildings.contains_key(&entity) {
@@ -2641,7 +2594,7 @@ fn spawn_building_visuals(
         // Scale factor 0.015 assumes Synty-style centimetre-unit exports — tune per asset pack.
         let visual = if let Some(ref dir) = model_assets.path {
             let glb_name = building_model_name(building_type);
-            let file_name = glb_name.split('#').next().unwrap_or(glb_name);
+            let file_name = glb_name.split('#').next().unwrap_or(&glb_name);
             let full_path = dir.join(file_name);
             if full_path.exists() {
                 commands.spawn((
@@ -2679,7 +2632,7 @@ fn handle_mouse_input(
     keys: Res<ButtonInput<KeyCode>>,
     windows: Query<&Window>,
     cameras: Query<(&Camera, &GlobalTransform), With<IsometricCamera>>,
-    units: Query<(Entity, &UnitPos, &Faction), With<UnitType>>,
+    units: Query<(Entity, &UnitPos, &Faction), With<UnitTypeId>>,
     mut selected: ResMut<SelectedUnits>,
     player_faction: Option<Res<PlayerFaction>>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -2979,7 +2932,7 @@ fn handle_keyboard_commands(
     keys: Res<ButtonInput<KeyCode>>,
     mut selected: ResMut<SelectedUnits>,
     selection_rings: Query<Entity, With<SelectionRing>>,
-    units: Query<(Entity, &UnitPos, &Faction), With<UnitType>>,
+    units: Query<(Entity, &UnitPos, &Faction), With<UnitTypeId>>,
     player_faction: Option<Res<PlayerFaction>>,
     mut attack_move_mode: ResMut<AttackMoveMode>,
     mut paused: ResMut<Paused>,
@@ -3203,7 +3156,7 @@ fn update_paused_overlay(
 }
 
 fn sync_selection_rings(
-    units: Query<&UnitPos, With<UnitType>>,
+    units: Query<&UnitPos, With<UnitTypeId>>,
     mut rings: Query<(&SelectionRing, &mut Transform)>,
 ) {
     for (ring, mut transform) in &mut rings {
@@ -3279,10 +3232,10 @@ fn handle_editor_keyboard(
     time: Res<Time>,
     gen: Res<GeneratePanel>,
     tiles: Query<(Entity, &Tile)>,
-    units: Query<Entity, With<UnitType>>,
-    buildings: Query<Entity, With<BuildingType>>,
-    units_full: Query<(&UnitPos, &Faction, &UnitType)>,
-    buildings_full: Query<(&BuildingPos, &Faction, &BuildingType)>,
+    units: Query<Entity, With<UnitTypeId>>,
+    buildings: Query<Entity, With<BuildingTypeId>>,
+    units_full: Query<(&UnitPos, &Faction, &UnitTypeId)>,
+    buildings_full: Query<(&BuildingPos, &Faction, &BuildingTypeId)>,
     mut visual_entities: ResMut<VisualEntities>,
     rendered_tiles: Query<Entity, With<RenderedTile>>,
     mut entered_from_game: ResMut<EditorEnteredFromGame>,
@@ -3502,15 +3455,15 @@ fn handle_editor_keyboard(
 
     // Cycle faction (F)
     if keys.just_pressed(KeyCode::KeyF) {
-        editor.faction_idx = (editor.faction_idx + 1) % EDITOR_FACTIONS.len();
+        editor.faction_idx = (editor.faction_idx + 1) % EDITOR_FACTION_IDS.len();
     }
     // Cycle unit type (T)
     if keys.just_pressed(KeyCode::KeyT) {
-        editor.unit_type_idx = (editor.unit_type_idx + 1) % EDITOR_UNIT_TYPES.len();
+        editor.unit_type_idx = (editor.unit_type_idx + 1) % EDITOR_UNIT_TYPE_IDS.len();
     }
     // Cycle building type (B)
     if keys.just_pressed(KeyCode::KeyB) {
-        editor.building_type_idx = (editor.building_type_idx + 1) % EDITOR_BUILDING_TYPES.len();
+        editor.building_type_idx = (editor.building_type_idx + 1) % EDITOR_BUILDING_TYPE_IDS.len();
     }
 
     // Del — clear map (confirm with 2nd press within 2s)
@@ -3635,13 +3588,13 @@ fn handle_editor_keyboard(
 
                     // Spawn loaded units
                     for su in &map.units {
-                        let faction = parse_faction_name(&su.faction).unwrap_or(Faction::Combine);
+                        let faction = parse_faction_name(&su.faction).unwrap_or_else(Faction::combine);
                         spawn_editor_unit(&mut commands, su.x, su.y, faction, &su.unit_type);
                     }
 
                     // Spawn loaded buildings
                     for sb in &map.buildings {
-                        let faction = parse_faction_name(&sb.faction).unwrap_or(Faction::Combine);
+                        let faction = parse_faction_name(&sb.faction).unwrap_or_else(Faction::combine);
                         spawn_editor_building(&mut commands, sb.x, sb.y, faction, &sb.building_type);
                     }
 
@@ -3752,8 +3705,8 @@ fn handle_editor_keyboard(
                     }
 
                     // Use mission_type / faction from saved fields or defaults.
-                    let player = Faction::Combine;
-                    let opponent = Faction::Ironborn;
+                    let player = Faction::combine();
+                    let opponent = Faction::ironborn();
                     let mission_index = 0usize;
 
                     world.spawn(FactionBundle::new(player.clone()));
@@ -3834,8 +3787,8 @@ fn handle_generate_panel(
     screen: Res<ClientScreen>,
     mut gen: ResMut<GeneratePanel>,
     tiles: Query<(Entity, &Tile)>,
-    units: Query<Entity, With<UnitType>>,
-    buildings: Query<Entity, With<BuildingType>>,
+    units: Query<Entity, With<UnitTypeId>>,
+    buildings: Query<Entity, With<BuildingTypeId>>,
     rendered_tiles: Query<Entity, With<RenderedTile>>,
     spawn_markers: Query<Entity, With<SpawnMarker>>,
     mut visual_entities: ResMut<VisualEntities>,
@@ -4442,122 +4395,50 @@ fn parse_terrain_name(s: &str) -> Option<cindertide::map::TerrainType> {
 }
 
 fn parse_faction_name(s: &str) -> Option<Faction> {
-    match s {
-        "Combine" => Some(Faction::Combine),
-        "Ironborn" => Some(Faction::Ironborn),
-        "Covenant" => Some(Faction::Covenant),
-        "Hollow" => Some(Faction::Hollow),
-        _ => None,
-    }
+    if s.is_empty() { None } else { Some(Faction::new(&s.to_lowercase())) }
 }
 
-fn map_faction_name(f: &Faction) -> &'static str {
-    match f {
-        Faction::Combine  => "Combine",
-        Faction::Ironborn => "Ironborn",
-        Faction::Covenant => "Covenant",
-        Faction::Hollow   => "Hollow",
-    }
+fn map_faction_name(f: &Faction) -> String {
+    f.id().to_string()
 }
 
-fn unit_type_name(t: &UnitType) -> &'static str {
-    match t {
-        UnitType::Riflemen => "Riflemen",
-        UnitType::HeavyWeapons => "HeavyWeapons",
-        UnitType::LightVehicle => "LightVehicle",
-        UnitType::HeavyArmor => "HeavyArmor",
-    }
+fn unit_type_name(t: &UnitTypeId) -> &str {
+    t.id()
 }
 
-fn building_type_name(t: &BuildingType) -> &'static str {
-    match t {
-        BuildingType::Barracks => "Barracks",
-        BuildingType::Refinery => "Refinery",
-        BuildingType::CommandBunker => "CommandBunker",
-        BuildingType::MotorPool => "MotorPool",
-        BuildingType::Pillbox => "Pillbox",
-        BuildingType::Watchtower => "Watchtower",
-        BuildingType::Scrapyard => "Scrapyard",
-        BuildingType::RecruitmentOffice => "RecruitmentOffice",
-        BuildingType::Foundry => "Foundry",
-        BuildingType::Airfield => "Airfield",
-        BuildingType::Workshop => "Workshop",
-        BuildingType::ResearchLab => "ResearchLab",
-        BuildingType::SupplyDepot => "SupplyDepot",
-        BuildingType::RepairBay => "RepairBay",
-        BuildingType::AAGun => "AAGun",
-        BuildingType::TankTrap => "TankTrap",
-    }
+fn building_type_name(t: &BuildingTypeId) -> &str {
+    t.id()
 }
 
 /// Spawn a unit directly into the World (used for map loading during mission start).
 fn spawn_unit_world(world: &mut World, x: i32, y: i32, faction: Faction, type_name: &str) {
-    use cindertide::units::*;
-    use cindertide::combat::*;
-    match type_name {
-        "HeavyWeapons" => { world.spawn(HeavyWeaponsBundle::with_faction(x, y, faction)); }
-        "LightVehicle"  => { world.spawn(LightVehicleBundle::with_faction(x, y, faction)); }
-        "HeavyArmor"    => { world.spawn(HeavyArmorBundle::with_faction(x, y, faction)); }
-        _               => { world.spawn(RiflemanBundle::with_faction(x, y, faction)); }
+    let unit_id = type_name.to_lowercase().replace(' ', "_");
+    let loaded = world.resource::<LoadedFactions>().clone();
+    if let Some(def) = loaded.units.get(&unit_id) {
+        world.spawn(UnitBundle::from_def(def, faction, x, y));
+    } else {
+        world.spawn(UnitBundle::default_riflemen(faction, x, y));
     }
 }
 
 /// Spawn a building directly into the World (used for map loading during mission start).
 fn spawn_building_world(world: &mut World, x: i32, y: i32, faction: Faction, type_name: &str) {
-    use cindertide::buildings::BuildingBundle;
-    let bt = match type_name {
-        "Refinery" => BuildingType::Refinery,
-        "CommandBunker" => BuildingType::CommandBunker,
-        "MotorPool" => BuildingType::MotorPool,
-        "Pillbox" => BuildingType::Pillbox,
-        "Watchtower" => BuildingType::Watchtower,
-        "Scrapyard" => BuildingType::Scrapyard,
-        "RecruitmentOffice" => BuildingType::RecruitmentOffice,
-        "Foundry" => BuildingType::Foundry,
-        "Airfield" => BuildingType::Airfield,
-        "Workshop" => BuildingType::Workshop,
-        "ResearchLab" => BuildingType::ResearchLab,
-        "SupplyDepot" => BuildingType::SupplyDepot,
-        "RepairBay" => BuildingType::RepairBay,
-        "AAGun" => BuildingType::AAGun,
-        "TankTrap" => BuildingType::TankTrap,
-        _ => BuildingType::Barracks,
-    };
-    world.spawn(BuildingBundle::new(bt, faction, x, y));
+    let bt_id = type_name.to_lowercase().replace(' ', "_");
+    let bt = BuildingTypeId::new(&bt_id);
+    let loaded = world.resource::<LoadedFactions>().clone();
+    world.spawn(BuildingBundle::new(bt, faction, x, y, &loaded));
 }
 
 fn spawn_editor_unit(commands: &mut Commands, x: i32, y: i32, faction: Faction, type_name: &str) {
-    use cindertide::units::*;
-    use cindertide::combat::*;
-    match type_name {
-        "HeavyWeapons" => { commands.spawn(HeavyWeaponsBundle::with_faction(x, y, faction)); }
-        "LightVehicle"  => { commands.spawn(LightVehicleBundle::with_faction(x, y, faction)); }
-        "HeavyArmor"    => { commands.spawn(HeavyArmorBundle::with_faction(x, y, faction)); }
-        _               => { commands.spawn(RiflemanBundle::with_faction(x, y, faction)); }
-    }
+    let unit_id = type_name.to_lowercase().replace(' ', "_");
+    commands.spawn(UnitBundle::default_riflemen_id(&unit_id, faction, x, y));
 }
 
 fn spawn_editor_building(commands: &mut Commands, x: i32, y: i32, faction: Faction, type_name: &str) {
-    use cindertide::buildings::BuildingBundle;
-    let bt = match type_name {
-        "Refinery" => BuildingType::Refinery,
-        "CommandBunker" => BuildingType::CommandBunker,
-        "MotorPool" => BuildingType::MotorPool,
-        "Pillbox" => BuildingType::Pillbox,
-        "Watchtower" => BuildingType::Watchtower,
-        "Scrapyard" => BuildingType::Scrapyard,
-        "RecruitmentOffice" => BuildingType::RecruitmentOffice,
-        "Foundry" => BuildingType::Foundry,
-        "Airfield" => BuildingType::Airfield,
-        "Workshop" => BuildingType::Workshop,
-        "ResearchLab" => BuildingType::ResearchLab,
-        "SupplyDepot" => BuildingType::SupplyDepot,
-        "RepairBay" => BuildingType::RepairBay,
-        "AAGun" => BuildingType::AAGun,
-        "TankTrap" => BuildingType::TankTrap,
-        _ => BuildingType::Barracks,
-    };
-    commands.spawn(BuildingBundle::new(bt, faction, x, y));
+    let bt_id = type_name.to_lowercase().replace(' ', "_");
+    let bt = BuildingTypeId::new(&bt_id);
+    // No LoadedFactions access from Commands — use default health
+    commands.spawn(BuildingBundle::new_default(bt, faction, x, y));
 }
 
 /// Handle mouse clicks in the map editor.
@@ -4569,8 +4450,8 @@ fn handle_editor_mouse_input(
     windows: Query<&Window>,
     cameras: Query<(&Camera, &GlobalTransform), With<IsometricCamera>>,
     mut tiles: Query<(Entity, &mut Tile)>,
-    units: Query<(Entity, &UnitPos), With<UnitType>>,
-    buildings: Query<(Entity, &BuildingPos), With<BuildingType>>,
+    units: Query<(Entity, &UnitPos), With<UnitTypeId>>,
+    buildings: Query<(Entity, &BuildingPos), With<BuildingTypeId>>,
     mut visual_entities: ResMut<VisualEntities>,
     rendered_tiles: Query<(Entity, &RenderedTile)>,
 ) {
@@ -4613,20 +4494,20 @@ fn handle_editor_mouse_input(
         }
         EditorTool::PlaceUnit => {
             if left_click {
-                let faction = EDITOR_FACTIONS[editor.faction_idx].clone();
-                let unit_type = EDITOR_UNIT_TYPES[editor.unit_type_idx].clone();
+                let faction = Faction::new(EDITOR_FACTION_IDS[editor.faction_idx]);
+                let unit_type = EDITOR_UNIT_TYPE_IDS[editor.unit_type_idx];
                 // Only place if tile exists
                 if tiles.iter().any(|(_, t)| t.pos.x == gx && t.pos.y == gy) {
-                    spawn_editor_unit(&mut commands, gx, gy, faction, unit_type_name(&unit_type));
+                    spawn_editor_unit(&mut commands, gx, gy, faction, unit_type);
                 }
             }
         }
         EditorTool::PlaceBuilding => {
             if left_click {
-                let faction = EDITOR_FACTIONS[editor.faction_idx].clone();
-                let building_type = EDITOR_BUILDING_TYPES[editor.building_type_idx].clone();
+                let faction = Faction::new(EDITOR_FACTION_IDS[editor.faction_idx]);
+                let building_type = EDITOR_BUILDING_TYPE_IDS[editor.building_type_idx];
                 if tiles.iter().any(|(_, t)| t.pos.x == gx && t.pos.y == gy) {
-                    spawn_editor_building(&mut commands, gx, gy, faction, building_type_name(&building_type));
+                    spawn_editor_building(&mut commands, gx, gy, faction, building_type);
                 }
             }
         }
@@ -4682,8 +4563,8 @@ fn update_editor_panel(
     editor: Res<EditorState>,
     gen: Res<GeneratePanel>,
     tiles: Query<&Tile>,
-    units: Query<&UnitPos, With<UnitType>>,
-    buildings: Query<&BuildingPos, With<BuildingType>>,
+    units: Query<&UnitPos, With<UnitTypeId>>,
+    buildings: Query<&BuildingPos, With<BuildingTypeId>>,
     mut panel_vis: Query<&mut Visibility, With<EditorPanel>>,
     mut panel_text: Query<&mut Text, With<EditorPanelText>>,
 ) {
@@ -4827,14 +4708,9 @@ fn update_editor_panel(
     };
 
     let terrain_name = terrain_type_name(&EDITOR_TERRAINS[editor.terrain_idx]);
-    let faction_name_str = match &EDITOR_FACTIONS[editor.faction_idx] {
-        Faction::Combine  => "Combine",
-        Faction::Ironborn => "Ironborn",
-        Faction::Covenant => "Covenant",
-        Faction::Hollow   => "Hollow",
-    };
-    let unit_name = unit_type_name(&EDITOR_UNIT_TYPES[editor.unit_type_idx]);
-    let building_name = building_type_name(&EDITOR_BUILDING_TYPES[editor.building_type_idx]);
+    let faction_name_str = EDITOR_FACTION_IDS[editor.faction_idx];
+    let unit_name = EDITOR_UNIT_TYPE_IDS[editor.unit_type_idx];
+    let building_name = EDITOR_BUILDING_TYPE_IDS[editor.building_type_idx];
 
     let tile_count = tiles.iter().count();
     let unit_count = units.iter().count();
@@ -4897,14 +4773,14 @@ fn update_unit_info_panel(
     screen: Res<ClientScreen>,
     selected: Res<SelectedUnits>,
     units: Query<(
-        &UnitType,
+        &UnitTypeId,
         Option<&Health>,
         Option<&MoveTarget>,
         Option<&AttackTarget>,
         Option<&HoldPosition>,
         Option<&AbilityCooldowns>,
         Option<&Suppressed>,
-    ), With<UnitType>>,
+    ), With<UnitTypeId>>,
     mut text_q: Query<&mut Text, With<UnitInfoText>>,
 ) {
     if !matches!(*screen, ClientScreen::InMission | ClientScreen::TestMission { .. }) {
@@ -4922,12 +4798,7 @@ fn update_unit_info_panel(
     if count == 1 {
         let entity = selected.entities[0];
         if let Ok((unit_type, health, move_target, attack_target, hold, ability_cds, suppressed)) = units.get(entity) {
-            let type_name = match unit_type {
-                UnitType::Riflemen => "Riflemen",
-                UnitType::HeavyWeapons => "Heavy Weapons",
-                UnitType::LightVehicle => "Light Vehicle",
-                UnitType::HeavyArmor => "Heavy Armor",
-            };
+            let type_name = unit_type.id();
 
             let health_str = if let Some(h) = health {
                 let frac = (h.current / h.max).clamp(0.0, 1.0);
@@ -4961,11 +4832,9 @@ fn update_unit_info_panel(
             };
             let suppressed_str = if suppressed.is_some() { " [SUPPRESSED]" } else { "" };
 
-            let stats = unit_stats(unit_type);
             **text = format!(
-                "{}{}\n{}\nOrder: {}  {}\nRange: {:.0}  Speed: {:.1}",
+                "{}{}\n{}\nOrder: {}  {}",
                 type_name, suppressed_str, health_str, order, q_cd_str,
-                stats.attack_range, stats.move_speed
             );
         } else {
             **text = String::new();
@@ -5008,14 +4877,16 @@ fn update_unit_info_panel(
 fn update_production_queue(
     screen: Res<ClientScreen>,
     player_faction: Option<Res<PlayerFaction>>,
-    buildings: Query<(&BuildingType, &Faction, &ProductionQueue), With<Built>>,
+    buildings: Query<(&BuildingTypeId, &Faction, &ProductionQueue), With<Built>>,
     mut text_q: Query<&mut Text, With<ProductionQueueText>>,
+    loaded: Option<Res<LoadedFactions>>,
 ) {
     if !matches!(*screen, ClientScreen::InMission | ClientScreen::TestMission { .. }) {
         return;
     }
     let Ok(mut text) = text_q.single_mut() else { return };
     let Some(pf) = player_faction else { return };
+    let Some(loaded) = loaded else { return };
 
     let mut lines: Vec<String> = Vec::new();
 
@@ -5027,20 +4898,9 @@ fn update_production_queue(
             continue;
         }
 
-        let building_name = match bt {
-            BuildingType::Barracks => "Barracks",
-            BuildingType::MotorPool => "Motor Pool",
-            _ => continue, // only show producing buildings
-        };
-
-        let producing = match &queue.jobs[0] {
-            UnitType::Riflemen => "Riflemen",
-            UnitType::HeavyWeapons => "Heavy Weapons",
-            UnitType::LightVehicle => "Light Vehicle",
-            UnitType::HeavyArmor => "Heavy Armor",
-        };
-
-        let duration = unit_production_seconds(&queue.jobs[0]);
+        let building_name = bt.id();
+        let producing = &queue.jobs[0];
+        let duration = unit_production_seconds(producing, &loaded);
         let frac = (queue.progress / duration).clamp(0.0, 1.0);
         let filled = (frac * 16.0).round() as usize;
         let empty = 16 - filled;
@@ -5082,8 +4942,8 @@ fn update_minimap(
     panel_q: Query<Entity, With<MinimapPanel>>,
     dot_q: Query<Entity, With<MinimapDot>>,
     tiles: Query<&Tile>,
-    units: Query<(&UnitPos, &Faction), With<UnitType>>,
-    buildings: Query<(&BuildingPos, &Faction), With<BuildingType>>,
+    units: Query<(&UnitPos, &Faction), With<UnitTypeId>>,
+    buildings: Query<(&BuildingPos, &Faction), With<BuildingTypeId>>,
     player_faction: Option<Res<PlayerFaction>>,
 ) {
     if !matches!(*screen, ClientScreen::InMission | ClientScreen::TestMission { .. }) {
@@ -5450,12 +5310,12 @@ fn update_mission_objectives(
     screen: Res<ClientScreen>,
     active: Res<ActiveRun>,
     missions: Query<&Mission>,
-    units: Query<&Faction, With<UnitType>>,
-    buildings: Query<(&Faction, &BuildingType), With<BuildingPos>>,
+    units: Query<&Faction, With<UnitTypeId>>,
+    buildings: Query<(&Faction, &BuildingTypeId), With<BuildingPos>>,
     player_faction: Option<Res<PlayerFaction>>,
     script_state: Option<Res<ScriptState>>,
     commanders: Query<(&cindertide::mission::Commander, &cindertide::combat::Health), Without<cindertide::combat::Dead>>,
-    all_factions_units: Query<&Faction, (With<UnitType>, Without<cindertide::combat::Dead>)>,
+    all_factions_units: Query<&Faction, (With<UnitTypeId>, Without<cindertide::combat::Dead>)>,
     all_factions_buildings: Query<&Faction, (With<BuildingPos>, With<cindertide::buildings::Built>, Without<cindertide::combat::Dead>)>,
     mut text_q: Query<&mut Text, With<ObjectivesText>>,
 ) {
@@ -5600,14 +5460,14 @@ fn update_fog_of_war(
     time: Res<Time>,
     player_faction: Option<Res<PlayerFaction>>,
     player_cheats: Res<PlayerCheats>,
-    units: Query<(&UnitPos, &Faction, &UnitType), With<UnitType>>,
-    buildings: Query<(&BuildingPos, &Faction), With<BuildingType>>,
+    units: Query<(&UnitPos, &Faction, &UnitTypeId), With<UnitTypeId>>,
+    buildings: Query<(&BuildingPos, &Faction), With<BuildingTypeId>>,
     mut fog: ResMut<FogOfWar>,
     tiles: Query<&Tile>,
     visual_entities: Res<VisualEntities>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    unit_visuals: Query<(&Faction, &UnitPos), With<UnitType>>,
-    building_visuals: Query<(&Faction, &BuildingPos), With<BuildingType>>,
+    unit_visuals: Query<(&Faction, &UnitPos), With<UnitTypeId>>,
+    building_visuals: Query<(&Faction, &BuildingPos), With<BuildingTypeId>>,
     mut vis_query: Query<(&mut Visibility, Entity)>,
 ) {
     if !matches!(*screen, ClientScreen::InMission | ClientScreen::TestMission { .. }) {
@@ -5639,7 +5499,11 @@ fn update_fog_of_war(
         if faction != player_f {
             continue;
         }
-        let radius = unit_stats(unit_type).vision_range as i32;
+        let radius = match unit_type.id() {
+            "heavy_armor" => 4,
+            "light_vehicle" => 8,
+            _ => 6,
+        };
         let cx = pos.pos.x;
         let cy = pos.pos.y;
         for dy in -radius..=radius {
@@ -5772,23 +5636,25 @@ fn terrain_color(terrain: &cindertide::map::TerrainType) -> Color {
 }
 
 fn faction_color(faction: &Faction) -> Color {
-    match faction {
-        Faction::Combine  => Color::srgb(0.90, 0.75, 0.10),
-        Faction::Ironborn => Color::srgb(0.60, 0.60, 0.65),
-        Faction::Covenant => Color::srgb(0.20, 0.40, 0.90),
-        Faction::Hollow   => Color::srgb(0.70, 0.10, 0.70),
+    match faction.id() {
+        "combine"  => Color::srgb(0.90, 0.75, 0.10),
+        "ironborn" => Color::srgb(0.60, 0.60, 0.65),
+        "covenant" => Color::srgb(0.20, 0.40, 0.90),
+        "hollow"   => Color::srgb(0.70, 0.10, 0.70),
+        _          => Color::srgb(0.50, 0.50, 0.50),
     }
 }
 
 // ── Unit ability system ───────────────────────────────────────────────────────
 
-/// Q/W/E ability cooldown durations in seconds per UnitType.
-fn ability_q_cooldown(unit_type: &UnitType) -> f32 {
-    match unit_type {
-        UnitType::Riflemen    => 15.0,
-        UnitType::HeavyWeapons => 20.0,
-        UnitType::LightVehicle => 10.0,
-        UnitType::HeavyArmor  => 8.0,
+/// Q/W/E ability cooldown durations in seconds per UnitTypeId.
+fn ability_q_cooldown(unit_type: &UnitTypeId) -> f32 {
+    match unit_type.id() {
+        "riflemen"      => 15.0,
+        "heavy_weapons" => 20.0,
+        "light_vehicle" => 10.0,
+        "heavy_armor"   => 8.0,
+        _               => 15.0,
     }
 }
 
@@ -5796,12 +5662,12 @@ fn ability_q_cooldown(unit_type: &UnitType) -> f32 {
 fn fire_ability_q(
     commands: &mut Commands,
     entity: Entity,
-    unit_type: &UnitType,
+    unit_type: &UnitTypeId,
     unit_pos: &cindertide::units::UnitPos,
     enemies: &[(Entity, cindertide::units::UnitPos)],
 ) {
-    match unit_type {
-        UnitType::Riflemen => {
+    match unit_type.id() {
+        "riflemen" => {
             // Suppressing Fire: apply Suppressed for 5s to the nearest enemy
             let nearest = enemies.iter().min_by_key(|(_, epos)| {
                 let dx = (epos.pos.x - unit_pos.pos.x).abs();
@@ -5815,7 +5681,7 @@ fn fire_ability_q(
             }
             info!("Riflemen: Suppressing Fire");
         }
-        UnitType::HeavyWeapons => {
+        "heavy_weapons" => {
             // Grenade: deal 3× damage to all units on the nearest enemy tile
             let nearest = enemies.iter().min_by_key(|(_, epos)| {
                 let dx = (epos.pos.x - unit_pos.pos.x).abs();
@@ -5836,7 +5702,7 @@ fn fire_ability_q(
             }
             info!("HeavyWeapons: Grenade");
         }
-        UnitType::LightVehicle => {
+        "light_vehicle" => {
             // Scout Dash: move 3 tiles in current facing direction (just teleport for now)
             let new_pos = cindertide::map::GridPos {
                 x: unit_pos.pos.x,
@@ -5847,7 +5713,7 @@ fn fire_ability_q(
             }
             info!("LightVehicle: Scout Dash");
         }
-        UnitType::HeavyArmor => {
+        "heavy_armor" => {
             // Rally: remove Suppressed/Routing from self
             if let Ok(mut e) = commands.get_entity(entity) {
                 e.remove::<Suppressed>()
@@ -5855,6 +5721,7 @@ fn fire_ability_q(
             }
             info!("HeavyArmor: Rally");
         }
+        _ => {}
     }
 }
 
@@ -5866,11 +5733,11 @@ fn handle_ability_input(
     selected: Res<SelectedUnits>,
     tech_vis: Res<TechPanelVisible>,
     mut units: Query<(
-        &UnitType,
+        &UnitTypeId,
         &cindertide::units::UnitPos,
         Option<&mut AbilityCooldowns>,
     )>,
-    enemies_q: Query<(Entity, &cindertide::units::UnitPos, &Faction), With<UnitType>>,
+    enemies_q: Query<(Entity, &cindertide::units::UnitPos, &Faction), With<UnitTypeId>>,
     player_faction: Option<Res<PlayerFaction>>,
 ) {
     if !matches!(*screen, ClientScreen::InMission | ClientScreen::TestMission { .. }) || tech_vis.visible {
@@ -6178,8 +6045,8 @@ fn handle_unit_death(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut visual_entities: ResMut<VisualEntities>,
-    dying_units: Query<(Entity, &UnitPos), (With<JustDied>, With<Dead>, With<UnitType>)>,
-    dying_buildings: Query<(Entity, &BuildingPos), (With<JustDied>, With<Dead>, With<BuildingType>)>,
+    dying_units: Query<(Entity, &UnitPos), (With<JustDied>, With<Dead>, With<UnitTypeId>)>,
+    dying_buildings: Query<(Entity, &BuildingPos), (With<JustDied>, With<Dead>, With<BuildingTypeId>)>,
     mut audio_queue: ResMut<AudioEventQueue>,
 ) {
     for (entity, pos) in &dying_units {
@@ -6278,8 +6145,8 @@ fn host_broadcast_game_state(
     time: Res<Time>,
     mut timer: ResMut<NetBroadcastTimer>,
     screen: Res<ClientScreen>,
-    units: Query<(Entity, &UnitPos, &Faction, &UnitType, Option<&Health>, Option<&NetId>)>,
-    buildings: Query<(Entity, &BuildingPos, &Faction, &BuildingType, Option<&Health>, Option<&Built>, Option<&NetId>)>,
+    units: Query<(Entity, &UnitPos, &Faction, &UnitTypeId, Option<&Health>, Option<&NetId>)>,
+    buildings: Query<(Entity, &BuildingPos, &Faction, &BuildingTypeId, Option<&Health>, Option<&Built>, Option<&NetId>)>,
     missions: Query<&Mission>,
     active: Res<ActiveRun>,
     mut commands: Commands,
@@ -6324,8 +6191,8 @@ fn host_broadcast_game_state(
             id,
             x: pos.pos.x,
             y: pos.pos.y,
-            faction: format!("{:?}", faction),
-            unit_type: format!("{:?}", utype),
+            faction: faction.id().to_string(),
+            unit_type: utype.id().to_string(),
             hp: health.map(|h| h.current).unwrap_or(100.0),
             hp_max: health.map(|h| h.max).unwrap_or(100.0),
         })
@@ -6337,8 +6204,8 @@ fn host_broadcast_game_state(
             id,
             x: pos.pos.x,
             y: pos.pos.y,
-            faction: format!("{:?}", faction),
-            building_type: format!("{:?}", btype),
+            faction: faction.id().to_string(),
+            building_type: btype.id().to_string(),
             hp: health.map(|h| h.current).unwrap_or(100.0),
             hp_max: health.map(|h| h.max).unwrap_or(100.0),
             built: built.is_some(),
@@ -6380,7 +6247,7 @@ fn receive_net_messages(
     mut remote_state: ResMut<RemoteGameState>,
     mut lobby: ResMut<LobbyConfig>,
     mut commands: Commands,
-    units: Query<(Entity, &NetId, &UnitPos), With<UnitType>>,
+    units: Query<(Entity, &NetId, &UnitPos), With<UnitTypeId>>,
     tiles: Query<&Tile>,
 ) {
     let Some(channels) = net_channels else { return };
@@ -6440,7 +6307,7 @@ fn receive_net_messages(
 fn apply_client_command(
     commands: &mut Commands,
     cmd: ClientCommand,
-    units: &Query<(Entity, &NetId, &UnitPos), With<UnitType>>,
+    units: &Query<(Entity, &NetId, &UnitPos), With<UnitTypeId>>,
     tiles: &Query<&Tile>,
 ) {
     match cmd {
@@ -6491,17 +6358,11 @@ fn apply_client_command(
             }
         }
         ClientCommand::BuildOrder { building_type, x, y } => {
-            // Parse building type and spawn placement command
-            let bt = match building_type.as_str() {
-                "Refinery" => Some(BuildingType::Refinery),
-                "Barracks" => Some(BuildingType::Barracks),
-                "CommandBunker" => Some(BuildingType::CommandBunker),
-                "MotorPool" => Some(BuildingType::MotorPool),
-                _ => None,
-            };
-            if let Some(bt) = bt {
-                use cindertide::buildings::BuildingBundle;
-                commands.spawn(BuildingBundle::new(bt, Faction::Ironborn, x, y));
+            // Spawn a building with the given type string (any non-empty type is accepted)
+            if !building_type.is_empty() {
+                use cindertide::buildings::{BuildingBundle, BuildingTypeId};
+                let bt = BuildingTypeId::new(&building_type);
+                commands.spawn(BuildingBundle::new_default(bt, Faction::new("combine"), x, y));
             }
         }
     }

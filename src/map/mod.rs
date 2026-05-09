@@ -35,12 +35,16 @@ pub enum ControlPointType {
 }
 
 // Faction owner — also a Component so units carry their allegiance.
-#[derive(Component, Debug, Clone, PartialEq, Eq, Hash)]
-pub enum Faction {
-    Combine,
-    Covenant,
-    Ironborn,
-    Hollow,
+#[derive(Component, Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, Default)]
+pub struct Faction(pub String);
+
+impl Faction {
+    pub fn new(id: &str) -> Self { Faction(id.to_string()) }
+    pub fn combine() -> Self { Faction("combine".to_string()) }
+    pub fn ironborn() -> Self { Faction("ironborn".to_string()) }
+    pub fn covenant() -> Self { Faction("covenant".to_string()) }
+    pub fn hollow() -> Self { Faction("hollow".to_string()) }
+    pub fn id(&self) -> &str { &self.0 }
 }
 
 // Grid position

@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use crate::combat::{Health, Dead};
 use crate::heroes::{Hero, HeroDowned};
-use crate::buildings::{BuildingType, BuildingPos};
+use crate::buildings::{BuildingTypeId, BuildingPos};
 use crate::map::Faction;
 use std::collections::HashSet;
 
@@ -29,7 +29,7 @@ pub fn should_fire_last_stand(
 pub fn beat_check_system(
     mut fired: ResMut<FiredBeats>,
     heroes: Query<&Hero, With<HeroDowned>>,
-    bunkers: Query<(&BuildingType, &Health, &BuildingPos), Without<Dead>>,
+    bunkers: Query<(&BuildingTypeId, &Health, &BuildingPos), Without<Dead>>,
 ) {
     if should_fire_hero_goes_down(!heroes.is_empty(), fired.0.contains(&BeatId::HeroGoesDown)) {
         fired.0.insert(BeatId::HeroGoesDown);
@@ -37,7 +37,7 @@ pub fn beat_check_system(
 
     let mut min_frac: f32 = 1.0;
     for (bt, h, _) in &bunkers {
-        if matches!(bt, BuildingType::CommandBunker) && h.max > 0.0 {
+        if bt.id() == "command_bunker" && h.max > 0.0 {
             let frac = h.current / h.max;
             if frac < min_frac {
                 min_frac = frac;

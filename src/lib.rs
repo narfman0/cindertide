@@ -2,6 +2,7 @@ use bevy::prelude::*;
 use bevy::remote::{RemotePlugin, http::RemoteHttpPlugin, BrpResult, BrpError};
 use serde_json::Value;
 
+pub mod factions;
 pub mod map;
 pub mod units;
 pub mod combat;
@@ -29,13 +30,14 @@ pub mod narrative;
 pub mod mission_script;
 
 use map::{MapPlugin, GridPos, Faction, ControlPoint, ControlPointType};
-use units::{UnitPlugin, MoveTarget, MoveProgress, UnitPos, UnitKind, RiflemanBundle};
+use units::{UnitPlugin, MoveTarget, MoveProgress, UnitPos, UnitKind, UnitBundle};
 use combat::PlayerAttackOrder;
 use combat::{CombatPlugin, AttackTarget, Health, Morale, Suppression, Facing, morale_state};
 use resources::{ResourcesPlugin, FactionBundle, ResourcePool, ResourceTrickle, ResourceCost, spend, can_afford};
 use control::ControlPlugin;
-use buildings::{BuildingsPlugin, BuildingType, BuildingBundle, BuildingPos, ConstructionProgress, building_cost, try_pay, can_place, Built, UnderConstruction};
-use production::{ProductionPlugin, ProductionQueue, building_produces, try_enqueue, EnqueueError};
+use buildings::{BuildingsPlugin, BuildingTypeId, BuildingBundle, BuildingPos, ConstructionProgress, building_cost, building_produces, try_pay, can_place, Built, UnderConstruction};
+use production::{ProductionPlugin, ProductionQueue, try_enqueue, EnqueueError};
+use factions::{LoadedFactions, FactionsPlugin};
 use heroes::{HeroPlugin, HeroBundle, Hero, AbilityKind, SignatureAbility, Aura, HeroDowned, is_charge_full, within_aura};
 use tech::{TechPlugin, Tech, Tier, Doctrine, ResearchTarget, ResearchInProgress, start_research};
 use unit_ai::UnitAiPlugin;
@@ -133,6 +135,10 @@ pub fn run_server() {
         .add_plugins(GamePlugin)
         .add_plugins(MissionScriptPlugin)
         .add_systems(Startup, on_startup);
+    // Load faction/unit/building definitions from assets/factions/*.toml
+    let loaded_factions = factions::LoadedFactions::load_from_dir("assets/factions");
+    app.insert_resource(loaded_factions);
+
     // Load narrative data — path relative to working directory (project root when running via cargo)
     let narrative = narrative::NarrativeData::load("assets/narrative.toml")
         .unwrap_or_else(|e| {
@@ -276,7 +282,8 @@ fn handle_building_construct(In(params): In<Option<Value>>, world: &mut World) -
         return Ok(serde_json::json!({ "ok": false, "reason": "tile is occupied" }));
     }
 
-    let cost = building_cost(&building_type);
+    let loaded = world.resource::<LoadedFactions>().clone();
+    let cost = building_cost(&building_type, &loaded);
     let faction_entity = {
         let mut q = world.query::<(Entity, &resources::FactionEntity)>();
         q.iter(world)
@@ -295,8 +302,8 @@ fn handle_building_construct(In(params): In<Option<Value>>, world: &mut World) -
     }
 
     let bt_for_queue = building_type.clone();
-    let entity = world.spawn(BuildingBundle::new(building_type, faction, x, y)).id();
-    if !production::building_produces(&bt_for_queue).is_empty() {
+    let entity = world.spawn(BuildingBundle::new(building_type, faction, x, y, &loaded)).id();
+    if !building_produces(&bt_for_queue, &loaded).is_empty() {
         world.entity_mut(entity).insert(production::ProductionQueue::default());
     }
 
@@ -320,8 +327,6 @@ fn handle_unit_spawn(In(params): In<Option<Value>>, world: &mut World) -> BrpRes
             data: None,
         })?;
 
-    let unit_type = parse_unit_type(unit_type_str)?;
-
     let x = params["x"]
         .as_i64()
         .ok_or_else(|| BrpError {
@@ -338,25 +343,15 @@ fn handle_unit_spawn(In(params): In<Option<Value>>, world: &mut World) -> BrpRes
             data: None,
         })? as i32;
 
-    let faction = match params["faction"].as_str() {
-        Some("combine") | None => Faction::Combine,
-        Some("covenant") => Faction::Covenant,
-        Some("ironborn") => Faction::Ironborn,
-        Some("hollow") => Faction::Hollow,
-        Some(other) => {
-            return Err(BrpError {
-                code: -32602,
-                message: format!("unknown faction: {other}"),
-                data: None,
-            });
-        }
-    };
+    let faction_str = params["faction"].as_str().unwrap_or("combine");
+    let faction = Faction::new(faction_str);
 
-    let entity = match unit_type {
-        units::UnitType::Riflemen => world.spawn(RiflemanBundle::with_faction(x, y, faction)).id(),
-        units::UnitType::HeavyWeapons => world.spawn(units::HeavyWeaponsBundle::with_faction(x, y, faction)).id(),
-        units::UnitType::LightVehicle => world.spawn(units::LightVehicleBundle::with_faction(x, y, faction)).id(),
-        units::UnitType::HeavyArmor => world.spawn(units::HeavyArmorBundle::with_faction(x, y, faction)).id(),
+    let unit_id = normalize_unit_type_id(unit_type_str);
+    let loaded = world.resource::<LoadedFactions>().clone();
+    let entity = if let Some(def) = loaded.units.get(&unit_id) {
+        world.spawn(UnitBundle::from_def(def, faction, x, y)).id()
+    } else {
+        world.spawn(UnitBundle::default_riflemen(faction, x, y)).id()
     };
     world
         .entity_mut(entity)
@@ -398,8 +393,8 @@ fn handle_unit_status(In(params): In<Option<Value>>, world: &mut World) -> BrpRe
         })?;
 
     let unit_type = entity_ref
-        .get::<units::UnitType>()
-        .map(|t| format!("{:?}", t))
+        .get::<units::UnitTypeId>()
+        .map(|t| t.id().to_string())
         .unwrap_or_else(|| "unknown".into());
 
     let pos = entity_ref.get::<UnitPos>();
@@ -556,20 +551,7 @@ fn handle_faction_spawn(In(params): In<Option<Value>>, world: &mut World) -> Brp
             data: None,
         })?;
 
-    let faction = match name {
-        "combine" => Faction::Combine,
-        "covenant" => Faction::Covenant,
-        "ironborn" => Faction::Ironborn,
-        "hollow" => Faction::Hollow,
-        other => {
-            return Err(BrpError {
-                code: -32602,
-                message: format!("unknown faction: {other}"),
-                data: None,
-            });
-        }
-    };
-
+    let faction = Faction::new(name);
     let id = world.spawn(FactionBundle::new(faction)).id().to_bits();
     Ok(serde_json::json!({ "entity_id": id }))
 }
@@ -669,30 +651,18 @@ fn handle_resources_spend(In(params): In<Option<Value>>, world: &mut World) -> B
     Ok(serde_json::json!({ "success": success }))
 }
 
-fn parse_building_type(s: &str) -> Result<BuildingType, BrpError> {
-    use BuildingType::*;
-    match s {
-        "refinery" => Ok(Refinery),
-        "scrapyard" => Ok(Scrapyard),
-        "recruitment_office" => Ok(RecruitmentOffice),
-        "barracks" => Ok(Barracks),
-        "motor_pool" => Ok(MotorPool),
-        "foundry" => Ok(Foundry),
-        "airfield" => Ok(Airfield),
-        "workshop" => Ok(Workshop),
-        "command_bunker" => Ok(CommandBunker),
-        "research_lab" => Ok(ResearchLab),
-        "supply_depot" => Ok(SupplyDepot),
-        "watchtower" => Ok(Watchtower),
-        "repair_bay" => Ok(RepairBay),
-        "pillbox" => Ok(Pillbox),
-        "aa_gun" => Ok(AAGun),
-        "tank_trap" => Ok(TankTrap),
-        other => Err(BrpError {
-            code: -32602,
-            message: format!("unknown building_type: {other}"),
-            data: None,
-        }),
+fn parse_building_type(s: &str) -> Result<BuildingTypeId, BrpError> {
+    // Accept any lowercase kebab-case building type string
+    Ok(BuildingTypeId::new(s))
+}
+
+fn normalize_unit_type_id(s: &str) -> String {
+    match s.to_lowercase().replace(' ', "_").as_str() {
+        "rifleman" | "riflemen" => "riflemen".to_string(),
+        "heavy_weapons" | "heavyweapons" | "heavy_weapon" => "heavy_weapons".to_string(),
+        "light_vehicle" | "lightvehicle" => "light_vehicle".to_string(),
+        "heavy_armor" | "heavyarmor" | "heavy_armour" | "heavyarmour" => "heavy_armor".to_string(),
+        other => other.to_string(),
     }
 }
 
@@ -755,7 +725,8 @@ fn handle_building_place(In(params): In<Option<Value>>, world: &mut World) -> Br
         data: None,
     })?;
 
-    let cost = building_cost(&building_type);
+    let loaded = world.resource::<LoadedFactions>().clone();
+    let cost = building_cost(&building_type, &loaded);
 
     // Look up the faction enum on the FactionEntity component.
     let faction = {
@@ -795,10 +766,10 @@ fn handle_building_place(In(params): In<Option<Value>>, world: &mut World) -> Br
 
     let bt_for_query = building_type.clone();
     let entity = world
-        .spawn(BuildingBundle::new(building_type, faction, x, y))
+        .spawn(BuildingBundle::new(building_type, faction, x, y, &loaded))
         .id();
 
-    if !building_produces(&bt_for_query).is_empty() {
+    if !building_produces(&bt_for_query, &loaded).is_empty() {
         world.entity_mut(entity).insert(ProductionQueue::default());
     }
 
@@ -828,7 +799,7 @@ fn handle_building_status(In(params): In<Option<Value>>, world: &mut World) -> B
         data: None,
     })?;
 
-    let bt = er.get::<BuildingType>().ok_or_else(|| BrpError {
+    let bt = er.get::<BuildingTypeId>().ok_or_else(|| BrpError {
         code: -32602,
         message: "entity is not a building".into(),
         data: None,
@@ -841,10 +812,10 @@ fn handle_building_status(In(params): In<Option<Value>>, world: &mut World) -> B
     let under = er.get::<UnderConstruction>().is_some();
 
     Ok(serde_json::json!({
-        "building_type": format!("{:?}", bt),
+        "building_type": bt.id(),
         "pos_x": pos.map(|p| p.pos.x),
         "pos_y": pos.map(|p| p.pos.y),
-        "faction": faction.map(|f| format!("{:?}", f)),
+        "faction": faction.map(|f| f.id().to_string()),
         "health_current": h.map(|h| h.current),
         "health_max": h.map(|h| h.max),
         "construction_elapsed": cp.map(|c| c.elapsed),
@@ -855,17 +826,7 @@ fn handle_building_status(In(params): In<Option<Value>>, world: &mut World) -> B
 }
 
 fn parse_faction(s: &str) -> Result<Faction, BrpError> {
-    match s {
-        "combine" => Ok(Faction::Combine),
-        "covenant" => Ok(Faction::Covenant),
-        "ironborn" => Ok(Faction::Ironborn),
-        "hollow" => Ok(Faction::Hollow),
-        other => Err(BrpError {
-            code: -32602,
-            message: format!("unknown faction: {other}"),
-            data: None,
-        }),
-    }
+    Ok(Faction::new(&s.to_lowercase()))
 }
 
 fn parse_playable_faction(s: &str) -> Result<PlayableFaction, BrpError> {
@@ -883,9 +844,9 @@ fn parse_playable_faction(s: &str) -> Result<PlayableFaction, BrpError> {
 
 fn playable_to_map_faction(f: &PlayableFaction) -> Faction {
     match f {
-        PlayableFaction::Combine => Faction::Combine,
-        PlayableFaction::Ironborn => Faction::Ironborn,
-        PlayableFaction::Handler => Faction::Combine,
+        PlayableFaction::Combine => Faction::combine(),
+        PlayableFaction::Ironborn => Faction::ironborn(),
+        PlayableFaction::Handler => Faction::combine(),
     }
 }
 
@@ -981,25 +942,12 @@ fn handle_point_status(In(params): In<Option<Value>>, world: &mut World) -> BrpR
         "pos_x": cp.pos.x,
         "pos_y": cp.pos.y,
         "capture_radius": cp.capture_radius,
-        "owner": cp.owner.as_ref().map(|f| format!("{:?}", f)),
-        "contesting": cp.contesting.as_ref().map(|f| format!("{:?}", f)),
+        "owner": cp.owner.as_ref().map(|f| f.id().to_string()),
+        "contesting": cp.contesting.as_ref().map(|f| f.id().to_string()),
         "capture_progress": cp.capture_progress,
     }))
 }
 
-fn parse_unit_type(s: &str) -> Result<units::UnitType, BrpError> {
-    match s {
-        "rifleman" | "riflemen" => Ok(units::UnitType::Riflemen),
-        "heavy_weapons" => Ok(units::UnitType::HeavyWeapons),
-        "light_vehicle" => Ok(units::UnitType::LightVehicle),
-        "heavy_armor" => Ok(units::UnitType::HeavyArmor),
-        other => Err(BrpError {
-            code: -32602,
-            message: format!("unknown unit_type: {other}"),
-            data: None,
-        }),
-    }
-}
 
 /// BRP handler for "production/enqueue": { faction_entity, building_entity, unit_type }
 fn handle_production_enqueue(In(params): In<Option<Value>>, world: &mut World) -> BrpResult {
@@ -1019,11 +967,12 @@ fn handle_production_enqueue(In(params): In<Option<Value>>, world: &mut World) -
         message: "building_entity required".into(),
         data: None,
     })?;
-    let unit_type = parse_unit_type(params["unit_type"].as_str().ok_or_else(|| BrpError {
+    let unit_type_raw = params["unit_type"].as_str().ok_or_else(|| BrpError {
         code: -32602,
         message: "unit_type required".into(),
         data: None,
-    })?)?;
+    })?;
+    let unit_type = normalize_unit_type_id(unit_type_raw);
 
     let faction_entity = Entity::try_from_bits(faction_id).map_err(|_| BrpError {
         code: -32602,
@@ -1043,7 +992,7 @@ fn handle_production_enqueue(In(params): In<Option<Value>>, world: &mut World) -
             message: format!("building entity {building_id} not found"),
             data: None,
         })?;
-        let bt = r.get::<BuildingType>().cloned().ok_or_else(|| BrpError {
+        let bt = r.get::<BuildingTypeId>().cloned().ok_or_else(|| BrpError {
             code: -32602,
             message: "entity is not a building".into(),
             data: None,
@@ -1053,7 +1002,8 @@ fn handle_production_enqueue(In(params): In<Option<Value>>, world: &mut World) -
     };
 
     // Pay from faction pool, then enqueue on building.
-    let cost = production::unit_production_cost(&unit_type);
+    let loaded = world.resource::<LoadedFactions>().clone();
+    let cost = production::unit_production_cost(&unit_type, &loaded);
     {
         let mut fm = world.get_entity_mut(faction_entity).map_err(|_| BrpError {
             code: -32602,
@@ -1073,10 +1023,10 @@ fn handle_production_enqueue(In(params): In<Option<Value>>, world: &mut World) -
                 data: None,
             });
         }
-        if !building_produces(&bt).contains(&unit_type) {
+        if !building_produces(&bt, &loaded).iter().any(|s| *s == unit_type.as_str()) {
             return Err(BrpError {
                 code: -32000,
-                message: format!("{:?} cannot produce {:?}", bt, unit_type),
+                message: format!("{} cannot produce {}", bt.id(), unit_type),
                 data: None,
             });
         }
@@ -1157,7 +1107,7 @@ fn handle_production_enqueue(In(params): In<Option<Value>>, world: &mut World) -
             data: None,
         });
     }
-    queue.jobs.push(unit_type);
+    queue.jobs.push(unit_type.clone());
 
     // Suppress unused-import warning when EnqueueError isn't matched here.
     let _: Option<EnqueueError> = None;
@@ -1194,11 +1144,17 @@ fn handle_production_queue_status(In(params): In<Option<Value>>, world: &mut Wor
         data: None,
     })?;
 
-    let jobs: Vec<String> = q.jobs.iter().map(|u| format!("{:?}", u)).collect();
+    let jobs: Vec<String> = q.jobs.iter().cloned().collect();
+    let progress = q.progress;
+    let head_unit = q.jobs.first().cloned();
+    drop(r);
+
+    let loaded = world.resource::<LoadedFactions>().clone();
+    let head_total = head_unit.as_deref().map(|u| production::unit_production_seconds(u, &loaded));
     Ok(serde_json::json!({
         "jobs": jobs,
-        "progress": q.progress,
-        "head_total": q.jobs.first().map(|u| production::unit_production_seconds(u)),
+        "progress": progress,
+        "head_total": head_total,
     }))
 }
 
@@ -1523,9 +1479,9 @@ pub fn wipe_world_entities(world: &mut World) {
     {
         let mut q = world.query_filtered::<Entity, Or<(
             With<resources::FactionEntity>,
-            With<units::UnitType>,
+            With<units::UnitTypeId>,
             With<map::ControlPoint>,
-            With<BuildingType>,
+            With<BuildingTypeId>,
             With<Hero>,
             With<map::Tile>,
             With<Mission>,
@@ -1805,10 +1761,10 @@ fn handle_mission_select(In(params): In<Option<Value>>, world: &mut World) -> Br
         (mt, mf, idx)
     };
 
-    let opponent = match map_faction {
-        Faction::Combine => Faction::Ironborn,
-        Faction::Ironborn => Faction::Combine,
-        _ => Faction::Hollow,
+    let opponent = match map_faction.id() {
+        "combine" => Faction::ironborn(),
+        "ironborn" => Faction::combine(),
+        _ => Faction::hollow(),
     };
 
     let mission_entity = world
@@ -1837,7 +1793,7 @@ fn handle_mission_select(In(params): In<Option<Value>>, world: &mut World) -> Br
     Ok(serde_json::json!({
         "mission_entity": mission_entity.to_bits(),
         "mission_type": format!("{:?}", mission_type),
-        "opponent": format!("{:?}", opponent),
+        "opponent": opponent.id(),
     }))
 }
 
@@ -1858,7 +1814,7 @@ fn snapshot_world(world: &mut World) -> Value {
         let mut q = world.query::<(&resources::FactionEntity, &resources::ResourcePool)>();
         for (fe, pool) in q.iter(world) {
             factions.push(serde_json::json!({
-                "faction": format!("{:?}", fe.faction),
+                "faction": fe.faction.id(),
                 "fuel": pool.fuel,
                 "scrap": pool.scrap,
                 "manpower": pool.manpower,
@@ -1867,12 +1823,12 @@ fn snapshot_world(world: &mut World) -> Value {
     }
     let mut units: Vec<Value> = Vec::new();
     {
-        let mut q = world.query::<(&units::UnitType, &units::UnitPos, &map::Faction, &Health)>();
+        let mut q = world.query::<(&units::UnitTypeId, &units::UnitPos, &map::Faction, &Health)>();
         for (ut, pos, faction, h) in q.iter(world) {
             units.push(serde_json::json!({
-                "unit_type": format!("{:?}", ut),
+                "unit_type": ut.id(),
                 "x": pos.pos.x, "y": pos.pos.y,
-                "faction": format!("{:?}", faction),
+                "faction": faction.id(),
                 "health_current": h.current,
                 "health_max": h.max,
             }));
@@ -1891,9 +1847,9 @@ fn restore_world(world: &mut World, snapshot: &Value) -> Result<u32, BrpError> {
     {
         let mut q = world.query_filtered::<Entity, Or<(
             With<resources::FactionEntity>,
-            With<units::UnitType>,
+            With<units::UnitTypeId>,
             With<map::ControlPoint>,
-            With<BuildingType>,
+            With<BuildingTypeId>,
             With<Hero>,
             With<map::Tile>,
             With<Mission>,
@@ -1947,8 +1903,8 @@ fn restore_world(world: &mut World, snapshot: &Value) -> Result<u32, BrpError> {
             let y = u["y"].as_i64().unwrap_or(0) as i32;
             let faction_name = u["faction"].as_str().unwrap_or("Combine").to_lowercase();
             let faction = parse_faction(&faction_name)?;
-            // For now, only Riflemen are restorable — extend per-type as needed.
-            let entity = world.spawn(RiflemanBundle::with_faction(x, y, faction)).id();
+            // For now, use default_riflemen as a fallback when restoring.
+            let entity = world.spawn(UnitBundle::default_riflemen(faction, x, y)).id();
             world.entity_mut(entity).insert(units::HomeBase { pos: GridPos { x, y } });
             // Apply HP if present.
             if let Some(hc) = u["health_current"].as_f64() {
@@ -2287,8 +2243,8 @@ fn handle_mission_status(In(params): In<Option<Value>>, world: &mut World) -> Br
     })?;
     Ok(serde_json::json!({
         "mission_type": format!("{:?}", m.mission_type),
-        "player": format!("{:?}", m.player_faction),
-        "opponent": format!("{:?}", m.opponent_faction),
+        "player": m.player_faction.id(),
+        "opponent": m.opponent_faction.id(),
         "status": format!("{:?}", m.status),
         "elapsed": m.elapsed,
         "deadline": m.deadline,
@@ -2432,9 +2388,9 @@ fn handle_dev_reset(In(_params): In<Option<Value>>, world: &mut World) -> BrpRes
     {
         let mut q = world.query_filtered::<Entity, Or<(
             With<resources::FactionEntity>,
-            With<units::UnitType>,
+            With<units::UnitTypeId>,
             With<map::ControlPoint>,
-            With<BuildingType>,
+            With<BuildingTypeId>,
             With<Hero>,
             With<map::Tile>,
             With<Mission>,
@@ -2487,7 +2443,7 @@ fn handle_world_list(In(params): In<Option<Value>>, world: &mut World) -> BrpRes
             for (e, fe, pool, trickle, pop) in q.iter(world) {
                 out.push(serde_json::json!({
                     "entity_id": e.to_bits(),
-                    "faction": format!("{:?}", fe.faction),
+                    "faction": fe.faction.id(),
                     "fuel": pool.fuel,
                     "scrap": pool.scrap,
                     "manpower": pool.manpower,
@@ -2504,7 +2460,7 @@ fn handle_world_list(In(params): In<Option<Value>>, world: &mut World) -> BrpRes
             let mut out = Vec::new();
             let mut q = world.query::<(
                 Entity,
-                &units::UnitType,
+                &units::UnitTypeId,
                 &UnitPos,
                 &Faction,
                 &Health,
@@ -2512,8 +2468,8 @@ fn handle_world_list(In(params): In<Option<Value>>, world: &mut World) -> BrpRes
             for (e, ut, pos, faction, h) in q.iter(world) {
                 out.push(serde_json::json!({
                     "entity_id": e.to_bits(),
-                    "unit_type": format!("{:?}", ut),
-                    "faction": format!("{:?}", faction),
+                    "unit_type": ut.id(),
+                    "faction": faction.id(),
                     "x": pos.pos.x,
                     "y": pos.pos.y,
                     "health": h.current,
@@ -2526,7 +2482,7 @@ fn handle_world_list(In(params): In<Option<Value>>, world: &mut World) -> BrpRes
             let mut out = Vec::new();
             let mut q = world.query::<(
                 Entity,
-                &BuildingType,
+                &BuildingTypeId,
                 &BuildingPos,
                 &Faction,
                 &Health,
@@ -2535,8 +2491,8 @@ fn handle_world_list(In(params): In<Option<Value>>, world: &mut World) -> BrpRes
             for (e, bt, pos, faction, h, built) in q.iter(world) {
                 out.push(serde_json::json!({
                     "entity_id": e.to_bits(),
-                    "building_type": format!("{:?}", bt),
-                    "faction": format!("{:?}", faction),
+                    "building_type": bt.id(),
+                    "faction": faction.id(),
                     "x": pos.pos.x,
                     "y": pos.pos.y,
                     "built": built.is_some(),
@@ -2555,7 +2511,7 @@ fn handle_world_list(In(params): In<Option<Value>>, world: &mut World) -> BrpRes
                     "point_type": format!("{:?}", cp.point_type),
                     "x": cp.pos.x,
                     "y": cp.pos.y,
-                    "owner": cp.owner.as_ref().map(|f| format!("{:?}", f)),
+                    "owner": cp.owner.as_ref().map(|f| f.id().to_string()),
                     "capture_progress": cp.capture_progress,
                 }));
             }
@@ -2568,8 +2524,8 @@ fn handle_world_list(In(params): In<Option<Value>>, world: &mut World) -> BrpRes
                 out.push(serde_json::json!({
                     "entity_id": e.to_bits(),
                     "mission_type": format!("{:?}", m.mission_type),
-                    "player": format!("{:?}", m.player_faction),
-                    "opponent": format!("{:?}", m.opponent_faction),
+                    "player": m.player_faction.id(),
+                    "opponent": m.opponent_faction.id(),
                     "elapsed": m.elapsed,
                     "deadline": m.deadline,
                     "status": format!("{:?}", m.status),
@@ -2584,7 +2540,7 @@ fn handle_world_list(In(params): In<Option<Value>>, world: &mut World) -> BrpRes
                 out.push(serde_json::json!({
                     "entity_id": e.to_bits(),
                     "name": hero.name,
-                    "faction": format!("{:?}", faction),
+                    "faction": faction.id(),
                     "x": pos.pos.x,
                     "y": pos.pos.y,
                     "health": h.current,
@@ -2688,17 +2644,18 @@ fn handle_game_abandon_mission(
 
 fn spawn_built_building(
     world: &mut World,
-    bt: BuildingType,
+    bt: BuildingTypeId,
     faction: Faction,
     x: i32,
     y: i32,
+    loaded: &LoadedFactions,
 ) {
-    let id = world.spawn(BuildingBundle::new(bt.clone(), faction, x, y)).id();
+    let id = world.spawn(BuildingBundle::new(bt.clone(), faction, x, y, loaded)).id();
     if let Ok(mut em) = world.get_entity_mut(id) {
         em.remove::<UnderConstruction>();
         em.insert(Built);
     }
-    if !production::building_produces(&bt).is_empty() {
+    if !building_produces(&bt, loaded).is_empty() {
         if let Ok(mut em) = world.get_entity_mut(id) {
             em.insert(ProductionQueue::default());
         }
@@ -2706,15 +2663,15 @@ fn spawn_built_building(
 }
 
 fn spawn_unit_at(world: &mut World, faction: Faction, x: i32, y: i32) {
-    spawn_unit_type_at(world, faction, units::UnitType::Riflemen, x, y);
+    spawn_unit_type_at(world, faction, "riflemen", x, y);
 }
 
-fn spawn_unit_type_at(world: &mut World, faction: Faction, unit_type: units::UnitType, x: i32, y: i32) {
-    let id = match unit_type {
-        units::UnitType::Riflemen => world.spawn(RiflemanBundle::with_faction(x, y, faction)).id(),
-        units::UnitType::HeavyWeapons => world.spawn(units::HeavyWeaponsBundle::with_faction(x, y, faction)).id(),
-        units::UnitType::LightVehicle => world.spawn(units::LightVehicleBundle::with_faction(x, y, faction)).id(),
-        units::UnitType::HeavyArmor => world.spawn(units::HeavyArmorBundle::with_faction(x, y, faction)).id(),
+fn spawn_unit_type_at(world: &mut World, faction: Faction, unit_id: &str, x: i32, y: i32) {
+    let loaded = world.resource::<LoadedFactions>().clone();
+    let id = if let Some(def) = loaded.units.get(unit_id) {
+        world.spawn(UnitBundle::from_def(def, faction, x, y)).id()
+    } else {
+        world.spawn(UnitBundle::default_riflemen(faction, x, y)).id()
     };
     if let Ok(mut em) = world.get_entity_mut(id) {
         em.insert(units::HomeBase { pos: GridPos { x, y } });
@@ -2741,112 +2698,114 @@ fn apply_faction_loadout(
     // Player gets a progressively smaller starting loadout.
     let effective_index = if is_player { mission_index } else { 0 };
 
-    match faction {
-        Faction::Combine => {
+    let loaded = world.resource::<LoadedFactions>().clone();
+
+    match faction.id() {
+        "combine" => {
             // Index 0: full base (CommandBunker + Refinery + Barracks + Scrapyard + SupplyDepot, 4 Riflemen + 1 HeavyWeapons)
             // Index 1: light  (CommandBunker + Refinery, 2 Riflemen)
             // Index 2: minimal (CommandBunker only, 1 Rifleman)
             // Index 3-4: economic start (Refinery only, 1 Rifleman)
             match effective_index {
                 0 => {
-                    spawn_built_building(world, BuildingType::CommandBunker, faction.clone(), bx, by);
-                    spawn_built_building(world, BuildingType::Refinery, faction.clone(), bx + 2, by);
-                    spawn_built_building(world, BuildingType::Barracks, faction.clone(), bx, by + 2);
+                    spawn_built_building(world, BuildingTypeId::new("command_bunker"), faction.clone(), bx, by, &loaded);
+                    spawn_built_building(world, BuildingTypeId::new("refinery"), faction.clone(), bx + 2, by, &loaded);
+                    spawn_built_building(world, BuildingTypeId::new("barracks"), faction.clone(), bx, by + 2, &loaded);
                     for i in 0..3 {
-                        spawn_unit_type_at(world, faction.clone(), units::UnitType::Riflemen, bx + i, by + 4);
+                        spawn_unit_type_at(world, faction.clone(), "riflemen", bx + i, by + 4);
                     }
-                    spawn_unit_type_at(world, faction.clone(), units::UnitType::HeavyWeapons, bx + 3, by + 4);
+                    spawn_unit_type_at(world, faction.clone(), "heavy_weapons", bx + 3, by + 4);
                 }
                 1 => {
-                    spawn_built_building(world, BuildingType::CommandBunker, faction.clone(), bx, by);
-                    spawn_built_building(world, BuildingType::Refinery, faction.clone(), bx + 2, by);
+                    spawn_built_building(world, BuildingTypeId::new("command_bunker"), faction.clone(), bx, by, &loaded);
+                    spawn_built_building(world, BuildingTypeId::new("refinery"), faction.clone(), bx + 2, by, &loaded);
                     for i in 0..2 {
-                        spawn_unit_type_at(world, faction.clone(), units::UnitType::Riflemen, bx + i, by + 4);
+                        spawn_unit_type_at(world, faction.clone(), "riflemen", bx + i, by + 4);
                     }
                 }
                 2 => {
-                    spawn_built_building(world, BuildingType::CommandBunker, faction.clone(), bx, by);
-                    spawn_unit_type_at(world, faction.clone(), units::UnitType::Riflemen, bx, by + 3);
+                    spawn_built_building(world, BuildingTypeId::new("command_bunker"), faction.clone(), bx, by, &loaded);
+                    spawn_unit_type_at(world, faction.clone(), "riflemen", bx, by + 3);
                 }
                 _ => {
                     // Missions 3+: economic start — Refinery only, 1 Rifleman
-                    spawn_built_building(world, BuildingType::Refinery, faction.clone(), bx, by);
-                    spawn_unit_type_at(world, faction.clone(), units::UnitType::Riflemen, bx, by + 3);
+                    spawn_built_building(world, BuildingTypeId::new("refinery"), faction.clone(), bx, by, &loaded);
+                    spawn_unit_type_at(world, faction.clone(), "riflemen", bx, by + 3);
                 }
             }
             // Full base for AI (effective_index == 0)
             if effective_index == 0 && !is_player {
-                spawn_built_building(world, BuildingType::Scrapyard, faction.clone(), bx + 2, by + 2);
-                spawn_built_building(world, BuildingType::SupplyDepot, faction.clone(), bx - 1, by + 1);
-                spawn_unit_type_at(world, faction.clone(), units::UnitType::Riflemen, bx + 4, by + 4);
+                spawn_built_building(world, BuildingTypeId::new("scrapyard"), faction.clone(), bx + 2, by + 2, &loaded);
+                spawn_built_building(world, BuildingTypeId::new("supply_depot"), faction.clone(), bx - 1, by + 1, &loaded);
+                spawn_unit_type_at(world, faction.clone(), "riflemen", bx + 4, by + 4);
             }
         }
-        Faction::Ironborn => {
+        "ironborn" => {
             match effective_index {
                 0 => {
-                    spawn_built_building(world, BuildingType::Foundry, faction.clone(), bx, by);
-                    spawn_built_building(world, BuildingType::Scrapyard, faction.clone(), bx + 2, by);
-                    spawn_built_building(world, BuildingType::RepairBay, faction.clone(), bx, by + 2);
+                    spawn_built_building(world, BuildingTypeId::new("foundry"), faction.clone(), bx, by, &loaded);
+                    spawn_built_building(world, BuildingTypeId::new("scrapyard"), faction.clone(), bx + 2, by, &loaded);
+                    spawn_built_building(world, BuildingTypeId::new("repair_bay"), faction.clone(), bx, by + 2, &loaded);
                     for i in 0..3 {
-                        spawn_unit_type_at(world, faction.clone(), units::UnitType::Riflemen, bx + i, by + 4);
+                        spawn_unit_type_at(world, faction.clone(), "riflemen", bx + i, by + 4);
                     }
-                    spawn_unit_type_at(world, faction.clone(), units::UnitType::HeavyWeapons, bx + 3, by + 4);
+                    spawn_unit_type_at(world, faction.clone(), "heavy_weapons", bx + 3, by + 4);
                 }
                 1 => {
-                    spawn_built_building(world, BuildingType::Foundry, faction.clone(), bx, by);
-                    spawn_built_building(world, BuildingType::Scrapyard, faction.clone(), bx + 2, by);
+                    spawn_built_building(world, BuildingTypeId::new("foundry"), faction.clone(), bx, by, &loaded);
+                    spawn_built_building(world, BuildingTypeId::new("scrapyard"), faction.clone(), bx + 2, by, &loaded);
                     for i in 0..2 {
-                        spawn_unit_type_at(world, faction.clone(), units::UnitType::Riflemen, bx + i, by + 4);
+                        spawn_unit_type_at(world, faction.clone(), "riflemen", bx + i, by + 4);
                     }
                 }
                 2 => {
-                    spawn_built_building(world, BuildingType::Foundry, faction.clone(), bx, by);
-                    spawn_unit_type_at(world, faction.clone(), units::UnitType::Riflemen, bx, by + 3);
+                    spawn_built_building(world, BuildingTypeId::new("foundry"), faction.clone(), bx, by, &loaded);
+                    spawn_unit_type_at(world, faction.clone(), "riflemen", bx, by + 3);
                 }
                 _ => {
                     // Missions 3+: Foundry (primary economic building) + 1 Rifleman
-                    spawn_built_building(world, BuildingType::Foundry, faction.clone(), bx, by);
-                    spawn_unit_type_at(world, faction.clone(), units::UnitType::Riflemen, bx, by + 3);
+                    spawn_built_building(world, BuildingTypeId::new("foundry"), faction.clone(), bx, by, &loaded);
+                    spawn_unit_type_at(world, faction.clone(), "riflemen", bx, by + 3);
                 }
             }
             if effective_index == 0 && !is_player {
-                spawn_unit_type_at(world, faction.clone(), units::UnitType::LightVehicle, bx + 4, by + 4);
+                spawn_unit_type_at(world, faction.clone(), "light_vehicle", bx + 4, by + 4);
             }
         }
-        Faction::Covenant => {
+        "covenant" => {
             match effective_index {
                 0 => {
-                    spawn_built_building(world, BuildingType::CommandBunker, faction.clone(), bx, by);
-                    spawn_built_building(world, BuildingType::Pillbox, faction.clone(), bx + 3, by - 1);
-                    spawn_built_building(world, BuildingType::Workshop, faction.clone(), bx, by + 2);
+                    spawn_built_building(world, BuildingTypeId::new("command_bunker"), faction.clone(), bx, by, &loaded);
+                    spawn_built_building(world, BuildingTypeId::new("pillbox"), faction.clone(), bx + 3, by - 1, &loaded);
+                    spawn_built_building(world, BuildingTypeId::new("workshop"), faction.clone(), bx, by + 2, &loaded);
                     for i in 0..3 {
-                        spawn_unit_type_at(world, faction.clone(), units::UnitType::Riflemen, bx + i, by + 4);
+                        spawn_unit_type_at(world, faction.clone(), "riflemen", bx + i, by + 4);
                     }
-                    spawn_unit_type_at(world, faction.clone(), units::UnitType::HeavyWeapons, bx + 3, by + 4);
+                    spawn_unit_type_at(world, faction.clone(), "heavy_weapons", bx + 3, by + 4);
                 }
                 1 => {
-                    spawn_built_building(world, BuildingType::CommandBunker, faction.clone(), bx, by);
-                    spawn_built_building(world, BuildingType::Workshop, faction.clone(), bx, by + 2);
+                    spawn_built_building(world, BuildingTypeId::new("command_bunker"), faction.clone(), bx, by, &loaded);
+                    spawn_built_building(world, BuildingTypeId::new("workshop"), faction.clone(), bx, by + 2, &loaded);
                     for i in 0..2 {
-                        spawn_unit_type_at(world, faction.clone(), units::UnitType::Riflemen, bx + i, by + 4);
+                        spawn_unit_type_at(world, faction.clone(), "riflemen", bx + i, by + 4);
                     }
                 }
                 2 => {
-                    spawn_built_building(world, BuildingType::CommandBunker, faction.clone(), bx, by);
-                    spawn_unit_type_at(world, faction.clone(), units::UnitType::Riflemen, bx, by + 3);
+                    spawn_built_building(world, BuildingTypeId::new("command_bunker"), faction.clone(), bx, by, &loaded);
+                    spawn_unit_type_at(world, faction.clone(), "riflemen", bx, by + 3);
                 }
                 _ => {
                     // Missions 3+: Workshop (primary economic building) + 1 Rifleman
-                    spawn_built_building(world, BuildingType::Workshop, faction.clone(), bx, by);
-                    spawn_unit_type_at(world, faction.clone(), units::UnitType::Riflemen, bx, by + 3);
+                    spawn_built_building(world, BuildingTypeId::new("workshop"), faction.clone(), bx, by, &loaded);
+                    spawn_unit_type_at(world, faction.clone(), "riflemen", bx, by + 3);
                 }
             }
             if effective_index == 0 && !is_player {
-                spawn_built_building(world, BuildingType::Pillbox, faction.clone(), bx + 3, by + 1);
-                spawn_built_building(world, BuildingType::Watchtower, faction.clone(), bx + 3, by + 3);
+                spawn_built_building(world, BuildingTypeId::new("pillbox"), faction.clone(), bx + 3, by + 1, &loaded);
+                spawn_built_building(world, BuildingTypeId::new("watchtower"), faction.clone(), bx + 3, by + 3, &loaded);
             }
         }
-        Faction::Hollow => {
+        "hollow" | _ => {
             world.spawn(HollowSpawner::new(hollow::HollowMode::Consuming, bx, by));
         }
     }
@@ -2865,11 +2824,9 @@ fn apply_faction_loadout(
 
 /// Default opponent faction for a given player.
 fn default_opponent(player: &Faction) -> Faction {
-    match player {
-        Faction::Combine => Faction::Hollow,
-        Faction::Covenant => Faction::Hollow,
-        Faction::Ironborn => Faction::Combine,
-        Faction::Hollow => Faction::Combine,
+    match player.id() {
+        "ironborn" => Faction::combine(),
+        _ => Faction::hollow(),
     }
 }
 
@@ -2979,12 +2936,7 @@ pub fn setup_demo_scenario_with_spawns(
     }
 
     // Load mission script if one exists for this faction + mission index.
-    let faction_name = match player {
-        Faction::Combine => "combine",
-        Faction::Ironborn => "ironborn",
-        Faction::Covenant => "covenant",
-        Faction::Hollow => "hollow",
-    };
+    let faction_name = player.id();
     let script_name = format!("{faction_name}_m{mission_index}");
     if let Some(mut script_state) = world.get_resource_mut::<mission_script::ScriptState>() {
         script_state.load_script(&script_name);

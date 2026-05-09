@@ -10,9 +10,8 @@ use std::collections::{HashSet, VecDeque};
 use crate::beats::{BeatId, FiredBeats};
 use crate::map::{Faction, GridPos};
 use crate::mission::{Mission, MissionStatus};
-use crate::units::{
-    UnitType, RiflemanBundle, HeavyWeaponsBundle, LightVehicleBundle, HeavyArmorBundle, HomeBase,
-};
+use crate::units::{UnitBundle, HomeBase};
+use crate::factions::LoadedFactions;
 
 // ── Data types ────────────────────────────────────────────────────────────────
 
@@ -98,21 +97,17 @@ impl ScriptState {
 // ── Helper: parse faction string ──────────────────────────────────────────────
 
 fn parse_faction(s: &str) -> Faction {
-    match s.to_lowercase().as_str() {
-        "ironborn" => Faction::Ironborn,
-        "covenant" => Faction::Covenant,
-        "hollow" => Faction::Hollow,
-        _ => Faction::Combine,
-    }
+    Faction::new(&s.to_lowercase())
 }
 
-fn parse_unit_type(s: &str) -> UnitType {
-    match s.to_lowercase().replace(' ', "").as_str() {
-        "riflemen" | "rifleman" => UnitType::Riflemen,
-        "heavyweapons" | "heavyweapon" => UnitType::HeavyWeapons,
-        "lightvehicle" => UnitType::LightVehicle,
-        "heavyarmor" | "heavyarmour" => UnitType::HeavyArmor,
-        _ => UnitType::Riflemen,
+fn parse_unit_type_id(s: &str) -> String {
+    // Normalize common aliases to canonical IDs
+    match s.to_lowercase().replace(' ', "_").as_str() {
+        "rifleman" => "riflemen".to_string(),
+        "heavyweapons" | "heavy_weapon" | "heavyweapon" => "heavy_weapons".to_string(),
+        "lightvehicle" | "light_vehicle" => "light_vehicle".to_string(),
+        "heavyarmor" | "heavy_armor" | "heavyarmour" | "heavy_armour" => "heavy_armor".to_string(),
+        other => other.to_string(),
     }
 }
 
@@ -135,6 +130,7 @@ pub fn script_tick_system(
     fired_beats: Res<FiredBeats>,
     missions: Query<&Mission>,
     mut mission_q: Query<&mut Mission>,
+    loaded: Res<LoadedFactions>,
 ) {
     let dt = time.delta_secs();
 
@@ -209,31 +205,20 @@ pub fn script_tick_system(
                 }
                 Action::SpawnUnits { faction, unit_type, count, x, y } => {
                     let f = parse_faction(faction);
-                    let ut = parse_unit_type(unit_type);
+                    let unit_id = parse_unit_type_id(unit_type);
                     for i in 0..*count as i32 {
                         let spawn_x = x + (i % 4);
                         let spawn_y = y + (i / 4);
                         let home = GridPos { x: spawn_x, y: spawn_y };
-                        match ut {
-                            UnitType::Riflemen => {
-                                commands.spawn(RiflemanBundle::with_faction(spawn_x, spawn_y, f.clone()))
-                                    .insert(HomeBase { pos: home });
-                            }
-                            UnitType::HeavyWeapons => {
-                                commands.spawn(HeavyWeaponsBundle::with_faction(spawn_x, spawn_y, f.clone()))
-                                    .insert(HomeBase { pos: home });
-                            }
-                            UnitType::LightVehicle => {
-                                commands.spawn(LightVehicleBundle::with_faction(spawn_x, spawn_y, f.clone()))
-                                    .insert(HomeBase { pos: home });
-                            }
-                            UnitType::HeavyArmor => {
-                                commands.spawn(HeavyArmorBundle::with_faction(spawn_x, spawn_y, f.clone()))
-                                    .insert(HomeBase { pos: home });
-                            }
+                        if let Some(def) = loaded.units.get(&unit_id) {
+                            commands.spawn(UnitBundle::from_def(def, f.clone(), spawn_x, spawn_y))
+                                .insert(HomeBase { pos: home });
+                        } else {
+                            commands.spawn(UnitBundle::default_riflemen(f.clone(), spawn_x, spawn_y))
+                                .insert(HomeBase { pos: home });
                         }
                     }
-                    info!("[script] spawned {} {:?} ({}) at ({}, {})", count, ut, faction, x, y);
+                    info!("[script] spawned {} {} ({}) at ({}, {})", count, unit_id, faction, x, y);
                 }
                 Action::Objective { text } | Action::ChangeObjective { text } => {
                     script_state.current_objective = Some(text.clone());

@@ -3,9 +3,9 @@
 use bevy::prelude::*;
 use crate::map::{Faction, ControlPoint};
 use crate::mapgen::MissionType;
-use crate::buildings::{BuildingType, BuildingPos, Built};
+use crate::buildings::{BuildingTypeId, BuildingPos, Built};
 use crate::combat::{Health, Dead};
-use crate::units::{UnitType, UnitPos};
+use crate::units::{UnitTypeId, UnitPos};
 use crate::resources::FactionEntity;
 use std::collections::HashSet;
 
@@ -122,8 +122,8 @@ pub fn evaluate_status(
 pub fn mission_check_system(
     time: Res<Time>,
     mut missions: Query<&mut Mission>,
-    units: Query<&Faction, (With<UnitType>, Without<Dead>)>,
-    bunkers: Query<(&Faction, &BuildingType, &Health)>,
+    units: Query<&Faction, (With<UnitTypeId>, Without<Dead>)>,
+    bunkers: Query<(&Faction, &BuildingTypeId, &Health)>,
     points: Query<&ControlPoint>,
     factions: Query<&FactionEntity>,
 ) {
@@ -148,7 +148,7 @@ pub fn mission_check_system(
         let mut player_has_cmd = false;
         let mut opponent_has_cmd = false;
         for (f, bt, h) in &bunkers {
-            if matches!(bt, BuildingType::CommandBunker) && h.current > 0.0 {
+            if bt.id() == "command_bunker" && h.current > 0.0 {
                 if f == &m.player_faction { player_has_cmd = true; }
                 if f == &m.opponent_faction { opponent_has_cmd = true; }
             }
@@ -157,10 +157,10 @@ pub fn mission_check_system(
         // with; otherwise treat as alive (mission start grace).
         let any_player_bunker = bunkers
             .iter()
-            .any(|(f, bt, _)| f == &m.player_faction && matches!(bt, BuildingType::CommandBunker));
+            .any(|(f, bt, _)| f == &m.player_faction && bt.id() == "command_bunker");
         let any_opp_bunker = bunkers
             .iter()
-            .any(|(f, bt, _)| f == &m.opponent_faction && matches!(bt, BuildingType::CommandBunker));
+            .any(|(f, bt, _)| f == &m.opponent_faction && bt.id() == "command_bunker");
         if any_player_bunker { player_cmd = player_has_cmd; }
         if any_opp_bunker { opponent_cmd = opponent_has_cmd; }
 
@@ -198,7 +198,7 @@ pub fn mission_check_system(
 pub fn ffa_win_system(
     time: Res<Time>,
     mut missions: Query<&mut Mission>,
-    units: Query<(&Faction, Entity), (With<UnitType>, Without<Dead>)>,
+    units: Query<(&Faction, Entity), (With<UnitTypeId>, Without<Dead>)>,
     buildings: Query<(&Faction, Entity), (With<BuildingPos>, With<Built>, Without<Dead>)>,
 ) {
     let dt = time.delta_secs();
@@ -243,7 +243,7 @@ pub fn ffa_win_system(
 pub fn koth_win_system(
     time: Res<Time>,
     mut missions: Query<&mut Mission>,
-    units: Query<(&Faction, &UnitPos), (With<UnitType>, Without<Dead>)>,
+    units: Query<(&Faction, &UnitPos), (With<UnitTypeId>, Without<Dead>)>,
 ) {
     let dt = time.delta_secs();
     // Hill center for a 128×80 map

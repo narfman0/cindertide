@@ -66,11 +66,12 @@ pub struct FactionBundle {
 
 impl FactionBundle {
     pub fn new(faction: Faction) -> Self {
-        let (fuel, scrap, manpower) = match &faction {
-            Faction::Combine  => (800.0, 400.0, 100.0),
-            Faction::Ironborn => (400.0, 900.0, 120.0),
-            Faction::Covenant => (600.0, 600.0, 80.0),
-            Faction::Hollow   => (0.0, 0.0, 0.0),
+        let (fuel, scrap, manpower) = match faction.id() {
+            "combine"  => (800.0, 400.0, 100.0),
+            "ironborn" => (400.0, 900.0, 120.0),
+            "covenant" => (600.0, 600.0, 80.0),
+            "hollow"   => (0.0, 0.0, 0.0),
+            _          => (500.0, 500.0, 100.0),
         };
         Self {
             faction: FactionEntity { faction },
@@ -130,8 +131,8 @@ pub fn resource_trickle_system(
 /// and Built Supply Depots.
 pub fn pop_cap_system(
     mut factions: Query<(&FactionEntity, &mut PopCap)>,
-    units: Query<&Faction, (With<crate::units::UnitType>, Without<crate::heroes::Hero>)>,
-    depots: Query<(&Faction, &crate::buildings::BuildingType), With<crate::buildings::Built>>,
+    units: Query<&Faction, (With<crate::units::UnitTypeId>, Without<crate::heroes::Hero>)>,
+    depots: Query<(&Faction, &crate::buildings::BuildingTypeId), With<crate::buildings::Built>>,
 ) {
     use std::collections::HashMap;
 
@@ -142,7 +143,7 @@ pub fn pop_cap_system(
 
     let mut depot_counts: HashMap<Faction, u32> = HashMap::new();
     for (f, bt) in &depots {
-        if matches!(bt, crate::buildings::BuildingType::SupplyDepot) {
+        if bt.id() == "supply_depot" {
             *depot_counts.entry(f.clone()).or_insert(0) += 1;
         }
     }
@@ -245,16 +246,16 @@ mod tests {
 
     #[test]
     fn faction_bundle_default_starting_pool() {
-        let b = FactionBundle::new(Faction::Combine);
+        let b = FactionBundle::new(Faction::combine());
         assert_eq!(b.pool.fuel, 800.0);
         assert_eq!(b.pool.scrap, 400.0);
         assert_eq!(b.pool.manpower, 100.0);
-        assert_eq!(b.faction.faction, Faction::Combine);
+        assert_eq!(b.faction.faction, Faction::combine());
     }
 
     #[test]
     fn faction_bundle_pop_cap_starts_at_base() {
-        let b = FactionBundle::new(Faction::Combine);
+        let b = FactionBundle::new(Faction::combine());
         assert_eq!(b.pop_cap.current, 0);
         assert_eq!(b.pop_cap.max, BASE_POP_CAP);
     }

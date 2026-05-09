@@ -6,8 +6,8 @@ use bevy::prelude::*;
 use std::collections::HashMap;
 
 use crate::map::{Faction, GridPos, Tile};
-use crate::units::{UnitPos, UnitType};
-use crate::buildings::{BuildingPos, BuildingType, Built};
+use crate::units::{UnitPos, UnitTypeId};
+use crate::buildings::{BuildingPos, BuildingTypeId, Built};
 use crate::combat::{AttackTarget, Health, AttackMoveOrder, InCover};
 use crate::resources::FactionEntity;
 use crate::ai::{AiController, AiStates};
@@ -26,7 +26,7 @@ impl LuaAiEngine {
     /// `default.lua` source so the binary always has a working script.
     pub fn load(faction: &Faction) -> Result<Self, LuaError> {
         let faction_name = faction_to_script_name(faction);
-        let path = format!("assets/ai/{}.lua", faction_name);
+        let path = format!("assets/ai/{}.lua", &faction_name);
 
         let script = std::fs::read_to_string(&path)
             .or_else(|_| std::fs::read_to_string("assets/ai/default.lua"))
@@ -38,13 +38,8 @@ impl LuaAiEngine {
     }
 }
 
-fn faction_to_script_name(faction: &Faction) -> &'static str {
-    match faction {
-        Faction::Ironborn => "ironborn",
-        Faction::Combine  => "combine",
-        Faction::Covenant => "covenant",
-        Faction::Hollow   => "hollow",
-    }
+fn faction_to_script_name(faction: &Faction) -> String {
+    faction.id().to_lowercase()
 }
 
 // Minimal embedded fallback so the binary compiles without file-system assets.
@@ -83,22 +78,12 @@ pub struct LuaAiEngines(pub HashMap<Faction, LuaAiEngine>);
 // Helper: build the Lua state table for one faction
 // ------------------------------------------------------------------
 
-fn faction_name_str(f: &Faction) -> &'static str {
-    match f {
-        Faction::Combine  => "Combine",
-        Faction::Ironborn => "Ironborn",
-        Faction::Covenant => "Covenant",
-        Faction::Hollow   => "Hollow",
-    }
+fn faction_name_str(f: &Faction) -> String {
+    f.id().to_string()
 }
 
-fn unit_type_str(ut: &UnitType) -> &'static str {
-    match ut {
-        UnitType::Riflemen    => "Riflemen",
-        UnitType::HeavyWeapons => "HeavyWeapons",
-        UnitType::LightVehicle => "LightVehicle",
-        UnitType::HeavyArmor  => "HeavyArmor",
-    }
+fn unit_type_str(ut: &UnitTypeId) -> String {
+    ut.id().to_string()
 }
 
 // ------------------------------------------------------------------
@@ -144,8 +129,8 @@ pub fn lua_ai_system(
         }
 
         // Build state table data
-        let my_units: Vec<(Entity, i32, i32, f32, f32, bool, &'static str)> = {
-            let mut q = world.query::<(Entity, &Faction, &UnitPos, &Health, Option<&InCover>, &UnitType)>();
+        let my_units: Vec<(Entity, i32, i32, f32, f32, bool, String)> = {
+            let mut q = world.query::<(Entity, &Faction, &UnitPos, &Health, Option<&InCover>, &UnitTypeId)>();
             q.iter(world)
                 .filter(|(_, f, _, _, _, _)| *f == faction)
                 .map(|(e, _, pos, hp, cover, ut)| {
@@ -154,25 +139,19 @@ pub fn lua_ai_system(
                 .collect()
         };
 
-        let my_buildings: Vec<(Entity, i32, i32, f32, &'static str)> = {
-            let mut q = world.query_filtered::<(Entity, &Faction, &BuildingPos, &Health, &BuildingType), With<Built>>();
+        let my_buildings: Vec<(Entity, i32, i32, f32, String)> = {
+            let mut q = world.query_filtered::<(Entity, &Faction, &BuildingPos, &Health, &BuildingTypeId), With<Built>>();
             q.iter(world)
                 .filter(|(_, f, _, _, _)| *f == faction)
                 .map(|(e, _, pos, hp, bt)| {
-                    let type_str: &'static str = match bt {
-                        BuildingType::CommandBunker => "CommandBunker",
-                        BuildingType::Barracks => "Barracks",
-                        BuildingType::Refinery => "Refinery",
-                        _ => "Building",
-                    };
-                    (e, pos.pos.x, pos.pos.y, hp.current, type_str)
+                    (e, pos.pos.x, pos.pos.y, hp.current, bt.id().to_string())
                 })
                 .collect()
         };
 
         // Enemy visible: simple approximation — all non-faction units
-        let enemy_visible: Vec<(Entity, i32, i32, f32, &'static str, &'static str)> = {
-            let mut q = world.query::<(Entity, &Faction, &UnitPos, &Health, &UnitType)>();
+        let enemy_visible: Vec<(Entity, i32, i32, f32, String, String)> = {
+            let mut q = world.query::<(Entity, &Faction, &UnitPos, &Health, &UnitTypeId)>();
             q.iter(world)
                 .filter(|(_, f, _, _, _)| *f != faction)
                 .map(|(e, f, pos, hp, ut)| {
@@ -253,9 +232,9 @@ pub enum LuaCommand {
 fn call_ai_tick(
     engine: &LuaAiEngine,
     faction: &Faction,
-    my_units: &[(Entity, i32, i32, f32, f32, bool, &'static str)],
-    my_buildings: &[(Entity, i32, i32, f32, &'static str)],
-    enemy_visible: &[(Entity, i32, i32, f32, &'static str, &'static str)],
+    my_units: &[(Entity, i32, i32, f32, f32, bool, String)],
+    my_buildings: &[(Entity, i32, i32, f32, String)],
+    enemy_visible: &[(Entity, i32, i32, f32, String, String)],
     cover_positions: &[(i32, i32)],
     focus_fire: bool,
 ) -> Result<Vec<LuaCommand>, LuaError> {
@@ -271,7 +250,7 @@ fn call_ai_tick(
         let u = lua.create_table()?;
         // Use entity index as a stable integer ID
         u.set("id", entity.index() as i64)?;
-        u.set("type", *ut)?;
+        u.set("type", ut.as_str())?;
         u.set("x", *x)?;
         u.set("y", *y)?;
         u.set("health", *hp)?;
@@ -286,7 +265,7 @@ fn call_ai_tick(
     for (i, (entity, x, y, hp, bt)) in my_buildings.iter().enumerate() {
         let b = lua.create_table()?;
         b.set("id", entity.index() as i64)?;
-        b.set("type", *bt)?;
+        b.set("type", bt.as_str())?;
         b.set("x", *x)?;
         b.set("y", *y)?;
         b.set("health", *hp)?;
@@ -299,11 +278,11 @@ fn call_ai_tick(
     for (i, (entity, x, y, hp, ut, f)) in enemy_visible.iter().enumerate() {
         let e = lua.create_table()?;
         e.set("id", entity.index() as i64)?;
-        e.set("type", *ut)?;
+        e.set("type", ut.as_str())?;
         e.set("x", *x)?;
         e.set("y", *y)?;
         e.set("health", *hp)?;
-        e.set("faction", *f)?;
+        e.set("faction", f.as_str())?;
         enemy_tbl.set(i + 1, e)?;
     }
     state.set("enemy_visible", enemy_tbl)?;
@@ -361,8 +340,8 @@ fn apply_lua_commands(
     world: &mut World,
     faction: &Faction,
     commands: &[LuaCommand],
-    my_units: &[(Entity, i32, i32, f32, f32, bool, &'static str)],
-    enemy_visible: &[(Entity, i32, i32, f32, &'static str, &'static str)],
+    my_units: &[(Entity, i32, i32, f32, f32, bool, String)],
+    enemy_visible: &[(Entity, i32, i32, f32, String, String)],
 ) {
     // Build lookup: entity index → Entity
     let unit_by_id: HashMap<u32, Entity> = my_units.iter()

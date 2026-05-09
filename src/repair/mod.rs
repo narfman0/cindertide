@@ -3,7 +3,7 @@
 
 use bevy::prelude::*;
 use crate::map::{Faction, GridPos};
-use crate::buildings::{BuildingPos, BuildingType, Built};
+use crate::buildings::{BuildingPos, BuildingTypeId, Built};
 use crate::combat::Health;
 use crate::units::{UnitPos, UnitKind};
 use crate::resources::{ResourcePool, FactionEntity};
@@ -33,7 +33,7 @@ pub fn compute_heal(desired_hp: f32, current: f32, max: f32, faction_scrap: f32)
 
 pub fn repair_passive_system(
     time: Res<Time>,
-    bays: Query<(&BuildingPos, &Faction, &BuildingType), With<Built>>,
+    bays: Query<(&BuildingPos, &Faction, &BuildingTypeId), With<Built>>,
     mut units: Query<(&UnitPos, &Faction, &UnitKind, &mut Health)>,
     mut factions: Query<(&FactionEntity, &mut ResourcePool)>,
 ) {
@@ -44,7 +44,7 @@ pub fn repair_passive_system(
 
     let bay_list: Vec<(GridPos, Faction)> = bays
         .iter()
-        .filter(|(_, _, bt)| matches!(bt, BuildingType::RepairBay))
+        .filter(|(_, _, bt)| bt.id() == "repair_bay")
         .map(|(p, f, _)| (p.pos.clone(), f.clone()))
         .collect();
 

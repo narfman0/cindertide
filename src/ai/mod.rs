@@ -3,9 +3,10 @@
 use bevy::prelude::*;
 use crate::map::{Faction, GridPos};
 use crate::resources::{ResourcePool, FactionEntity, can_afford, spend, PopCap};
-use crate::buildings::{BuildingPos, BuildingType, BuildingBundle, building_cost, can_place, Built};
-use crate::production::{ProductionQueue, building_produces, unit_production_cost, QUEUE_CAP};
-use crate::units::{UnitPos, UnitType, MoveTarget, MoveProgress};
+use crate::buildings::{BuildingPos, BuildingTypeId, BuildingBundle, building_cost, can_place, Built};
+use crate::production::{ProductionQueue, unit_production_cost, QUEUE_CAP};
+use crate::units::{UnitPos, UnitTypeId, MoveTarget, MoveProgress};
+use crate::factions::LoadedFactions;
 use crate::combat::{AttackTarget, Health};
 use crate::heroes::{Hero, SignatureAbility, HeroDowned, is_charge_full};
 use crate::tech::{Tech, Doctrine, ResearchTarget, ResearchInProgress, start_research, Tier};
@@ -121,46 +122,46 @@ pub fn next_economy_target(
     have_barracks: bool,
     have_supply_depot: bool,
     have_motor_pool: bool,
-) -> Option<BuildingType> {
-    if !have_refinery { return Some(BuildingType::Refinery); }
-    if !have_scrapyard { return Some(BuildingType::Scrapyard); }
-    if !have_barracks { return Some(BuildingType::Barracks); }
-    if !have_supply_depot { return Some(BuildingType::SupplyDepot); }
-    if !have_motor_pool { return Some(BuildingType::MotorPool); }
+) -> Option<&'static str> {
+    if !have_refinery { return Some("refinery"); }
+    if !have_scrapyard { return Some("scrapyard"); }
+    if !have_barracks { return Some("barracks"); }
+    if !have_supply_depot { return Some("supply_depot"); }
+    if !have_motor_pool { return Some("motor_pool"); }
     None
 }
 
 /// Phase-aware build order. Mid/late game may add defenses.
 pub fn next_build_target(
     phase: &AiPhase,
-    have: &std::collections::HashMap<BuildingType, u32>,
-) -> Option<BuildingType> {
-    let has = |bt: &BuildingType| have.contains_key(bt);
+    have: &std::collections::HashMap<String, u32>,
+) -> Option<&'static str> {
+    let has = |id: &str| have.contains_key(id);
 
     match phase {
         AiPhase::EarlyGame => {
             // Economy first, then barracks.
-            if !has(&BuildingType::Refinery) { return Some(BuildingType::Refinery); }
-            if !has(&BuildingType::Scrapyard) { return Some(BuildingType::Scrapyard); }
-            if !has(&BuildingType::Barracks)  { return Some(BuildingType::Barracks); }
+            if !has("refinery") { return Some("refinery"); }
+            if !has("scrapyard") { return Some("scrapyard"); }
+            if !has("barracks") { return Some("barracks"); }
             None
         }
         AiPhase::MidGame => {
             // Complete economy, add supply.
-            if !has(&BuildingType::Refinery)    { return Some(BuildingType::Refinery); }
-            if !has(&BuildingType::Scrapyard)   { return Some(BuildingType::Scrapyard); }
-            if !has(&BuildingType::Barracks)    { return Some(BuildingType::Barracks); }
-            if !has(&BuildingType::SupplyDepot) { return Some(BuildingType::SupplyDepot); }
+            if !has("refinery")    { return Some("refinery"); }
+            if !has("scrapyard")   { return Some("scrapyard"); }
+            if !has("barracks")    { return Some("barracks"); }
+            if !has("supply_depot") { return Some("supply_depot"); }
             None
         }
         AiPhase::LateGame => {
             // Full build order + MotorPool + defensive Pillbox.
-            if !has(&BuildingType::Refinery)    { return Some(BuildingType::Refinery); }
-            if !has(&BuildingType::Scrapyard)   { return Some(BuildingType::Scrapyard); }
-            if !has(&BuildingType::Barracks)    { return Some(BuildingType::Barracks); }
-            if !has(&BuildingType::SupplyDepot) { return Some(BuildingType::SupplyDepot); }
-            if !has(&BuildingType::MotorPool)   { return Some(BuildingType::MotorPool); }
-            if !has(&BuildingType::Pillbox)     { return Some(BuildingType::Pillbox); }
+            if !has("refinery")    { return Some("refinery"); }
+            if !has("scrapyard")   { return Some("scrapyard"); }
+            if !has("barracks")    { return Some("barracks"); }
+            if !has("supply_depot") { return Some("supply_depot"); }
+            if !has("motor_pool")   { return Some("motor_pool"); }
+            if !has("pillbox")     { return Some("pillbox"); }
             None
         }
     }
@@ -172,8 +173,9 @@ pub fn economic_ai_system(
     mut commands: Commands,
     time: Res<Time>,
     mut ai: Query<(Entity, &mut AiController, &FactionEntity, &mut ResourcePool)>,
-    buildings: Query<(&BuildingPos, &BuildingType, &Faction)>,
+    buildings: Query<(&BuildingPos, &BuildingTypeId, &Faction)>,
     ai_states: Res<AiStates>,
+    loaded: Res<LoadedFactions>,
 ) {
     let now = time.elapsed_secs();
     let dt = time.delta_secs();
@@ -198,12 +200,12 @@ pub fn economic_ai_system(
         }
 
         // Inventory of buildings owned by this faction.
-        let mut have = std::collections::HashMap::<BuildingType, u32>::new();
+        let mut have = std::collections::HashMap::<String, u32>::new();
         let mut occupied = std::collections::HashSet::<GridPos>::new();
         for (bp, bt, f) in &buildings {
             occupied.insert(bp.pos.clone());
             if f == &fe.faction {
-                *have.entry(bt.clone()).or_insert(0) += 1;
+                *have.entry(bt.id().to_string()).or_insert(0) += 1;
             }
         }
 
@@ -218,18 +220,19 @@ pub fn economic_ai_system(
             .map(|s| s.config.cheats.build_time_multiplier)
             .unwrap_or(1.0);
 
-        if let Some(bt) = target {
-            let cost = building_cost(&bt);
+        if let Some(bt_id) = target {
+            let bt = BuildingTypeId::new(bt_id);
+            let cost = building_cost(&bt, &loaded);
             if can_afford(&pool, &cost) {
                 if let Some(pos) = find_empty_near(&a.home, &occupied) {
                     if can_place(&pos, &occupied, &Default::default()) {
                         spend(&mut pool, &cost);
-                        let mut bundle = BuildingBundle::new(bt.clone(), fe.faction.clone(), pos.x, pos.y);
+                        let mut bundle = BuildingBundle::new(bt.clone(), fe.faction.clone(), pos.x, pos.y, &loaded);
                         // Apply build time multiplier: higher = slower, lower = faster.
                         // build_time_multiplier is a divisor on speed, so multiply total by it.
                         bundle.construction.total *= build_time_multiplier;
                         let id = commands.spawn(bundle).id();
-                        if !building_produces(&bt).is_empty() {
+                        if !crate::buildings::building_produces(&bt, &loaded).is_empty() {
                             commands.entity(id).insert(ProductionQueue::default());
                         }
                     }
@@ -246,9 +249,10 @@ pub fn economic_ai_system(
 pub fn production_ai_system(
     time: Res<Time>,
     ai: Query<(&FactionEntity, &AiController)>,
-    mut buildings: Query<(&Faction, &BuildingType, &mut ProductionQueue), With<Built>>,
+    mut buildings: Query<(&Faction, &BuildingTypeId, &mut ProductionQueue), With<Built>>,
     mut pools: Query<(&FactionEntity, &mut ResourcePool, &PopCap)>,
     ai_states: Res<AiStates>,
+    loaded: Res<LoadedFactions>,
 ) {
     let _ = time;
     use std::collections::HashSet;
@@ -258,7 +262,7 @@ pub fn production_ai_system(
         if !ai_factions.contains(b_faction) {
             continue;
         }
-        let producible = building_produces(bt);
+        let producible = crate::buildings::building_produces(bt, &loaded);
         if producible.is_empty() {
             continue;
         }
@@ -271,25 +275,26 @@ pub fn production_ai_system(
             .map(|s| s.phase.clone())
             .unwrap_or(AiPhase::EarlyGame);
 
-        let chosen = match phase {
+        // Prefer infantry in early/mid, prefer heavy in late game.
+        let chosen: &str = match phase {
             AiPhase::EarlyGame | AiPhase::MidGame => {
-                // Prefer cheapest infantry.
-                producible.iter().find(|u| matches!(u, UnitType::Riflemen))
-                    .cloned()
-                    .unwrap_or_else(|| producible[0].clone())
+                // Prefer riflemen (cheapest infantry)
+                producible.iter().find(|&&u| u == "riflemen")
+                    .copied()
+                    .unwrap_or(producible[0])
             }
             AiPhase::LateGame => {
-                // Prefer heavier units: HeavyWeapons, then LightVehicle, then HeavyArmor, fallback Riflemen.
-                producible.iter().find(|u| matches!(u, UnitType::HeavyWeapons))
-                    .or_else(|| producible.iter().find(|u| matches!(u, UnitType::LightVehicle)))
-                    .or_else(|| producible.iter().find(|u| matches!(u, UnitType::HeavyArmor)))
-                    .or_else(|| producible.iter().find(|u| matches!(u, UnitType::Riflemen)))
-                    .cloned()
-                    .unwrap_or_else(|| producible[0].clone())
+                // Prefer heavy_weapons, then light_vehicle, heavy_armor, fallback riflemen
+                producible.iter().find(|&&u| u == "heavy_weapons")
+                    .or_else(|| producible.iter().find(|&&u| u == "light_vehicle"))
+                    .or_else(|| producible.iter().find(|&&u| u == "heavy_armor"))
+                    .or_else(|| producible.iter().find(|&&u| u == "riflemen"))
+                    .copied()
+                    .unwrap_or(producible[0])
             }
         };
 
-        let cost = unit_production_cost(&chosen);
+        let cost = unit_production_cost(chosen, &loaded);
 
         for (fe, mut pool, popcap) in &mut pools {
             if &fe.faction != b_faction {
@@ -300,7 +305,7 @@ pub fn production_ai_system(
             }
             if can_afford(&pool, &cost) {
                 spend(&mut pool, &cost);
-                queue.jobs.push(chosen.clone());
+                queue.jobs.push(chosen.to_string());
             }
             break;
         }
@@ -363,7 +368,7 @@ pub fn scouting_system(
     ai: Query<(&FactionEntity, &AiController)>,
     idle_units: Query<
         (Entity, &Faction, &UnitPos),
-        (With<UnitType>, Without<AttackTarget>, Without<Retreating>, Without<AttackWave>),
+        (With<UnitTypeId>, Without<AttackTarget>, Without<Retreating>, Without<AttackWave>),
     >,
 ) {
     // Compute map center as average of all idle unit positions.
@@ -404,10 +409,10 @@ pub fn attack_wave_system(
     ai: Query<(&FactionEntity, &AiController)>,
     mut ai_units: Query<
         (Entity, &Faction, &UnitPos),
-        (With<UnitType>, Without<AttackTarget>, Without<Retreating>, Without<crate::combat::Dead>),
+        (With<UnitTypeId>, Without<AttackTarget>, Without<Retreating>, Without<crate::combat::Dead>),
     >,
     enemy_buildings: Query<(&Faction, &BuildingPos), With<Built>>,
-    enemy_units: Query<(Entity, &Faction, &UnitPos), (With<UnitType>, Without<crate::combat::Dead>)>,
+    enemy_units: Query<(Entity, &Faction, &UnitPos), (With<UnitTypeId>, Without<crate::combat::Dead>)>,
 ) {
     use std::collections::HashSet;
     let ai_factions: HashSet<Faction> = ai.iter().map(|(fe, _)| fe.faction.clone()).collect();
@@ -480,7 +485,7 @@ pub fn retreat_system(
     ai: Query<&FactionEntity, With<AiController>>,
     injured: Query<
         (Entity, &Faction, &UnitPos, &Health),
-        (With<UnitType>, Without<Retreating>, Without<crate::combat::Dead>),
+        (With<UnitTypeId>, Without<Retreating>, Without<crate::combat::Dead>),
     >,
     friendly_buildings: Query<(&Faction, &BuildingPos), With<Built>>,
 ) {
@@ -543,10 +548,10 @@ pub fn defensive_response_system(
     mut commands: Commands,
     ai: Query<&FactionEntity, With<AiController>>,
     friendly_buildings: Query<(&Faction, &BuildingPos), With<Built>>,
-    enemy_units: Query<(Entity, &Faction, &UnitPos), (With<UnitType>, Without<crate::combat::Dead>)>,
+    enemy_units: Query<(Entity, &Faction, &UnitPos), (With<UnitTypeId>, Without<crate::combat::Dead>)>,
     mut ai_units: Query<
         (Entity, &Faction, &UnitPos),
-        (With<UnitType>, Without<AttackTarget>, Without<Retreating>, Without<crate::combat::Dead>),
+        (With<UnitTypeId>, Without<AttackTarget>, Without<Retreating>, Without<crate::combat::Dead>),
     >,
 ) {
     use std::collections::HashSet;
@@ -595,9 +600,9 @@ pub fn tactical_ai_system(
     ai: Query<(&FactionEntity, &AiController)>,
     units: Query<
         (Entity, &Faction, &UnitPos),
-        (With<UnitType>, Without<AttackTarget>, Without<Retreating>, Without<crate::combat::Dead>),
+        (With<UnitTypeId>, Without<AttackTarget>, Without<Retreating>, Without<crate::combat::Dead>),
     >,
-    enemies: Query<(Entity, &Faction, &UnitPos), (With<UnitType>, Without<crate::combat::Dead>)>,
+    enemies: Query<(Entity, &Faction, &UnitPos), (With<UnitTypeId>, Without<crate::combat::Dead>)>,
 ) {
     use std::collections::HashSet;
     let ai_data: Vec<(Faction, GridPos)> = ai.iter()
@@ -732,7 +737,7 @@ mod tests {
     fn next_economy_target_starts_with_refinery() {
         assert_eq!(
             next_economy_target(false, false, false, false, false),
-            Some(BuildingType::Refinery)
+            Some("refinery")
         );
     }
 
@@ -740,19 +745,19 @@ mod tests {
     fn next_economy_target_progresses() {
         assert_eq!(
             next_economy_target(true, false, false, false, false),
-            Some(BuildingType::Scrapyard)
+            Some("scrapyard")
         );
         assert_eq!(
             next_economy_target(true, true, false, false, false),
-            Some(BuildingType::Barracks)
+            Some("barracks")
         );
         assert_eq!(
             next_economy_target(true, true, true, false, false),
-            Some(BuildingType::SupplyDepot)
+            Some("supply_depot")
         );
         assert_eq!(
             next_economy_target(true, true, true, true, false),
-            Some(BuildingType::MotorPool)
+            Some("motor_pool")
         );
     }
 
@@ -764,32 +769,32 @@ mod tests {
     #[test]
     fn next_build_target_early_game_starts_refinery() {
         let have = std::collections::HashMap::new();
-        assert_eq!(next_build_target(&AiPhase::EarlyGame, &have), Some(BuildingType::Refinery));
+        assert_eq!(next_build_target(&AiPhase::EarlyGame, &have), Some("refinery"));
     }
 
     #[test]
     fn next_build_target_early_game_completes_at_barracks() {
         let mut have = std::collections::HashMap::new();
-        have.insert(BuildingType::Refinery, 1);
-        have.insert(BuildingType::Scrapyard, 1);
-        have.insert(BuildingType::Barracks, 1);
+        have.insert("refinery".to_string(), 1);
+        have.insert("scrapyard".to_string(), 1);
+        have.insert("barracks".to_string(), 1);
         assert_eq!(next_build_target(&AiPhase::EarlyGame, &have), None);
     }
 
     #[test]
     fn next_build_target_late_game_adds_motor_pool_and_pillbox() {
         let mut have = std::collections::HashMap::new();
-        have.insert(BuildingType::Refinery, 1);
-        have.insert(BuildingType::Scrapyard, 1);
-        have.insert(BuildingType::Barracks, 1);
-        have.insert(BuildingType::SupplyDepot, 1);
-        // MotorPool not yet built → should target it next.
-        assert_eq!(next_build_target(&AiPhase::LateGame, &have), Some(BuildingType::MotorPool));
+        have.insert("refinery".to_string(), 1);
+        have.insert("scrapyard".to_string(), 1);
+        have.insert("barracks".to_string(), 1);
+        have.insert("supply_depot".to_string(), 1);
+        // motor_pool not yet built → should target it next.
+        assert_eq!(next_build_target(&AiPhase::LateGame, &have), Some("motor_pool"));
     }
 
     #[test]
     fn ai_state_phase_starts_early() {
-        let s = AiState::new(Faction::Combine);
+        let s = AiState::new(Faction::combine());
         assert_eq!(s.phase, AiPhase::EarlyGame);
         assert!(!s.scout_sent);
     }

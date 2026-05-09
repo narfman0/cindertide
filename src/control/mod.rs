@@ -72,11 +72,11 @@ pub fn point_trickle_bonus(point_type: &ControlPointType, owner: &Faction) -> (f
     match point_type {
         ControlPointType::Strategic => (0.0, 0.0, 0.5),
         ControlPointType::FuelDepot => {
-            let f = if matches!(owner, Faction::Combine) { 7.5 } else { 5.0 };
+            let f = if owner.id() == "combine" { 7.5 } else { 5.0 };
             (f, 0.0, 0.0)
         }
         ControlPointType::ScrapField => {
-            let s = if matches!(owner, Faction::Ironborn) { 7.5 } else { 5.0 };
+            let s = if owner.id() == "ironborn" { 7.5 } else { 5.0 };
             (0.0, s, 0.0)
         }
         ControlPointType::HighGround => (0.0, 0.0, 0.0),
@@ -163,8 +163,8 @@ mod tests {
     fn neutral_point_captured_by_lone_faction() {
         let mut p = make_point(None);
         // 0.2/s rate × 5s = 1.0 → captured
-        step_capture(&mut p, &[Faction::Combine], 5.0, DEFAULT_CAPTURE_RATE);
-        assert_eq!(p.owner, Some(Faction::Combine));
+        step_capture(&mut p, &[Faction::combine()], 5.0, DEFAULT_CAPTURE_RATE);
+        assert_eq!(p.owner, Some(Faction::combine()));
         assert_eq!(p.contesting, None);
         assert_eq!(p.capture_progress, 0.0);
     }
@@ -172,7 +172,7 @@ mod tests {
     #[test]
     fn two_factions_contested_no_progress() {
         let mut p = make_point(None);
-        step_capture(&mut p, &[Faction::Combine, Faction::Hollow], 10.0, DEFAULT_CAPTURE_RATE);
+        step_capture(&mut p, &[Faction::combine(), Faction::hollow()], 10.0, DEFAULT_CAPTURE_RATE);
         assert_eq!(p.owner, None);
         assert_eq!(p.capture_progress, 0.0);
     }
@@ -180,17 +180,17 @@ mod tests {
     #[test]
     fn no_units_decays_progress() {
         let mut p = make_point(None);
-        p.contesting = Some(Faction::Combine);
+        p.contesting = Some(Faction::combine());
         p.capture_progress = 0.5;
         step_capture(&mut p, &[], 1.0, DEFAULT_CAPTURE_RATE);
         assert!((p.capture_progress - 0.3).abs() < 1e-5);
-        assert_eq!(p.contesting, Some(Faction::Combine));
+        assert_eq!(p.contesting, Some(Faction::combine()));
     }
 
     #[test]
     fn no_units_decay_clears_contester_at_zero() {
         let mut p = make_point(None);
-        p.contesting = Some(Faction::Combine);
+        p.contesting = Some(Faction::combine());
         p.capture_progress = 0.05;
         step_capture(&mut p, &[], 1.0, DEFAULT_CAPTURE_RATE);
         assert_eq!(p.capture_progress, 0.0);
@@ -199,37 +199,37 @@ mod tests {
 
     #[test]
     fn owner_lone_decays_opposing_progress() {
-        let mut p = make_point(Some(Faction::Combine));
-        p.contesting = Some(Faction::Hollow);
+        let mut p = make_point(Some(Faction::combine()));
+        p.contesting = Some(Faction::hollow());
         p.capture_progress = 0.6;
-        step_capture(&mut p, &[Faction::Combine], 1.0, DEFAULT_CAPTURE_RATE);
+        step_capture(&mut p, &[Faction::combine()], 1.0, DEFAULT_CAPTURE_RATE);
         assert!((p.capture_progress - 0.4).abs() < 1e-5);
     }
 
     #[test]
     fn switch_contester_resets_progress() {
-        let mut p = make_point(Some(Faction::Combine));
-        p.contesting = Some(Faction::Hollow);
+        let mut p = make_point(Some(Faction::combine()));
+        p.contesting = Some(Faction::hollow());
         p.capture_progress = 0.5;
-        step_capture(&mut p, &[Faction::Ironborn], 0.0, DEFAULT_CAPTURE_RATE);
-        assert_eq!(p.contesting, Some(Faction::Ironborn));
+        step_capture(&mut p, &[Faction::ironborn()], 0.0, DEFAULT_CAPTURE_RATE);
+        assert_eq!(p.contesting, Some(Faction::ironborn()));
         assert_eq!(p.capture_progress, 0.0);
     }
 
     #[test]
     fn ownership_transfers_at_full_progress() {
-        let mut p = make_point(Some(Faction::Combine));
-        p.contesting = Some(Faction::Hollow);
+        let mut p = make_point(Some(Faction::combine()));
+        p.contesting = Some(Faction::hollow());
         p.capture_progress = 0.95;
-        step_capture(&mut p, &[Faction::Hollow], 1.0, DEFAULT_CAPTURE_RATE);
-        assert_eq!(p.owner, Some(Faction::Hollow));
+        step_capture(&mut p, &[Faction::hollow()], 1.0, DEFAULT_CAPTURE_RATE);
+        assert_eq!(p.owner, Some(Faction::hollow()));
         assert_eq!(p.contesting, None);
         assert_eq!(p.capture_progress, 0.0);
     }
 
     #[test]
     fn strategic_point_grants_manpower() {
-        let (f, s, m) = point_trickle_bonus(&ControlPointType::Strategic, &Faction::Combine);
+        let (f, s, m) = point_trickle_bonus(&ControlPointType::Strategic, &Faction::combine());
         assert_eq!(f, 0.0);
         assert_eq!(s, 0.0);
         assert_eq!(m, 0.5);
@@ -237,19 +237,19 @@ mod tests {
 
     #[test]
     fn fuel_depot_combine_bonus() {
-        let (f, _, _) = point_trickle_bonus(&ControlPointType::FuelDepot, &Faction::Combine);
+        let (f, _, _) = point_trickle_bonus(&ControlPointType::FuelDepot, &Faction::combine());
         assert_eq!(f, 7.5);
     }
 
     #[test]
     fn fuel_depot_non_combine_baseline() {
-        let (f, _, _) = point_trickle_bonus(&ControlPointType::FuelDepot, &Faction::Ironborn);
+        let (f, _, _) = point_trickle_bonus(&ControlPointType::FuelDepot, &Faction::ironborn());
         assert_eq!(f, 5.0);
     }
 
     #[test]
     fn scrap_field_ironborn_bonus() {
-        let (_, s, _) = point_trickle_bonus(&ControlPointType::ScrapField, &Faction::Ironborn);
+        let (_, s, _) = point_trickle_bonus(&ControlPointType::ScrapField, &Faction::ironborn());
         assert_eq!(s, 7.5);
     }
 }
