@@ -1,0 +1,11 @@
+[params]
+attack_wave_interval = 150.0     # seconds between waves
+reaction_time = 3.0              # seconds before AI responds to threats
+aggression = 0.4                 # 0=passive, 1=aggressive
+scout_radius = 6
+focus_fire = false               # whether to concentrate fire on one target
+
+[cheats]
+resource_multiplier = 0.8        # AI gets 80% of normal resource income
+build_time_multiplier = 1.3      # AI builds 30% slower
+starting_resource_bonus = 0.0   # flat bonus on top of normal starting resources

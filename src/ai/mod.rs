@@ -10,6 +10,11 @@ use crate::combat::{AttackTarget, Health};
 use crate::heroes::{Hero, SignatureAbility, HeroDowned, is_charge_full};
 use crate::tech::{Tech, Doctrine, ResearchTarget, ResearchInProgress, start_research, Tier};
 
+pub mod difficulty;
+pub mod lua_ai;
+pub use difficulty::AiDifficultyConfig;
+pub use lua_ai::{LuaAiEngines, lua_ai_system};
+
 pub const AI_TICK_SECONDS: f32 = 3.0;
 pub const AI_BUILD_OFFSET_RADIUS: i32 = 3;
 pub const ATTACK_WAVE_INTERVAL: f32 = 90.0;
@@ -39,6 +44,8 @@ pub struct AiState {
     pub scout_sent: bool,
     /// Elapsed game time in seconds (for phase transitions).
     pub elapsed: f32,
+    /// Loaded difficulty configuration.
+    pub config: AiDifficultyConfig,
 }
 
 impl AiState {
@@ -49,6 +56,18 @@ impl AiState {
             faction,
             scout_sent: false,
             elapsed: 0.0,
+            config: AiDifficultyConfig::normal(),
+        }
+    }
+
+    pub fn with_difficulty(faction: Faction, difficulty_name: &str) -> Self {
+        Self {
+            phase: AiPhase::EarlyGame,
+            wave_timer: 0.0,
+            faction,
+            scout_sent: false,
+            elapsed: 0.0,
+            config: AiDifficultyConfig::load(difficulty_name),
         }
     }
 }
@@ -157,9 +176,25 @@ pub fn economic_ai_system(
     ai_states: Res<AiStates>,
 ) {
     let now = time.elapsed_secs();
+    let dt = time.delta_secs();
     for (_faction_entity, mut a, fe, mut pool) in &mut ai {
         if now - a.last_tick < AI_TICK_SECONDS {
             continue;
+        }
+
+        // Apply cheat resource bonus each tick (scaled to tick interval).
+        if let Some(state) = ai_states.get(&fe.faction) {
+            let bonus_per_second = state.config.cheats.starting_resource_bonus / 300.0; // amortize over 5 min
+            let tick_bonus = bonus_per_second * dt * AI_TICK_SECONDS;
+            let rm = state.config.cheats.resource_multiplier;
+            // Apply resource multiplier as a bonus on top of normal trickle.
+            pool.fuel += pool.fuel * (rm - 1.0) * dt.min(AI_TICK_SECONDS);
+            pool.scrap += pool.scrap * (rm - 1.0) * dt.min(AI_TICK_SECONDS);
+            pool.fuel = pool.fuel.min(2000.0);
+            pool.scrap = pool.scrap.min(2000.0);
+            // One-time resource bonus distributed over ticks
+            pool.fuel += tick_bonus * 0.5;
+            pool.scrap += tick_bonus * 0.5;
         }
 
         // Inventory of buildings owned by this faction.
@@ -179,15 +214,21 @@ pub fn economic_ai_system(
 
         let target = next_build_target(&phase, &have);
 
+        let build_time_multiplier = ai_states.get(&fe.faction)
+            .map(|s| s.config.cheats.build_time_multiplier)
+            .unwrap_or(1.0);
+
         if let Some(bt) = target {
             let cost = building_cost(&bt);
             if can_afford(&pool, &cost) {
                 if let Some(pos) = find_empty_near(&a.home, &occupied) {
                     if can_place(&pos, &occupied, &Default::default()) {
                         spend(&mut pool, &cost);
-                        let id = commands
-                            .spawn(BuildingBundle::new(bt.clone(), fe.faction.clone(), pos.x, pos.y))
-                            .id();
+                        let mut bundle = BuildingBundle::new(bt.clone(), fe.faction.clone(), pos.x, pos.y);
+                        // Apply build time multiplier: higher = slower, lower = faster.
+                        // build_time_multiplier is a divisor on speed, so multiply total by it.
+                        bundle.construction.total *= build_time_multiplier;
+                        let id = commands.spawn(bundle).id();
                         if !building_produces(&bt).is_empty() {
                             commands.entity(id).insert(ProductionQueue::default());
                         }
@@ -295,6 +336,8 @@ pub fn phase_tracker_system(
     for f in &ai_factions {
         ai_states.0.entry(f.clone()).or_insert_with(|| AiState::new(f.clone()));
     }
+    // Note: difficulty config is set by the lobby launcher via AiStates.
+    // The phase tracker just manages timers.
 
     for f in &ai_factions {
         if let Some(state) = ai_states.0.get_mut(f) {
@@ -375,7 +418,8 @@ pub fn attack_wave_system(
             None => continue,
         };
 
-        if state.wave_timer < ATTACK_WAVE_INTERVAL {
+        let wave_interval = state.config.params.attack_wave_interval;
+        if state.wave_timer < wave_interval {
             continue;
         }
         state.wave_timer = 0.0;
@@ -659,6 +703,7 @@ pub struct AiPlugin;
 impl Plugin for AiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<AiStates>();
+        app.init_non_send_resource::<LuaAiEngines>();
         app.add_systems(
             Update,
             (
@@ -673,6 +718,7 @@ impl Plugin for AiPlugin {
                 tactical_ai_system,
                 hero_ai_system,
                 doctrine_consistency_system,
+                lua_ai_system,
             ),
         );
     }

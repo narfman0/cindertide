@@ -2725,12 +2725,14 @@ fn spawn_unit_type_at(world: &mut World, faction: Faction, unit_type: units::Uni
 ///
 /// `mission_index` controls player starting strength (0 = tutorial-rich, 4 = bare).
 /// `is_player` = true uses the mission_index progression; false always uses full AI base.
+/// `resource_bonus` is a flat starting resource bonus added to the faction's pool.
 fn apply_faction_loadout(
     world: &mut World,
     faction: &Faction,
     base: &GridPos,
     mission_index: usize,
     is_player: bool,
+    resource_bonus: f32,
 ) {
     let bx = base.x;
     let by = base.y;
@@ -2848,6 +2850,17 @@ fn apply_faction_loadout(
             world.spawn(HollowSpawner::new(hollow::HollowMode::Consuming, bx, by));
         }
     }
+
+    // Apply starting resource bonus to this faction's pool if nonzero.
+    if resource_bonus > 0.0 {
+        let mut q = world.query::<(&resources::FactionEntity, &mut resources::ResourcePool)>();
+        for (fe, mut pool) in q.iter_mut(world) {
+            if &fe.faction == faction {
+                pool.fuel += resource_bonus * 0.5;
+                pool.scrap += resource_bonus * 0.5;
+            }
+        }
+    }
 }
 
 /// Default opponent faction for a given player.
@@ -2898,8 +2911,8 @@ pub fn setup_demo_scenario_with_spawns(
         (p, o)
     };
 
-    apply_faction_loadout(world, player, &p_base, mission_index, true);
-    apply_faction_loadout(world, &opponent, &o_base, 0, false);
+    apply_faction_loadout(world, player, &p_base, mission_index, true, 0.0);
+    apply_faction_loadout(world, &opponent, &o_base, 0, false, 0.0);
 
     // Make sure the opponent faction entity exists (player faction was
     // spawned by game/new). Top them up so AI can build.

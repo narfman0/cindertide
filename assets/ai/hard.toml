@@ -1,0 +1,11 @@
+[params]
+attack_wave_interval = 60.0
+reaction_time = 0.5
+aggression = 0.85
+scout_radius = 15
+focus_fire = true
+
+[cheats]
+resource_multiplier = 1.0        # hard AI does NOT get resource cheats
+build_time_multiplier = 0.85     # slightly faster builds
+starting_resource_bonus = 0.0

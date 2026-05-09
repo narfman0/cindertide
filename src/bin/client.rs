@@ -81,6 +81,7 @@ fn main() {
         .init_resource::<GeneratePanel>()
         .init_resource::<LobbyConfig>()
         .init_resource::<LobbyPreviewState>()
+        .init_resource::<PlayerCheats>()
         .insert_resource(MinimapTimer(0.0))
         .insert_resource(NetBroadcastTimer(0.0))
         .add_systems(Startup, setup_scene)
@@ -129,6 +130,7 @@ fn main() {
         .add_systems(Update, process_audio_events)
         .add_systems(Update, host_broadcast_game_state)
         .add_systems(Update, receive_net_messages)
+        .add_systems(Update, apply_player_cheat_trickle)
         .run();
 }
 
@@ -150,6 +152,7 @@ enum ClientScreen {
     GameOver { won: bool, handler_unlocked: bool },
     MapEditor,
     CampaignEditor,
+    PlayerSettings { selected_field: PlayerSettingsField },
 }
 
 impl Default for ClientScreen {
@@ -604,6 +607,75 @@ struct AttackMoveMode(bool);
 /// When true, game logic is paused (uses Bevy's virtual time pause).
 #[derive(Resource, Default)]
 struct Paused(bool);
+
+// ── Player cheat options ──────────────────────────────────────────────────────
+
+/// Player-side cheat multipliers applied to the human player's faction only.
+/// AI uses its own difficulty-config cheats.
+#[derive(Resource, Clone, Debug)]
+pub struct PlayerCheats {
+    pub resource_multiplier: f32,    // 0.5, 0.75, 1.0, 1.5, 2.0
+    pub build_speed_multiplier: f32, // 0.5, 0.75, 1.0, 1.5, 2.0
+    pub starting_resource_bonus: f32, // 0, 250, 500, 1000
+    pub fog_of_war: bool,
+}
+
+impl Default for PlayerCheats {
+    fn default() -> Self {
+        Self {
+            resource_multiplier: 1.0,
+            build_speed_multiplier: 1.0,
+            starting_resource_bonus: 0.0,
+            fog_of_war: true,
+        }
+    }
+}
+
+impl PlayerCheats {
+    const RESOURCE_STEPS: &'static [f32] = &[0.5, 0.75, 1.0, 1.5, 2.0];
+    const BUILD_SPEED_STEPS: &'static [f32] = &[0.5, 0.75, 1.0, 1.5, 2.0];
+    const STARTING_BONUS_STEPS: &'static [f32] = &[0.0, 250.0, 500.0, 1000.0];
+
+    fn cycle_resource_multiplier(&mut self, forward: bool) {
+        let idx = Self::RESOURCE_STEPS.iter().position(|&v| (v - self.resource_multiplier).abs() < 0.01).unwrap_or(2);
+        let new_idx = if forward {
+            (idx + 1) % Self::RESOURCE_STEPS.len()
+        } else {
+            (idx + Self::RESOURCE_STEPS.len() - 1) % Self::RESOURCE_STEPS.len()
+        };
+        self.resource_multiplier = Self::RESOURCE_STEPS[new_idx];
+    }
+
+    fn cycle_build_speed(&mut self, forward: bool) {
+        let idx = Self::BUILD_SPEED_STEPS.iter().position(|&v| (v - self.build_speed_multiplier).abs() < 0.01).unwrap_or(2);
+        let new_idx = if forward {
+            (idx + 1) % Self::BUILD_SPEED_STEPS.len()
+        } else {
+            (idx + Self::BUILD_SPEED_STEPS.len() - 1) % Self::BUILD_SPEED_STEPS.len()
+        };
+        self.build_speed_multiplier = Self::BUILD_SPEED_STEPS[new_idx];
+    }
+
+    fn cycle_starting_bonus(&mut self, forward: bool) {
+        let idx = Self::STARTING_BONUS_STEPS.iter().position(|&v| (v - self.starting_resource_bonus).abs() < 0.01).unwrap_or(0);
+        let new_idx = if forward {
+            (idx + 1) % Self::STARTING_BONUS_STEPS.len()
+        } else {
+            (idx + Self::STARTING_BONUS_STEPS.len() - 1) % Self::STARTING_BONUS_STEPS.len()
+        };
+        self.starting_resource_bonus = Self::STARTING_BONUS_STEPS[new_idx];
+    }
+}
+
+/// Which field is selected on the PlayerSettings screen.
+#[derive(Default, Clone, PartialEq, Debug)]
+enum PlayerSettingsField {
+    #[default]
+    ResourceMultiplier,
+    BuildSpeed,
+    StartingBonus,
+    FogOfWar,
+}
 
 // ── Multiplayer networking ─────────────────────────────────────────────────────
 
@@ -1441,13 +1513,14 @@ fn update_screen_overlay(
     loaded_campaigns: Res<LoadedCampaigns>,
     lobby: Res<LobbyConfig>,
     mp_role: Res<MultiplayerRole>,
+    player_cheats: Res<PlayerCheats>,
     mut overlay_vis: Query<&mut Visibility, With<ScreenOverlay>>,
     mut title_text: Query<&mut Text, (With<OverlayTitleText>, Without<OverlayBodyText>, Without<OverlayHintText>)>,
     mut body_text: Query<&mut Text, (With<OverlayBodyText>, Without<OverlayTitleText>, Without<OverlayHintText>)>,
     mut hint_text: Query<&mut Text, (With<OverlayHintText>, Without<OverlayTitleText>, Without<OverlayBodyText>)>,
     narrative: Option<Res<NarrativeData>>,
 ) {
-    if !screen.is_changed() && !active.is_changed() && !progress.is_changed() && !lobby.is_changed() {
+    if !screen.is_changed() && !active.is_changed() && !progress.is_changed() && !lobby.is_changed() && !player_cheats.is_changed() {
         return;
     }
 
@@ -1469,7 +1542,7 @@ fn update_screen_overlay(
                 .find(|c| c.is_unlocked(&progress))
                 .map(|c| c.name.as_str())
                 .unwrap_or("Campaign");
-            **hint = format!("Enter — Start [{}]  |  E — Map Editor  |  M — Multiplayer", first_campaign_name);
+            **hint = format!("Enter — Start [{}]  |  E — Map Editor  |  M — Multiplayer  |  C — Player Settings", first_campaign_name);
         }
         ClientScreen::MultiplayerMenu { hosting, ip_input } => {
             *vis = Visibility::Visible;
@@ -1568,6 +1641,33 @@ fn update_screen_overlay(
             **body = text.clone();
             **hint = "Press Enter to continue".to_string();
         }
+        ClientScreen::PlayerSettings { selected_field } => {
+            *vis = Visibility::Visible;
+            **title = "PLAYER SETTINGS".to_string();
+
+            let sel = selected_field;
+            let rm_marker = if *sel == PlayerSettingsField::ResourceMultiplier { ">" } else { " " };
+            let bs_marker = if *sel == PlayerSettingsField::BuildSpeed { ">" } else { " " };
+            let sb_marker = if *sel == PlayerSettingsField::StartingBonus { ">" } else { " " };
+            let fw_marker = if *sel == PlayerSettingsField::FogOfWar { ">" } else { " " };
+
+            let fog_str = if player_cheats.fog_of_war { "ON" } else { "OFF" };
+
+            let body_str = format!(
+                "── PLAYER SETTINGS ──────────────\n\
+                 {}  Resource income:    [{:.2}×]  ←→\n\
+                 {}  Build speed:        [{:.2}×]  ←→\n\
+                 {}  Starting resources: [+{}]    ←→\n\
+                 {}  Fog of war:         [{}]    ←→\n\
+                 \nThese apply to YOUR faction only.\nAI uses its own difficulty settings.",
+                rm_marker, player_cheats.resource_multiplier,
+                bs_marker, player_cheats.build_speed_multiplier,
+                sb_marker, player_cheats.starting_resource_bonus as i32,
+                fw_marker, fog_str,
+            );
+            **body = body_str;
+            **hint = "↑↓ select field  ←→ change value  Esc: back".to_string();
+        }
         ClientScreen::GameOver { won, handler_unlocked } => {
             *vis = Visibility::Visible;
             let outcome = if *won { "CAMPAIGN COMPLETE" } else { "CAMPAIGN ENDED" };
@@ -1607,6 +1707,7 @@ fn handle_ui_input(
     mut lobby: ResMut<LobbyConfig>,
     net_channels: Option<Res<NetChannels>>,
     mut commands: Commands,
+    mut player_cheats: ResMut<PlayerCheats>,
 ) {
     // Only handle UI input when not in mission or editor
     if matches!(*screen, ClientScreen::InMission | ClientScreen::TestMission { .. } | ClientScreen::MapEditor | ClientScreen::CampaignEditor) {
@@ -1646,6 +1747,8 @@ fn handle_ui_input(
                     hosting: false,
                     ip_input: "127.0.0.1".to_string(),
                 };
+            } else if keys.just_pressed(KeyCode::KeyC) {
+                *screen = ClientScreen::PlayerSettings { selected_field: PlayerSettingsField::ResourceMultiplier };
             } else if keys.just_pressed(KeyCode::KeyE) {
                 // Enter map editor: try loading first campaign's first map; fallback to blank map
                 let first_map_path = loaded_campaigns.0.iter()
@@ -2097,6 +2200,49 @@ fn handle_ui_input(
         ClientScreen::MapEditor => {}
         ClientScreen::CampaignEditor => {}
         // MultiplayerMenu and MultiplayerLobby handled above.
+
+        ClientScreen::PlayerSettings { selected_field } => {
+            let left = keys.just_pressed(KeyCode::ArrowLeft);
+            let right = keys.just_pressed(KeyCode::ArrowRight);
+
+            if keys.just_pressed(KeyCode::Escape) {
+                *screen = ClientScreen::Title;
+                return;
+            }
+
+            // Cycle selected field with up/down
+            if up {
+                let new_field = match selected_field {
+                    PlayerSettingsField::ResourceMultiplier => PlayerSettingsField::FogOfWar,
+                    PlayerSettingsField::BuildSpeed => PlayerSettingsField::ResourceMultiplier,
+                    PlayerSettingsField::StartingBonus => PlayerSettingsField::BuildSpeed,
+                    PlayerSettingsField::FogOfWar => PlayerSettingsField::StartingBonus,
+                };
+                *screen = ClientScreen::PlayerSettings { selected_field: new_field };
+                return;
+            }
+            if down {
+                let new_field = match selected_field {
+                    PlayerSettingsField::ResourceMultiplier => PlayerSettingsField::BuildSpeed,
+                    PlayerSettingsField::BuildSpeed => PlayerSettingsField::StartingBonus,
+                    PlayerSettingsField::StartingBonus => PlayerSettingsField::FogOfWar,
+                    PlayerSettingsField::FogOfWar => PlayerSettingsField::ResourceMultiplier,
+                };
+                *screen = ClientScreen::PlayerSettings { selected_field: new_field };
+                return;
+            }
+
+            // Change values with left/right
+            if left || right {
+                let forward = right;
+                match selected_field {
+                    PlayerSettingsField::ResourceMultiplier => player_cheats.cycle_resource_multiplier(forward),
+                    PlayerSettingsField::BuildSpeed => player_cheats.cycle_build_speed(forward),
+                    PlayerSettingsField::StartingBonus => player_cheats.cycle_starting_bonus(forward),
+                    PlayerSettingsField::FogOfWar => player_cheats.fog_of_war = !player_cheats.fog_of_war,
+                }
+            }
+        }
     }
 }
 
@@ -5453,6 +5599,7 @@ fn update_fog_of_war(
     screen: Res<ClientScreen>,
     time: Res<Time>,
     player_faction: Option<Res<PlayerFaction>>,
+    player_cheats: Res<PlayerCheats>,
     units: Query<(&UnitPos, &Faction, &UnitType), With<UnitType>>,
     buildings: Query<(&BuildingPos, &Faction), With<BuildingType>>,
     mut fog: ResMut<FogOfWar>,
@@ -5475,6 +5622,15 @@ fn update_fog_of_war(
 
     let Some(pf) = player_faction else { return };
     let player_f = &pf.0;
+
+    // If player has disabled fog of war, reveal all tiles.
+    if !player_cheats.fog_of_war {
+        let all_tiles: HashSet<(i32, i32)> = tiles.iter().map(|t| (t.pos.x, t.pos.y)).collect();
+        fog.visible = all_tiles.clone();
+        fog.explored = all_tiles;
+        // Skip normal computation
+        return;
+    }
 
     // Recompute visible set from all player units + buildings.
     let mut new_visible: HashSet<(i32, i32)> = HashSet::new();
@@ -6348,5 +6504,36 @@ fn apply_client_command(
                 commands.spawn(BuildingBundle::new(bt, Faction::Ironborn, x, y));
             }
         }
+    }
+}
+
+/// Apply PlayerCheats resource multiplier to the human player's resource pool each tick.
+fn apply_player_cheat_trickle(
+    time: Res<Time>,
+    screen: Res<ClientScreen>,
+    player_cheats: Res<PlayerCheats>,
+    player_faction: Option<Res<PlayerFaction>>,
+    mut pools: Query<(&FactionEntity, &mut ResourcePool)>,
+) {
+    if !matches!(*screen, ClientScreen::InMission | ClientScreen::TestMission { .. }) {
+        return;
+    }
+    let rm = player_cheats.resource_multiplier;
+    if (rm - 1.0).abs() < 0.01 {
+        return; // no-op for 1.0x
+    }
+    let Some(pf) = player_faction else { return };
+    let player_f = &pf.0;
+    let dt = time.delta_secs();
+
+    for (fe, mut pool) in &mut pools {
+        if &fe.faction != player_f {
+            continue;
+        }
+        // Apply multiplier as a fractional bonus/penalty on current pool
+        let bonus = pool.fuel * (rm - 1.0) * dt;
+        pool.fuel = (pool.fuel + bonus).min(2000.0).max(0.0);
+        let sbonus = pool.scrap * (rm - 1.0) * dt;
+        pool.scrap = (pool.scrap + sbonus).min(2000.0).max(0.0);
     }
 }

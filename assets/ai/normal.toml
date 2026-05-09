@@ -1,0 +1,11 @@
+[params]
+attack_wave_interval = 90.0
+reaction_time = 1.5
+aggression = 0.6
+scout_radius = 10
+focus_fire = true
+
+[cheats]
+resource_multiplier = 1.0
+build_time_multiplier = 1.0
+starting_resource_bonus = 0.0
