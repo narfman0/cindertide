@@ -26,6 +26,7 @@ pub mod render;
 pub mod ai;
 pub mod tui;
 pub mod narrative;
+pub mod mission_script;
 
 use map::{MapPlugin, GridPos, Faction, ControlPoint, ControlPointType};
 use units::{UnitPlugin, MoveTarget, MoveProgress, UnitPos, UnitKind, RiflemanBundle};
@@ -46,6 +47,7 @@ use beats::{BeatsPlugin, FiredBeats};
 use hollow::{HollowPlugin, HollowSpawner, HollowMode};
 use save::{SavePlugin, SaveSlots};
 use game::{GamePlugin, GameState, ActiveRun, fire_exit};
+use mission_script::MissionScriptPlugin;
 
 pub fn run_server() {
     let mut app = App::new();
@@ -129,6 +131,7 @@ pub fn run_server() {
         .add_plugins(HollowPlugin)
         .add_plugins(SavePlugin)
         .add_plugins(GamePlugin)
+        .add_plugins(MissionScriptPlugin)
         .add_systems(Startup, on_startup);
     // Load narrative data — path relative to working directory (project root when running via cargo)
     let narrative = narrative::NarrativeData::load("assets/narrative.toml")
@@ -2923,6 +2926,18 @@ pub fn setup_demo_scenario(world: &mut World, player: &Faction, mission_index: u
             contesting: None,
             capture_progress: 0.0,
         });
+    }
+
+    // Load mission script if one exists for this faction + mission index.
+    let faction_name = match player {
+        Faction::Combine => "combine",
+        Faction::Ironborn => "ironborn",
+        Faction::Covenant => "covenant",
+        Faction::Hollow => "hollow",
+    };
+    let script_name = format!("{faction_name}_m{mission_index}");
+    if let Some(mut script_state) = world.get_resource_mut::<mission_script::ScriptState>() {
+        script_state.load_script(&script_name);
     }
 }
 

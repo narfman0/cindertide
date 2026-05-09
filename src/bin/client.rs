@@ -16,6 +16,7 @@ use cindertide::combat::{PlayerAttackOrder, AttackMoveOrder, HoldPosition, Attac
 use cindertide::units::{MoveTarget, MoveProgress, UnitKind};
 use cindertide::buildings::Built;
 use cindertide::production::{ProductionQueue, unit_production_seconds};
+use cindertide::mission_script::{MissionScriptPlugin, ScriptState};
 use cindertide::{
     map::MapPlugin,
     units::UnitPlugin,
@@ -58,6 +59,7 @@ fn main() {
         .add_plugins((BuildingsPlugin, ProductionPlugin, HeroPlugin, TechPlugin, UnitAiPlugin))
         .add_plugins((RepairPlugin, AiPlugin, MissionPlugin, CampaignPlugin, BeatsPlugin))
         .add_plugins((HollowPlugin, SavePlugin, GamePlugin))
+        .add_plugins(MissionScriptPlugin)
         .init_resource::<VisualEntities>()
         .init_resource::<SelectedUnits>()
         .init_resource::<DragState>()
@@ -104,6 +106,7 @@ fn main() {
         .add_systems(Update, update_minimap)
         .add_systems(Update, handle_minimap_click)
         .add_systems(Update, update_mission_objectives)
+        .add_systems(Update, update_dialogue_bar)
         .add_systems(Update, handle_ability_input)
         .add_systems(Update, update_tech_panel)
         .add_systems(Update, update_fog_of_war)
@@ -336,6 +339,14 @@ struct MinimapDot;
 /// Text node showing the current mission objective (top-right, InMission only).
 #[derive(Component)]
 struct ObjectivesText;
+
+/// Root node of the dialogue bar (above the unit info panel, InMission only).
+#[derive(Component)]
+struct DialogueBar;
+
+/// Text inside the dialogue bar.
+#[derive(Component)]
+struct DialogueBarText;
 
 /// Root node of the tech tree overlay panel.
 #[derive(Component)]
@@ -1013,6 +1024,28 @@ fn setup_ui(mut commands: Commands) {
                     TextColor(Color::srgb(1.0, 0.85, 0.3)),
                     TextFont { font_size: 14.0, ..default() },
                     ObjectivesText,
+                ));
+            });
+
+            // Dialogue bar — above the unit info panel (bottom-center)
+            hud.spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    bottom: Val::Px(72.0), // above the unit info panel (~60px tall)
+                    left: Val::Percent(15.0),
+                    width: Val::Percent(70.0),
+                    padding: UiRect::axes(Val::Px(16.0), Val::Px(10.0)),
+                    ..default()
+                },
+                BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.78)),
+                Visibility::Hidden,
+                DialogueBar,
+            )).with_children(|panel| {
+                panel.spawn((
+                    Text::new(""),
+                    TextColor(Color::srgb(0.95, 0.95, 0.80)),
+                    TextFont { font_size: 17.0, ..default() },
+                    DialogueBarText,
                 ));
             });
         });
@@ -3168,12 +3201,21 @@ fn update_mission_objectives(
     units: Query<&Faction, With<UnitType>>,
     buildings: Query<(&Faction, &BuildingType), With<BuildingPos>>,
     player_faction: Option<Res<PlayerFaction>>,
+    script_state: Option<Res<ScriptState>>,
     mut text_q: Query<&mut Text, With<ObjectivesText>>,
 ) {
     if !matches!(*screen, ClientScreen::InMission | ClientScreen::TestMission { .. }) {
         return;
     }
     let Ok(mut text) = text_q.single_mut() else { return };
+
+    // If the script has set an objective override, use that.
+    if let Some(ref ss) = script_state {
+        if let Some(ref override_text) = ss.current_objective {
+            **text = override_text.clone();
+            return;
+        }
+    }
 
     let Some(mission_entity) = active.current_mission_entity else {
         **text = String::new();
@@ -3218,6 +3260,39 @@ fn update_mission_objectives(
     };
 
     **text = obj_text;
+}
+
+/// Show the front dialogue message from `ScriptState.dialogue_queue` for 4 seconds,
+/// then pop and show the next. The bar is hidden when the queue is empty.
+fn update_dialogue_bar(
+    screen: Res<ClientScreen>,
+    script_state: Option<Res<ScriptState>>,
+    mut bar_q: Query<&mut Visibility, With<DialogueBar>>,
+    mut text_q: Query<&mut Text, With<DialogueBarText>>,
+) {
+    if !matches!(*screen, ClientScreen::InMission | ClientScreen::TestMission { .. }) {
+        // Hide the bar outside of missions.
+        if let Ok(mut vis) = bar_q.single_mut() {
+            *vis = Visibility::Hidden;
+        }
+        return;
+    }
+
+    let Ok(mut vis) = bar_q.single_mut() else { return };
+    let Ok(mut text) = text_q.single_mut() else { return };
+
+    match script_state {
+        Some(ref ss) if !ss.dialogue_queue.is_empty() => {
+            *vis = Visibility::Visible;
+            if let Some(msg) = ss.dialogue_queue.front() {
+                **text = msg.clone();
+            }
+        }
+        _ => {
+            *vis = Visibility::Hidden;
+            **text = String::new();
+        }
+    }
 }
 
 // ── Fog of War system ─────────────────────────────────────────────────────────
