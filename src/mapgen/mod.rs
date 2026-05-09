@@ -12,9 +12,9 @@
 //   - Left half is generated, right half is mirrored for symmetry.
 //
 // Map sizes by mission:
-//   - Defense / Survival : small  32×20
-//   - Assault / Control  : medium 48×28
-//   - Extraction         : large  64×36
+//   - Defense / Survival : small   80×52
+//   - Assault / Control  : medium 128×80
+//   - Extraction         : large  160×100
 
 use crate::map::{TerrainType, CoverDensity, GridPos};
 
@@ -85,9 +85,9 @@ fn cover_for_terrain(t: &TerrainType) -> CoverDensity {
 /// Map sizes keyed by mission type.
 fn map_dims(mt: &MissionType) -> (i32, i32) {
     match mt {
-        MissionType::Defense | MissionType::Survival => (32, 20),
-        MissionType::Assault | MissionType::Control  => (48, 28),
-        MissionType::Extraction                      => (64, 36),
+        MissionType::Defense | MissionType::Survival => (80, 52),
+        MissionType::Assault | MissionType::Control  => (128, 80),
+        MissionType::Extraction                      => (160, 100),
     }
 }
 
@@ -136,6 +136,7 @@ fn gen_left_half_tile(
     // ---- Noise layers ----
     let n0 = hash_noise(x, y, seed) as f32 / 255.0;              // primary
     let n1 = hash_noise(x * 3 + 7, y * 5 + 13, seed ^ 0xdeadbeef) as f32 / 255.0; // secondary
+    let n2 = hash_noise(x * 7 + 3, y * 2 + 17, seed ^ 0xabcdef01) as f32 / 255.0; // tertiary
 
     // Normalised coordinates (0-1)
     let nx = x as f32 / half_w as f32;         // 0 = left edge, 1 = centre
@@ -160,29 +161,109 @@ fn gen_left_half_tile(
         _ => {}
     }
 
-    // ---- Central contested zone (within ~20% of centre column) ----
+    // ---- Open killing ground: centre 20% of the half-width is mostly clear ----
+    // This is the ~10% each side of the true centre — the pitched-battle zone.
+    if nx > 0.80 {
+        // A few roads and light rubble only; mostly clear grass.
+        if n0 < 0.15 {
+            return TerrainType::Road;
+        }
+        if n0 < 0.22 {
+            return TerrainType::Rubble;
+        }
+        return TerrainType::Grass;
+    }
+
+    // ---- Winding river: diagonal band of Mud ~35-45% across the half-width ----
+    // The river meanders: offset by noise to create a winding effect.
+    // It crosses diagonally (x-based), 2-3 tiles wide.
+    // Bridge crossings: Road tiles cut through the river at fixed intervals.
+    {
+        let river_cx = (half_w as f32 * 0.40) as i32; // river centreline x
+        // Winding: shift x centre by a noise-based sine-like offset in y.
+        let wiggle = ((hash_noise(0, y, seed ^ 0x11223344) as f32 / 255.0) - 0.5) * 6.0;
+        let dist_from_river = (x as f32 - (river_cx as f32 + wiggle)).abs();
+        if dist_from_river < 1.5 {
+            // Bridge crossing: every ~(height/3) rows a Road cuts through.
+            let bridge_interval = (height / 3).max(8);
+            let in_bridge = (y % bridge_interval).abs() <= 1;
+            if in_bridge {
+                return TerrainType::Road;
+            }
+            return TerrainType::Mud;
+        }
+    }
+
+    // ---- Industrial ruins: 2-4 clusters of 3×3 Rubble in mid-map ----
+    // Cluster centres derived from seed, placed in x range [25%..75%] of half.
+    {
+        let ruin_count = 2 + ((seed >> 8) & 0x3) as i32; // 2-5; cap at 4
+        let ruin_count = ruin_count.min(4);
+        let mut rng_r = lcg(seed ^ 0xfeed0ff);
+        for _ in 0..ruin_count {
+            let raw = rng_r();
+            let rcx = (half_w / 4) + (raw % (half_w / 2).max(1) as u64) as i32;
+            let raw2 = rng_r();
+            let rcy = (height / 4) + (raw2 % (height / 2).max(1) as u64) as i32;
+            if (x - rcx).abs() <= 1 && (y - rcy).abs() <= 1 {
+                // Hollow centre of ruins (cover, but not impassable), edges are rubble.
+                if (x - rcx).abs() == 1 || (y - rcy).abs() == 1 {
+                    return TerrainType::Rubble;
+                }
+                // Interior is rubble too (3×3 solid ruin).
+                return TerrainType::Rubble;
+            }
+        }
+    }
+
+    // ---- Ridgelines: 1-2 diagonal bands of Forest acting as cover lines ----
+    {
+        let ridge_count = 1 + ((seed >> 12) & 0x1) as i32; // 1-2
+        for i in 0..ridge_count {
+            // Each ridge runs diagonally: y = slope * x + offset
+            let offset_base = (height / (ridge_count + 1)) * (i + 1);
+            let offset_noise = ((seed >> (i * 4)) & 0xf) as i32 - 8; // ±8 row jitter
+            let ridge_y = offset_base + offset_noise;
+            // Diagonal: tilt by ~0.5 tiles-per-x (gentle slope)
+            let tilted_y = ridge_y + (x as f32 * 0.5) as i32;
+            let ridge_hw = 1; // 2-tile wide band
+            if (y - tilted_y).abs() <= ridge_hw && n2 < 0.80 {
+                return TerrainType::Forest;
+            }
+        }
+    }
+
+    // ---- Central contested zone (within ~10-20% of centre column) ----
     // Roads and rubble near the midline, weighted by noise.
-    if nx > 0.75 {
+    if nx > 0.65 {
         if n0 < 0.30 {
             return TerrainType::Road;
         }
-        if n0 < 0.55 {
+        if n0 < 0.50 {
             return TerrainType::Rubble;
         }
     }
 
-    // ---- Choke corridors: 2-4 Forest/Rubble bands ----
+    // ---- Choke corridors: Forest/Rubble bands spanning mid to centre ----
     // We define choke corridors as diagonal-ish bands across y.
     // Corridor positions are derived from the seed so they vary per map.
-    let choke_count = 2 + ((seed & 0x3) as i32).min(2); // 2-4
+    // Scale corridor count the same as chokepoint count.
+    let choke_count = {
+        let base: i32 = match mission_type {
+            MissionType::Defense | MissionType::Survival => 2,
+            MissionType::Assault | MissionType::Control  => 3,
+            MissionType::Extraction                      => 4,
+        };
+        (base + ((seed & 0x3) as i32).min(2)).max(2)
+    };
     for i in 0..choke_count {
         // Each corridor occupies a band of y-space.
         let band_frac = (i as f32 + 0.5) / (choke_count as f32 + 1.0);
         let band_y = (band_frac * height as f32) as i32;
         // Width of corridor shrinks toward map edges (narrower at flanks).
         let corridor_hw = if (nx * 100.0) as i32 % 2 == 0 { 1 } else { 2 };
-        // Corridor is active in x range [half_w/2 .. half_w] (mid-map to centre).
-        if x >= half_w / 2 && (y - band_y).abs() <= corridor_hw {
+        // Corridor is active in x range [half_w/3 .. half_w*0.65] (mid-map to near centre).
+        if x >= half_w / 3 && nx < 0.65 && (y - band_y).abs() <= corridor_hw {
             // Alternate forest / rubble by corridor index.
             return if i % 2 == 0 {
                 TerrainType::Forest
@@ -194,25 +275,20 @@ fn gen_left_half_tile(
 
     // ---- Flanking forest strips (outer edges) ----
     // Forest corridors along top and bottom edges to create natural funnels.
-    if ny < 0.18 || ny > 0.82 {
+    if ny < 0.15 || ny > 0.85 {
         if n0 < 0.55 {
             return TerrainType::Forest;
         }
-    }
-
-    // ---- Mud river bands (horizontal stripes in the mid-field) ----
-    if ny > 0.35 && ny < 0.65 && n1 < 0.12 {
-        return TerrainType::Mud;
     }
 
     // ---- Scattered Forest / Road noise across the field ----
     if n0 < 0.05 {
         return TerrainType::Road;
     }
-    if n0 < 0.18 {
+    if n0 < 0.15 {
         return TerrainType::Forest;
     }
-    if n0 < 0.22 {
+    if n0 < 0.19 {
         return TerrainType::Rubble;
     }
 
@@ -229,22 +305,22 @@ fn resource_node_positions(
     _bases: &[GridPos],
 ) -> Vec<(i32, i32)> {
     let half_w = width / 2;
-    // 4-6 resource nodes on the left half; mirroring doubles them on the full map.
-    let count = 2 + ((seed >> 4) & 0x3) as usize; // 2-5 per half, mirrored = 4-10 total
-    let count = count.min(3); // cap per-half at 3 → max 6 total
+    // 6-10 total resource nodes: 3-5 per half (mirrored).
+    let count = 3 + ((seed >> 4) & 0x3) as usize; // 3-6 per half; cap at 5
+    let count = count.min(5);
     let mut positions = Vec::with_capacity(count);
     let mut rng = lcg(seed ^ 0x1234567890abcdef);
 
     let mut attempts = 0usize;
-    while positions.len() < count && attempts < 200 {
+    while positions.len() < count && attempts < 400 {
         attempts += 1;
-        // Weight toward centre and flanks, not near the base corners (x < 4).
-        let rx = 4 + (rng() % (half_w - 4) as u64) as i32;
-        let ry = 2 + (rng() % (height - 4) as u64) as i32;
+        // Weight toward centre and flanks, not near the base corners (x < 6).
+        let rx = 6 + (rng() % (half_w - 6).max(1) as u64) as i32;
+        let ry = 3 + (rng() % (height - 6).max(1) as u64) as i32;
 
-        // Keep at least 4 tiles away from other resource nodes.
+        // Keep at least 6 tiles away from other resource nodes (larger maps need spread).
         let too_close = positions.iter().any(|&(ox, oy): &(i32, i32)| {
-            (rx - ox).abs().max((ry - oy).abs()) < 4
+            (rx - ox).abs().max((ry - oy).abs()) < 6
         });
         if !too_close {
             positions.push((rx, ry));
@@ -275,8 +351,14 @@ pub fn generate(width: i32, height: i32, seed: u64, mission_type: MissionType) -
     };
 
     // Choke points: along the centre column at corridor y positions.
+    // Scale choke count with map size: small 2-4, medium 3-5, large 4-6.
     let half_w = width / 2;
-    let choke_count = (2 + ((seed & 0x3) as i32).min(2)) as usize;
+    let choke_base: i32 = match mission_type {
+        MissionType::Defense | MissionType::Survival => 2,
+        MissionType::Assault | MissionType::Control  => 3,
+        MissionType::Extraction                      => 4,
+    };
+    let choke_count = (choke_base + ((seed & 0x3) as i32).min(2)) as usize;
     let chokepoints: Vec<GridPos> = (0..choke_count)
         .map(|i| {
             let band_frac = (i as f32 + 0.5) / (choke_count as f32 + 1.0);
@@ -407,12 +489,12 @@ mod tests {
     }
 
     #[test]
-    fn chokepoints_between_two_and_four() {
+    fn chokepoints_between_three_and_five() {
         for seed in [1u64, 42, 99, 777] {
-            let m = generate(48, 28, seed, MissionType::Assault);
+            let m = generate(128, 80, seed, MissionType::Assault);
             assert!(
-                m.chokepoints.len() >= 2 && m.chokepoints.len() <= 4,
-                "seed {seed}: expected 2-4 chokepoints, got {}",
+                m.chokepoints.len() >= 3 && m.chokepoints.len() <= 5,
+                "seed {seed}: expected 3-5 chokepoints, got {}",
                 m.chokepoints.len()
             );
         }
@@ -420,7 +502,7 @@ mod tests {
 
     #[test]
     fn base_corners_are_grass() {
-        let m = generate(48, 28, 42, MissionType::Assault);
+        let m = generate(128, 80, 42, MissionType::Assault);
         for base in &m.bases {
             for dy in -2..=2i32 {
                 for dx in -2..=2i32 {
@@ -441,10 +523,10 @@ mod tests {
 
     #[test]
     fn symmetric_map_is_horizontally_mirrored() {
-        let m = generate(48, 28, 42, MissionType::Control);
-        // Check 50 random interior tiles are mirrored.
-        for y in 2..26 {
-            for x in 1..22 {
+        let m = generate(128, 80, 42, MissionType::Control);
+        // Check interior tiles are mirrored.
+        for y in 2..78 {
+            for x in 1..62 {
                 let mirror_x = m.width - 1 - x;
                 let t_left = m.tiles.iter().find(|t| t.pos.x == x && t.pos.y == y).unwrap();
                 let t_right = m.tiles.iter().find(|t| t.pos.x == mirror_x && t.pos.y == y).unwrap();
@@ -458,27 +540,27 @@ mod tests {
 
     #[test]
     fn resource_nodes_exist_on_map() {
-        let m = generate(48, 28, 42, MissionType::Control);
+        let m = generate(128, 80, 42, MissionType::Control);
         let corrupted: Vec<_> = m.tiles.iter().filter(|t| t.terrain == TerrainType::Corrupted).collect();
         assert!(
-            corrupted.len() >= 4,
-            "expected at least 4 resource nodes (Corrupted tiles), got {}",
+            corrupted.len() >= 6,
+            "expected at least 6 resource nodes (Corrupted tiles), got {}",
             corrupted.len()
         );
     }
 
     #[test]
     fn map_dims_vary_by_mission() {
-        assert_eq!(map_dims(&MissionType::Defense), (32, 20));
-        assert_eq!(map_dims(&MissionType::Assault), (48, 28));
-        assert_eq!(map_dims(&MissionType::Extraction), (64, 36));
+        assert_eq!(map_dims(&MissionType::Defense), (80, 52));
+        assert_eq!(map_dims(&MissionType::Assault), (128, 80));
+        assert_eq!(map_dims(&MissionType::Extraction), (160, 100));
     }
 
     #[test]
     fn generate_for_mission_uses_correct_dims() {
         let m = generate_for_mission(42, MissionType::Extraction);
-        assert_eq!(m.width, 64);
-        assert_eq!(m.height, 36);
-        assert_eq!(m.tiles.len(), 64 * 36);
+        assert_eq!(m.width, 160);
+        assert_eq!(m.height, 100);
+        assert_eq!(m.tiles.len(), 160 * 100);
     }
 }

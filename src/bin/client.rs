@@ -121,6 +121,9 @@ enum ClientScreen {
     FactionPicker { selected: usize },
     Briefing { title: String, briefing: String },
     InMission,
+    /// Running a mission that was started directly from the map editor (P key).
+    /// When it ends, return to MapEditor with the saved map path reloaded.
+    TestMission { saved_map_path: String },
     Debrief { title: String, text: String, won: bool },
     GameOver { won: bool, handler_unlocked: bool },
     MapEditor,
@@ -236,6 +239,23 @@ struct SavedMap {
     tiles: Vec<SavedTile>,
     units: Vec<SavedUnit>,
     buildings: Vec<SavedBuilding>,
+    /// Optional campaign scripting fields — if set, override mission config.
+    #[serde(default)]
+    mission_type: Option<String>,
+    #[serde(default)]
+    player_faction: Option<String>,
+    #[serde(default)]
+    opponent_faction: Option<String>,
+    #[serde(default)]
+    deadline_seconds: Option<f32>,
+    #[serde(default)]
+    briefing_override: Option<String>,
+    #[serde(default)]
+    win_override: Option<String>,
+    #[serde(default)]
+    loss_override: Option<String>,
+    #[serde(default)]
+    mission_index_override: Option<usize>,
 }
 
 // ── Components ──────────────────────────────────────────────────────────────
@@ -1016,7 +1036,7 @@ fn update_screen_overlay(
     let Ok(mut hint) = hint_text.single_mut() else { return };
 
     match screen.as_ref() {
-        ClientScreen::InMission | ClientScreen::MapEditor => {
+        ClientScreen::InMission | ClientScreen::TestMission { .. } | ClientScreen::MapEditor => {
             *vis = Visibility::Hidden;
         }
         ClientScreen::Title => {
@@ -1105,7 +1125,7 @@ fn handle_ui_input(
     mut commands: Commands,
 ) {
     // Only handle UI input when not in mission or editor
-    if *screen == ClientScreen::InMission || *screen == ClientScreen::MapEditor {
+    if matches!(*screen, ClientScreen::InMission | ClientScreen::TestMission { .. } | ClientScreen::MapEditor) {
         return;
     }
 
@@ -1216,10 +1236,14 @@ fn handle_ui_input(
                 commands.queue(|world: &mut World| {
                     cindertide::wipe_world_entities(world);
 
-                    let player = world.resource::<ActiveRun>()
-                        .run.as_ref()
-                        .map(|r| map_faction(r.faction))
-                        .unwrap_or(Faction::Combine);
+                    let (player, mission_index) = {
+                        let active = world.resource::<ActiveRun>();
+                        let p = active.run.as_ref()
+                            .map(|r| map_faction(r.faction))
+                            .unwrap_or(Faction::Combine);
+                        let idx = active.run.as_ref().map(|r| r.current_mission).unwrap_or(0);
+                        (p, idx)
+                    };
 
                     let opponent = if player == Faction::Combine {
                         Faction::Ironborn
@@ -1243,7 +1267,7 @@ fn handle_ui_input(
                         deadline: 300.0,
                     }).id();
 
-                    cindertide::setup_demo_scenario(world, &player);
+                    cindertide::setup_demo_scenario(world, &player, mission_index);
 
                     world.resource_mut::<ActiveRun>().current_mission_entity = Some(mission_entity);
                     *world.resource_mut::<GameState>() = GameState::InMission;
@@ -1289,6 +1313,7 @@ fn handle_ui_input(
         }
 
         ClientScreen::InMission => {}
+        ClientScreen::TestMission { .. } => {}
         ClientScreen::MapEditor => {}
         // MultiplayerMenu handled above; this arm exists so the compiler is happy
         // if we ever reach it again from a re-match (shouldn't happen).
@@ -1320,7 +1345,21 @@ fn poll_mission_end(
     narrative: Option<Res<NarrativeData>>,
     mut audio_queue: ResMut<AudioEventQueue>,
 ) {
-    if *screen != ClientScreen::InMission {
+    // Check if we're in a test mission — if so, handle end by returning to the map editor.
+    if let ClientScreen::TestMission { saved_map_path } = &*screen {
+        let Some(mission_entity) = active.current_mission_entity else { return };
+        let Ok(m) = missions.get(mission_entity) else { return };
+        if m.status == MissionStatus::Active { return; }
+        let won = m.status == MissionStatus::Won;
+        let result_str = if won { "WON" } else { "LOST" };
+        info!("Test mission ended: {result_str}. Returning to map editor.");
+        active.current_mission_entity = None;
+        audio_queue.0.push(AudioEvent::MissionEnd);
+        *screen = ClientScreen::MapEditor;
+        return;
+    }
+
+    if !matches!(*screen, ClientScreen::InMission | ClientScreen::TestMission { .. }) {
         return;
     }
 
@@ -1536,8 +1575,8 @@ fn handle_mouse_input(
     screen: Res<ClientScreen>,
     mut audio_queue: ResMut<AudioEventQueue>,
 ) {
-    // Only handle mouse input during mission
-    if *screen != ClientScreen::InMission {
+    // Only handle mouse input during mission (or test mission)
+    if !matches!(*screen, ClientScreen::InMission | ClientScreen::TestMission { .. }) {
         return;
     }
 
@@ -1822,8 +1861,8 @@ fn handle_keyboard_commands(
     mut materials: ResMut<Assets<StandardMaterial>>,
     screen: Res<ClientScreen>,
 ) {
-    // Only handle gameplay keys during mission
-    if *screen != ClientScreen::InMission {
+    // Only handle gameplay keys during mission (or test mission)
+    if !matches!(*screen, ClientScreen::InMission | ClientScreen::TestMission { .. }) {
         return;
     }
 
@@ -1974,7 +2013,7 @@ fn edge_scroll(
     time: Res<Time>,
     screen: Res<ClientScreen>,
 ) {
-    if *screen != ClientScreen::InMission && *screen != ClientScreen::MapEditor {
+    if !matches!(*screen, ClientScreen::InMission | ClientScreen::TestMission { .. } | ClientScreen::MapEditor) {
         return;
     }
     let Ok(window) = windows.single() else { return };
@@ -2034,6 +2073,8 @@ fn handle_editor_keyboard(
     tiles: Query<(Entity, &Tile)>,
     units: Query<Entity, With<UnitType>>,
     buildings: Query<Entity, With<BuildingType>>,
+    units_full: Query<(&UnitPos, &Faction, &UnitType)>,
+    buildings_full: Query<(&BuildingPos, &Faction, &BuildingType)>,
     mut visual_entities: ResMut<VisualEntities>,
     rendered_tiles: Query<Entity, With<RenderedTile>>,
 ) {
@@ -2135,6 +2176,14 @@ fn handle_editor_keyboard(
             tiles: saved_tiles,
             units: saved_units,
             buildings: saved_buildings,
+            mission_type: None,
+            player_faction: None,
+            opponent_faction: None,
+            deadline_seconds: None,
+            briefing_override: None,
+            win_override: None,
+            loss_override: None,
+            mission_index_override: None,
         };
 
         let timestamp = std::time::SystemTime::now()
@@ -2196,6 +2245,104 @@ fn handle_editor_keyboard(
             }
         }
     }
+
+    // P — Test Mission: save current editor state to a temp file and start a mission from it.
+    if keys.just_pressed(KeyCode::KeyP) {
+        // Collect current map state into a SavedMap.
+        let saved_tiles: Vec<SavedTile> = tiles.iter().map(|(_, t)| SavedTile {
+            x: t.pos.x,
+            y: t.pos.y,
+            terrain: terrain_type_name(&t.terrain_type).to_string(),
+        }).collect();
+        let saved_units: Vec<SavedUnit> = units_full.iter().map(|(pos, fac, ut)| SavedUnit {
+            x: pos.pos.x,
+            y: pos.pos.y,
+            faction: map_faction_name(fac).to_string(),
+            unit_type: unit_type_name(ut).to_string(),
+        }).collect();
+        let saved_buildings: Vec<SavedBuilding> = buildings_full.iter().map(|(pos, fac, bt)| SavedBuilding {
+            x: pos.pos.x,
+            y: pos.pos.y,
+            faction: map_faction_name(fac).to_string(),
+            building_type: building_type_name(bt).to_string(),
+        }).collect();
+
+        let map = SavedMap {
+            tiles: saved_tiles,
+            units: saved_units,
+            buildings: saved_buildings,
+            mission_type: None,
+            player_faction: None,
+            opponent_faction: None,
+            deadline_seconds: None,
+            briefing_override: None,
+            win_override: None,
+            loss_override: None,
+            mission_index_override: None,
+        };
+
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let path = format!("assets/maps/test_{}.toml", timestamp);
+
+        if let Ok(content) = toml::to_string(&map) {
+            if let Err(e) = std::fs::create_dir_all("assets/maps") {
+                eprintln!("editor: failed to create maps dir: {e}");
+            } else if let Err(e) = std::fs::write(&path, &content) {
+                eprintln!("editor: failed to save test map: {e}");
+            } else {
+                info!("editor: starting test mission from {path}");
+                let saved_path = path.clone();
+                // Queue world command to load tiles into the world and start a mission.
+                commands.queue(move |world: &mut World| {
+                    cindertide::wipe_world_entities(world);
+
+                    // Load the saved map into the world.
+                    if let Ok(file_content) = std::fs::read_to_string(&saved_path) {
+                        if let Ok(saved) = toml::from_str::<SavedMap>(&file_content) {
+                            for st in &saved.tiles {
+                                if let Some(terrain) = parse_terrain_name(&st.terrain) {
+                                    world.spawn(Tile {
+                                        pos: GridPos { x: st.x, y: st.y },
+                                        terrain_type: terrain,
+                                        cover: cindertide::map::CoverDensity::None,
+                                    });
+                                }
+                            }
+                        }
+                    }
+
+                    // Use mission_type / faction from saved fields or defaults.
+                    let player = Faction::Combine;
+                    let opponent = Faction::Ironborn;
+                    let mission_index = 0usize;
+
+                    world.spawn(FactionBundle::new(player.clone()));
+
+                    let mission_entity = world.spawn(Mission {
+                        mission_type: cindertide::mapgen::MissionType::Assault,
+                        player_faction: player.clone(),
+                        opponent_faction: opponent.clone(),
+                        status: MissionStatus::Active,
+                        elapsed: 0.0,
+                        deadline: 300.0,
+                    }).id();
+
+                    // Spawn faction loadouts for both sides.
+                    cindertide::setup_demo_scenario(world, &player, mission_index);
+
+                    world.resource_mut::<ActiveRun>().current_mission_entity = Some(mission_entity);
+                    *world.resource_mut::<GameState>() = GameState::InMission;
+                    world.insert_resource(PlayerFaction(player));
+                    *world.resource_mut::<ClientScreen>() = ClientScreen::TestMission {
+                        saved_map_path: saved_path,
+                    };
+                });
+            }
+        }
+    }
 }
 
 fn find_latest_custom_map() -> Option<String> {
@@ -2245,6 +2392,15 @@ fn parse_faction_name(s: &str) -> Option<Faction> {
         "Covenant" => Some(Faction::Covenant),
         "Hollow" => Some(Faction::Hollow),
         _ => None,
+    }
+}
+
+fn map_faction_name(f: &Faction) -> &'static str {
+    match f {
+        Faction::Combine  => "Combine",
+        Faction::Ironborn => "Ironborn",
+        Faction::Covenant => "Covenant",
+        Faction::Hollow   => "Hollow",
     }
 }
 
@@ -2474,7 +2630,7 @@ fn update_editor_panel(
     };
 
     **text = format!(
-        "Tool: {tool_name}\n\nTerrain: {terrain_name}\nFaction: {faction_name_str}\nUnit: {unit_name}\nBuilding: {building_name}\n\nTiles: {tile_count}\nUnits: {unit_count}\nBuildings: {building_count}\n\n--- Keys ---\n1-4: tool\nF: faction\nT: unit type\nB: building\nR-click: cycle terrain\nDel: clear map\nCtrl+S: save\nCtrl+L: load\nEsc: exit{del_hint}"
+        "Tool: {tool_name}\n\nTerrain: {terrain_name}\nFaction: {faction_name_str}\nUnit: {unit_name}\nBuilding: {building_name}\n\nTiles: {tile_count}\nUnits: {unit_count}\nBuildings: {building_count}\n\n--- Keys ---\n1-4: tool\nF: faction\nT: unit type\nB: building\nR-click: cycle terrain\nDel: clear map\nCtrl+S: save\nCtrl+L: load\nP: test mission\nEsc: exit{del_hint}"
     );
 }
 
@@ -2488,7 +2644,7 @@ fn update_hud_visibility(
     if !screen.is_changed() {
         return;
     }
-    let in_mission = *screen == ClientScreen::InMission;
+    let in_mission = matches!(*screen, ClientScreen::InMission | ClientScreen::TestMission { .. });
     for mut vis in &mut hud_vis {
         *vis = if in_mission { Visibility::Visible } else { Visibility::Hidden };
     }
@@ -2501,7 +2657,7 @@ fn update_resource_bar(
     faction_entities: Query<(&FactionEntity, &ResourcePool)>,
     mut text_q: Query<&mut Text, With<ResourceBarText>>,
 ) {
-    if *screen != ClientScreen::InMission {
+    if !matches!(*screen, ClientScreen::InMission | ClientScreen::TestMission { .. }) {
         return;
     }
     let Ok(mut text) = text_q.single_mut() else { return };
@@ -2534,7 +2690,7 @@ fn update_unit_info_panel(
     ), With<UnitType>>,
     mut text_q: Query<&mut Text, With<UnitInfoText>>,
 ) {
-    if *screen != ClientScreen::InMission {
+    if !matches!(*screen, ClientScreen::InMission | ClientScreen::TestMission { .. }) {
         return;
     }
     let Ok(mut text) = text_q.single_mut() else { return };
@@ -2633,7 +2789,7 @@ fn update_production_queue(
     buildings: Query<(&BuildingType, &Faction, &ProductionQueue), With<Built>>,
     mut text_q: Query<&mut Text, With<ProductionQueueText>>,
 ) {
-    if *screen != ClientScreen::InMission {
+    if !matches!(*screen, ClientScreen::InMission | ClientScreen::TestMission { .. }) {
         return;
     }
     let Ok(mut text) = text_q.single_mut() else { return };
@@ -2708,7 +2864,7 @@ fn update_minimap(
     buildings: Query<(&BuildingPos, &Faction), With<BuildingType>>,
     player_faction: Option<Res<PlayerFaction>>,
 ) {
-    if *screen != ClientScreen::InMission {
+    if !matches!(*screen, ClientScreen::InMission | ClientScreen::TestMission { .. }) {
         return;
     }
 
@@ -2817,7 +2973,7 @@ fn handle_minimap_click(
     tiles: Query<&Tile>,
     mut cameras: Query<&mut Transform, With<IsometricCamera>>,
 ) {
-    if *screen != ClientScreen::InMission {
+    if !matches!(*screen, ClientScreen::InMission | ClientScreen::TestMission { .. }) {
         return;
     }
     if !buttons.just_pressed(MouseButton::Left) {
@@ -2880,7 +3036,7 @@ fn update_mission_objectives(
     player_faction: Option<Res<PlayerFaction>>,
     mut text_q: Query<&mut Text, With<ObjectivesText>>,
 ) {
-    if *screen != ClientScreen::InMission {
+    if !matches!(*screen, ClientScreen::InMission | ClientScreen::TestMission { .. }) {
         return;
     }
     let Ok(mut text) = text_q.single_mut() else { return };
@@ -2952,7 +3108,7 @@ fn update_fog_of_war(
     building_visuals: Query<(&Faction, &BuildingPos), With<BuildingType>>,
     mut vis_query: Query<(&mut Visibility, Entity)>,
 ) {
-    if *screen != ClientScreen::InMission {
+    if !matches!(*screen, ClientScreen::InMission | ClientScreen::TestMission { .. }) {
         return;
     }
 
@@ -3192,7 +3348,7 @@ fn handle_ability_input(
     enemies_q: Query<(Entity, &cindertide::units::UnitPos, &Faction), With<UnitType>>,
     player_faction: Option<Res<PlayerFaction>>,
 ) {
-    if *screen != ClientScreen::InMission || tech_vis.visible {
+    if !matches!(*screen, ClientScreen::InMission | ClientScreen::TestMission { .. }) || tech_vis.visible {
         return;
     }
     if selected.entities.is_empty() {
@@ -3608,7 +3764,7 @@ fn host_broadcast_game_state(
         return;
     }
     let Some(channels) = net_channels else { return };
-    if *screen != ClientScreen::InMission {
+    if !matches!(*screen, ClientScreen::InMission | ClientScreen::TestMission { .. }) {
         return;
     }
 

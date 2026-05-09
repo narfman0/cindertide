@@ -1780,7 +1780,7 @@ fn handle_mission_select(In(params): In<Option<Value>>, world: &mut World) -> Br
         });
     }
 
-    let (mission_type, map_faction) = {
+    let (mission_type, map_faction, current_mission_index) = {
         let active = world.resource::<ActiveRun>();
         let run = active.run.as_ref().ok_or_else(|| BrpError {
             code: -32000,
@@ -1793,7 +1793,8 @@ fn handle_mission_select(In(params): In<Option<Value>>, world: &mut World) -> Br
             data: None,
         })?;
         let mf = playable_to_map_faction(&run.faction);
-        (mt, mf)
+        let idx = run.current_mission;
+        (mt, mf, idx)
     };
 
     let opponent = match map_faction {
@@ -1813,7 +1814,7 @@ fn handle_mission_select(In(params): In<Option<Value>>, world: &mut World) -> Br
         })
         .id();
 
-    setup_demo_scenario(world, &map_faction);
+    setup_demo_scenario(world, &map_faction, current_mission_index);
 
     world.resource_mut::<ActiveRun>().current_mission_entity = Some(mission_entity);
     *world.resource_mut::<GameState>() = GameState::InMission;
@@ -2696,40 +2697,127 @@ fn spawn_unit_type_at(world: &mut World, faction: Faction, unit_type: units::Uni
     }
 }
 
-/// Apply Layer-1 starting loadout per `factions.md` for a given faction
-/// at a base origin tile.
-fn apply_faction_loadout(world: &mut World, faction: &Faction, base: &GridPos) {
+/// Apply starting loadout for a given faction at a base origin tile.
+///
+/// `mission_index` controls player starting strength (0 = tutorial-rich, 4 = bare).
+/// `is_player` = true uses the mission_index progression; false always uses full AI base.
+fn apply_faction_loadout(
+    world: &mut World,
+    faction: &Faction,
+    base: &GridPos,
+    mission_index: usize,
+    is_player: bool,
+) {
     let bx = base.x;
     let by = base.y;
+
+    // Enemy AI always gets a full base regardless of mission index.
+    // Player gets a progressively smaller starting loadout.
+    let effective_index = if is_player { mission_index } else { 0 };
+
     match faction {
         Faction::Combine => {
-            spawn_built_building(world, BuildingType::CommandBunker, faction.clone(), bx, by);
-            spawn_built_building(world, BuildingType::Refinery, faction.clone(), bx + 2, by);
-            spawn_built_building(world, BuildingType::Barracks, faction.clone(), bx, by + 2);
-            spawn_built_building(world, BuildingType::Scrapyard, faction.clone(), bx + 2, by + 2);
-            spawn_built_building(world, BuildingType::SupplyDepot, faction.clone(), bx - 1, by + 1);
-            for i in 0..4 {
-                spawn_unit_type_at(world, faction.clone(), units::UnitType::Riflemen, bx + i, by + 4);
+            // Index 0: full base (CommandBunker + Refinery + Barracks + Scrapyard + SupplyDepot, 4 Riflemen + 1 HeavyWeapons)
+            // Index 1: light  (CommandBunker + Refinery, 2 Riflemen)
+            // Index 2: minimal (CommandBunker only, 1 Rifleman)
+            // Index 3-4: economic start (Refinery only, 1 Rifleman)
+            match effective_index {
+                0 => {
+                    spawn_built_building(world, BuildingType::CommandBunker, faction.clone(), bx, by);
+                    spawn_built_building(world, BuildingType::Refinery, faction.clone(), bx + 2, by);
+                    spawn_built_building(world, BuildingType::Barracks, faction.clone(), bx, by + 2);
+                    for i in 0..3 {
+                        spawn_unit_type_at(world, faction.clone(), units::UnitType::Riflemen, bx + i, by + 4);
+                    }
+                    spawn_unit_type_at(world, faction.clone(), units::UnitType::HeavyWeapons, bx + 3, by + 4);
+                }
+                1 => {
+                    spawn_built_building(world, BuildingType::CommandBunker, faction.clone(), bx, by);
+                    spawn_built_building(world, BuildingType::Refinery, faction.clone(), bx + 2, by);
+                    for i in 0..2 {
+                        spawn_unit_type_at(world, faction.clone(), units::UnitType::Riflemen, bx + i, by + 4);
+                    }
+                }
+                2 => {
+                    spawn_built_building(world, BuildingType::CommandBunker, faction.clone(), bx, by);
+                    spawn_unit_type_at(world, faction.clone(), units::UnitType::Riflemen, bx, by + 3);
+                }
+                _ => {
+                    // Missions 3+: economic start — Refinery only, 1 Rifleman
+                    spawn_built_building(world, BuildingType::Refinery, faction.clone(), bx, by);
+                    spawn_unit_type_at(world, faction.clone(), units::UnitType::Riflemen, bx, by + 3);
+                }
             }
-            spawn_unit_type_at(world, faction.clone(), units::UnitType::HeavyWeapons, bx + 4, by + 4);
+            // Full base for AI (effective_index == 0)
+            if effective_index == 0 && !is_player {
+                spawn_built_building(world, BuildingType::Scrapyard, faction.clone(), bx + 2, by + 2);
+                spawn_built_building(world, BuildingType::SupplyDepot, faction.clone(), bx - 1, by + 1);
+                spawn_unit_type_at(world, faction.clone(), units::UnitType::Riflemen, bx + 4, by + 4);
+            }
         }
         Faction::Ironborn => {
-            spawn_built_building(world, BuildingType::Foundry, faction.clone(), bx, by);
-            spawn_built_building(world, BuildingType::Scrapyard, faction.clone(), bx + 2, by);
-            spawn_built_building(world, BuildingType::RepairBay, faction.clone(), bx, by + 2);
-            for i in 0..5 {
-                spawn_unit_type_at(world, faction.clone(), units::UnitType::Riflemen, bx + i, by + 4);
+            match effective_index {
+                0 => {
+                    spawn_built_building(world, BuildingType::Foundry, faction.clone(), bx, by);
+                    spawn_built_building(world, BuildingType::Scrapyard, faction.clone(), bx + 2, by);
+                    spawn_built_building(world, BuildingType::RepairBay, faction.clone(), bx, by + 2);
+                    for i in 0..3 {
+                        spawn_unit_type_at(world, faction.clone(), units::UnitType::Riflemen, bx + i, by + 4);
+                    }
+                    spawn_unit_type_at(world, faction.clone(), units::UnitType::HeavyWeapons, bx + 3, by + 4);
+                }
+                1 => {
+                    spawn_built_building(world, BuildingType::Foundry, faction.clone(), bx, by);
+                    spawn_built_building(world, BuildingType::Scrapyard, faction.clone(), bx + 2, by);
+                    for i in 0..2 {
+                        spawn_unit_type_at(world, faction.clone(), units::UnitType::Riflemen, bx + i, by + 4);
+                    }
+                }
+                2 => {
+                    spawn_built_building(world, BuildingType::Foundry, faction.clone(), bx, by);
+                    spawn_unit_type_at(world, faction.clone(), units::UnitType::Riflemen, bx, by + 3);
+                }
+                _ => {
+                    // Missions 3+: Foundry (primary economic building) + 1 Rifleman
+                    spawn_built_building(world, BuildingType::Foundry, faction.clone(), bx, by);
+                    spawn_unit_type_at(world, faction.clone(), units::UnitType::Riflemen, bx, by + 3);
+                }
             }
-            spawn_unit_type_at(world, faction.clone(), units::UnitType::LightVehicle, bx + 5, by + 4);
+            if effective_index == 0 && !is_player {
+                spawn_unit_type_at(world, faction.clone(), units::UnitType::LightVehicle, bx + 4, by + 4);
+            }
         }
         Faction::Covenant => {
-            spawn_built_building(world, BuildingType::CommandBunker, faction.clone(), bx, by);
-            spawn_built_building(world, BuildingType::Pillbox, faction.clone(), bx + 3, by - 1);
-            spawn_built_building(world, BuildingType::Pillbox, faction.clone(), bx + 3, by + 1);
-            spawn_built_building(world, BuildingType::Watchtower, faction.clone(), bx + 3, by + 3);
-            spawn_built_building(world, BuildingType::Workshop, faction.clone(), bx, by + 2);
-            for i in 0..5 {
-                spawn_unit_type_at(world, faction.clone(), units::UnitType::Riflemen, bx + i, by + 4);
+            match effective_index {
+                0 => {
+                    spawn_built_building(world, BuildingType::CommandBunker, faction.clone(), bx, by);
+                    spawn_built_building(world, BuildingType::Pillbox, faction.clone(), bx + 3, by - 1);
+                    spawn_built_building(world, BuildingType::Workshop, faction.clone(), bx, by + 2);
+                    for i in 0..3 {
+                        spawn_unit_type_at(world, faction.clone(), units::UnitType::Riflemen, bx + i, by + 4);
+                    }
+                    spawn_unit_type_at(world, faction.clone(), units::UnitType::HeavyWeapons, bx + 3, by + 4);
+                }
+                1 => {
+                    spawn_built_building(world, BuildingType::CommandBunker, faction.clone(), bx, by);
+                    spawn_built_building(world, BuildingType::Workshop, faction.clone(), bx, by + 2);
+                    for i in 0..2 {
+                        spawn_unit_type_at(world, faction.clone(), units::UnitType::Riflemen, bx + i, by + 4);
+                    }
+                }
+                2 => {
+                    spawn_built_building(world, BuildingType::CommandBunker, faction.clone(), bx, by);
+                    spawn_unit_type_at(world, faction.clone(), units::UnitType::Riflemen, bx, by + 3);
+                }
+                _ => {
+                    // Missions 3+: Workshop (primary economic building) + 1 Rifleman
+                    spawn_built_building(world, BuildingType::Workshop, faction.clone(), bx, by);
+                    spawn_unit_type_at(world, faction.clone(), units::UnitType::Riflemen, bx, by + 3);
+                }
+            }
+            if effective_index == 0 && !is_player {
+                spawn_built_building(world, BuildingType::Pillbox, faction.clone(), bx + 3, by + 1);
+                spawn_built_building(world, BuildingType::Watchtower, faction.clone(), bx + 3, by + 3);
             }
         }
         Faction::Hollow => {
@@ -2748,11 +2836,12 @@ fn default_opponent(player: &Faction) -> Faction {
     }
 }
 
-/// Generate a 40x25 Control map and place loadouts for both factions.
+/// Generate a Control map and place loadouts for both factions.
 /// Called from `mission/select` on the way into a mission.
-pub fn setup_demo_scenario(world: &mut World, player: &Faction) {
+/// `mission_index` controls the player starting loadout (0 = tutorial-rich, 4 = bare).
+pub fn setup_demo_scenario(world: &mut World, player: &Faction, mission_index: usize) {
     let opponent = default_opponent(player);
-    let m = mapgen::generate(40, 25, 17, mapgen::MissionType::Control);
+    let m = mapgen::generate_for_mission(17, mapgen::MissionType::Control);
     for t in &m.tiles {
         world.spawn(map::Tile {
             pos: t.pos.clone(),
@@ -2761,11 +2850,13 @@ pub fn setup_demo_scenario(world: &mut World, player: &Faction) {
         });
     }
 
-    let p_base = m.bases.first().cloned().unwrap_or(GridPos { x: 5, y: 12 });
-    let o_base = m.bases.get(1).cloned().unwrap_or(GridPos { x: 35, y: 12 });
+    let half_x = m.width / 2;
+    let mid_y = m.height / 2;
+    let p_base = m.bases.first().cloned().unwrap_or(GridPos { x: 5, y: mid_y });
+    let o_base = m.bases.get(1).cloned().unwrap_or(GridPos { x: m.width - 6, y: mid_y });
 
-    apply_faction_loadout(world, player, &p_base);
-    apply_faction_loadout(world, &opponent, &o_base);
+    apply_faction_loadout(world, player, &p_base, mission_index, true);
+    apply_faction_loadout(world, &opponent, &o_base, 0, false);
 
     // Make sure the opponent faction entity exists (player faction was
     // spawned by game/new). Top them up so AI can build.
@@ -2817,12 +2908,13 @@ pub fn setup_demo_scenario(world: &mut World, player: &Faction) {
         }
     }
 
-    // Spawn a couple of neutral strategic points along the midline.
-    let mid_y = 12;
-    for x in &[12, 20, 28] {
+    // Spawn neutral strategic points evenly spaced along the midline.
+    let step = half_x / 4;
+    for i in 1..=3 {
+        let sx = step * i;
         world.spawn(ControlPoint {
             point_type: ControlPointType::Strategic,
-            pos: GridPos { x: *x, y: mid_y },
+            pos: GridPos { x: sx, y: mid_y },
             capture_radius: 2.0,
             owner: None,
             contesting: None,
