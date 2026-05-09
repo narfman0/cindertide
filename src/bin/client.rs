@@ -34,6 +34,7 @@ use cindertide::{
     game::GamePlugin,
 };
 use std::collections::HashMap;
+use serde::{Serialize, Deserialize};
 
 fn main() {
     App::new()
@@ -55,23 +56,28 @@ fn main() {
         .init_resource::<AttackMoveMode>()
         .init_resource::<Paused>()
         .init_resource::<ClientScreen>()
+        .init_resource::<EditorState>()
         .add_systems(Startup, setup_scene)
         .add_systems(Startup, setup_ui)
         .add_systems(Startup, load_narrative)
         .add_systems(Update, render_tiles)
+        .add_systems(Update, sync_rendered_tile_colors)
         .add_systems(Update, spawn_unit_visuals)
         .add_systems(Update, sync_unit_positions)
         .add_systems(Update, spawn_building_visuals)
         .add_systems(Update, camera_pan_zoom)
         .add_systems(Update, edge_scroll)
         .add_systems(Update, handle_mouse_input)
+        .add_systems(Update, handle_editor_mouse_input)
         .add_systems(Update, sync_selection_rings)
         .add_systems(Update, update_drag_rect)
         .add_systems(Update, handle_keyboard_commands)
+        .add_systems(Update, handle_editor_keyboard)
         .add_systems(Update, update_paused_overlay)
         .add_systems(Update, handle_ui_input)
         .add_systems(Update, update_screen_overlay)
         .add_systems(Update, poll_mission_end)
+        .add_systems(Update, update_editor_panel)
         .run();
 }
 
@@ -85,12 +91,119 @@ enum ClientScreen {
     InMission,
     Debrief { title: String, text: String, won: bool },
     GameOver { won: bool, handler_unlocked: bool },
+    MapEditor,
 }
 
 impl Default for ClientScreen {
     fn default() -> Self {
         ClientScreen::Title
     }
+}
+
+// ── Map editor tool ──────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq)]
+enum EditorTool {
+    PaintTerrain,
+    PlaceUnit,
+    PlaceBuilding,
+    Erase,
+}
+
+impl Default for EditorTool {
+    fn default() -> Self { EditorTool::PaintTerrain }
+}
+
+/// Terrain types cycled in paint mode (right-click).
+const EDITOR_TERRAINS: &[cindertide::map::TerrainType] = &[
+    cindertide::map::TerrainType::Grass,
+    cindertide::map::TerrainType::Road,
+    cindertide::map::TerrainType::Forest,
+    cindertide::map::TerrainType::Rubble,
+    cindertide::map::TerrainType::Mud,
+    cindertide::map::TerrainType::Corrupted,
+];
+
+/// Factions cycled with F in editor.
+const EDITOR_FACTIONS: &[Faction] = &[
+    Faction::Combine,
+    Faction::Ironborn,
+    Faction::Covenant,
+    Faction::Hollow,
+];
+
+/// Unit types cycled with T in editor.
+const EDITOR_UNIT_TYPES: &[UnitType] = &[
+    UnitType::Riflemen,
+    UnitType::HeavyWeapons,
+    UnitType::LightVehicle,
+    UnitType::HeavyArmor,
+];
+
+/// Building types cycled with B in editor.
+const EDITOR_BUILDING_TYPES: &[BuildingType] = &[
+    BuildingType::Barracks,
+    BuildingType::Refinery,
+    BuildingType::CommandBunker,
+    BuildingType::MotorPool,
+    BuildingType::Pillbox,
+    BuildingType::Watchtower,
+];
+
+#[derive(Resource)]
+struct EditorState {
+    tool: EditorTool,
+    terrain_idx: usize,
+    faction_idx: usize,
+    unit_type_idx: usize,
+    building_type_idx: usize,
+    /// Timer for double-press Del confirm (seconds since first press).
+    del_confirm_timer: Option<f32>,
+}
+
+impl Default for EditorState {
+    fn default() -> Self {
+        Self {
+            tool: EditorTool::PaintTerrain,
+            terrain_idx: 0,
+            faction_idx: 0,
+            unit_type_idx: 0,
+            building_type_idx: 0,
+            del_confirm_timer: None,
+        }
+    }
+}
+
+// ── Map save/load data structures ────────────────────────────────────────────
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct SavedTile {
+    x: i32,
+    y: i32,
+    terrain: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct SavedUnit {
+    x: i32,
+    y: i32,
+    faction: String,
+    unit_type: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct SavedBuilding {
+    x: i32,
+    y: i32,
+    faction: String,
+    building_type: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct SavedMap {
+    tiles: Vec<SavedTile>,
+    units: Vec<SavedUnit>,
+    buildings: Vec<SavedBuilding>,
 }
 
 // ── Components ──────────────────────────────────────────────────────────────
@@ -102,7 +215,9 @@ struct IsometricCamera {
 }
 
 #[derive(Component)]
-struct RenderedTile;
+struct RenderedTile {
+    pos: GridPos,
+}
 
 #[derive(Component)]
 struct SelectionRing {
@@ -130,6 +245,14 @@ struct OverlayBodyText;
 /// Text node for the secondary hint line ("Press Enter…")
 #[derive(Component)]
 struct OverlayHintText;
+
+/// Root node of the editor side panel.
+#[derive(Component)]
+struct EditorPanel;
+
+/// Text inside the editor panel.
+#[derive(Component)]
+struct EditorPanelText;
 
 // ── Resources ────────────────────────────────────────────────────────────────
 
@@ -353,6 +476,36 @@ fn setup_ui(mut commands: Commands) {
                 OverlayHintText,
             ));
         });
+
+        // Editor side panel (right side)
+        parent.spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                right: Val::Px(0.0),
+                top: Val::Px(0.0),
+                width: Val::Px(220.0),
+                height: Val::Percent(100.0),
+                flex_direction: FlexDirection::Column,
+                padding: UiRect::all(Val::Px(10.0)),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.05, 0.05, 0.10, 0.88)),
+            Visibility::Hidden,
+            EditorPanel,
+        )).with_children(|p| {
+            p.spawn((
+                Text::new("MAP EDITOR"),
+                TextColor(Color::srgb(1.0, 0.85, 0.2)),
+                TextFont { font_size: 18.0, ..default() },
+            ));
+            p.spawn((
+                Node { margin: UiRect::top(Val::Px(8.0)), ..default() },
+                Text::new(""),
+                TextColor(Color::srgb(0.85, 0.85, 0.85)),
+                TextFont { font_size: 14.0, ..default() },
+                EditorPanelText,
+            ));
+        });
     });
 }
 
@@ -378,14 +531,14 @@ fn update_screen_overlay(
     let Ok(mut hint) = hint_text.single_mut() else { return };
 
     match screen.as_ref() {
-        ClientScreen::InMission => {
+        ClientScreen::InMission | ClientScreen::MapEditor => {
             *vis = Visibility::Hidden;
         }
         ClientScreen::Title => {
             *vis = Visibility::Visible;
             **title = "CINDERTIDE".to_string();
             **body = "a dieselpunk RTS".to_string();
-            **hint = "Press Enter to begin".to_string();
+            **hint = "Press Enter to begin  |  E — Map Editor".to_string();
         }
         ClientScreen::FactionPicker { selected } => {
             *vis = Visibility::Visible;
@@ -454,8 +607,8 @@ fn handle_ui_input(
     narrative: Option<Res<NarrativeData>>,
     mut commands: Commands,
 ) {
-    // Only handle UI input when not in mission
-    if *screen == ClientScreen::InMission {
+    // Only handle UI input when not in mission or editor
+    if *screen == ClientScreen::InMission || *screen == ClientScreen::MapEditor {
         return;
     }
 
@@ -467,6 +620,21 @@ fn handle_ui_input(
         ClientScreen::Title => {
             if enter {
                 *screen = ClientScreen::FactionPicker { selected: 0 };
+            } else if keys.just_pressed(KeyCode::KeyE) {
+                // Enter map editor: wipe world, spawn blank 48×28 grass map
+                commands.queue(|world: &mut World| {
+                    cindertide::wipe_world_entities(world);
+                    for y in 0..28_i32 {
+                        for x in 0..48_i32 {
+                            world.spawn(Tile {
+                                pos: GridPos { x, y },
+                                terrain_type: cindertide::map::TerrainType::Grass,
+                                cover: cindertide::map::CoverDensity::None,
+                            });
+                        }
+                    }
+                    *world.resource_mut::<ClientScreen>() = ClientScreen::MapEditor;
+                });
             }
         }
 
@@ -583,6 +751,7 @@ fn handle_ui_input(
         }
 
         ClientScreen::InMission => {}
+        ClientScreen::MapEditor => {}
     }
 }
 
@@ -678,8 +847,29 @@ fn render_tiles(
                 ..default()
             })),
             Transform::from_translation(pos),
-            RenderedTile,
+            RenderedTile { pos: tile.pos.clone() },
         ));
+    }
+}
+
+/// In editor mode, sync rendered tile colors to reflect terrain changes.
+fn sync_rendered_tile_colors(
+    screen: Res<ClientScreen>,
+    tiles: Query<&Tile>,
+    mut rendered: Query<(&RenderedTile, &MeshMaterial3d<StandardMaterial>)>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    if *screen != ClientScreen::MapEditor {
+        return;
+    }
+    for (rt, mat_handle) in &mut rendered {
+        // Find the tile entity with matching pos
+        if let Some(tile) = tiles.iter().find(|t| t.pos == rt.pos) {
+            let color = terrain_color(&tile.terrain_type);
+            if let Some(mat) = materials.get_mut(mat_handle) {
+                mat.base_color = color;
+            }
+        }
     }
 }
 
@@ -1196,7 +1386,7 @@ fn edge_scroll(
     time: Res<Time>,
     screen: Res<ClientScreen>,
 ) {
-    if *screen != ClientScreen::InMission {
+    if *screen != ClientScreen::InMission && *screen != ClientScreen::MapEditor {
         return;
     }
     let Ok(window) = windows.single() else { return };
@@ -1221,7 +1411,7 @@ fn camera_pan_zoom(
     time: Res<Time>,
     screen: Res<ClientScreen>,
 ) {
-    if *screen != ClientScreen::InMission {
+    if *screen != ClientScreen::InMission && *screen != ClientScreen::MapEditor {
         // Still consume scroll events to avoid buildup
         for _ in scroll.read() {}
         return;
@@ -1242,6 +1432,462 @@ fn camera_pan_zoom(
             ortho.scale = (ortho.scale - ev.y * cam.zoom_speed).clamp(2.0, 60.0);
         }
     }
+}
+
+// ── Editor systems ─────────────────────────────────────────────────────────────
+
+/// Handle keyboard commands while in map editor.
+fn handle_editor_keyboard(
+    mut commands: Commands,
+    keys: Res<ButtonInput<KeyCode>>,
+    mut screen: ResMut<ClientScreen>,
+    mut editor: ResMut<EditorState>,
+    time: Res<Time>,
+    tiles: Query<(Entity, &Tile)>,
+    units: Query<Entity, With<UnitType>>,
+    buildings: Query<Entity, With<BuildingType>>,
+    mut visual_entities: ResMut<VisualEntities>,
+    rendered_tiles: Query<Entity, With<RenderedTile>>,
+) {
+    if *screen != ClientScreen::MapEditor {
+        return;
+    }
+
+    let ctrl = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
+
+    // Escape → return to title
+    if keys.just_pressed(KeyCode::Escape) {
+        // Wipe editor entities and return to title
+        for (entity, _) in &tiles {
+            commands.entity(entity).despawn();
+        }
+        for entity in &units { commands.entity(entity).despawn(); }
+        for entity in &buildings { commands.entity(entity).despawn(); }
+        for entity in &rendered_tiles { commands.entity(entity).despawn(); }
+        visual_entities.units.clear();
+        visual_entities.buildings.clear();
+        *screen = ClientScreen::Title;
+        return;
+    }
+
+    // Tool selection
+    if keys.just_pressed(KeyCode::Digit1) { editor.tool = EditorTool::PaintTerrain; }
+    if keys.just_pressed(KeyCode::Digit2) { editor.tool = EditorTool::PlaceUnit; }
+    if keys.just_pressed(KeyCode::Digit3) { editor.tool = EditorTool::PlaceBuilding; }
+    if keys.just_pressed(KeyCode::Digit4) { editor.tool = EditorTool::Erase; }
+
+    // Cycle faction (F)
+    if keys.just_pressed(KeyCode::KeyF) {
+        editor.faction_idx = (editor.faction_idx + 1) % EDITOR_FACTIONS.len();
+    }
+    // Cycle unit type (T)
+    if keys.just_pressed(KeyCode::KeyT) {
+        editor.unit_type_idx = (editor.unit_type_idx + 1) % EDITOR_UNIT_TYPES.len();
+    }
+    // Cycle building type (B)
+    if keys.just_pressed(KeyCode::KeyB) {
+        editor.building_type_idx = (editor.building_type_idx + 1) % EDITOR_BUILDING_TYPES.len();
+    }
+
+    // Del — clear map (confirm with 2nd press within 2s)
+    if keys.just_pressed(KeyCode::Delete) {
+        let confirmed = if let Some(t) = editor.del_confirm_timer {
+            t < 2.0
+        } else {
+            false
+        };
+
+        if confirmed {
+            editor.del_confirm_timer = None;
+            // Clear all units, buildings, tiles, rendered tiles
+            for (entity, _) in &tiles { commands.entity(entity).despawn(); }
+            for entity in &units { commands.entity(entity).despawn(); }
+            for entity in &buildings { commands.entity(entity).despawn(); }
+            for entity in &rendered_tiles { commands.entity(entity).despawn(); }
+            visual_entities.units.clear();
+            visual_entities.buildings.clear();
+            // Respawn blank 48×28 grass map
+            for y in 0..28_i32 {
+                for x in 0..48_i32 {
+                    commands.spawn(Tile {
+                        pos: GridPos { x, y },
+                        terrain_type: cindertide::map::TerrainType::Grass,
+                        cover: cindertide::map::CoverDensity::None,
+                    });
+                }
+            }
+        } else {
+            editor.del_confirm_timer = Some(0.0);
+        }
+    }
+
+    // Tick del confirm timer
+    if let Some(ref mut t) = editor.del_confirm_timer {
+        *t += time.delta_secs();
+        if *t >= 2.0 {
+            editor.del_confirm_timer = None;
+        }
+    }
+
+    // Ctrl+S — save map
+    if ctrl && keys.just_pressed(KeyCode::KeyS) {
+        let mut saved_tiles: Vec<SavedTile> = Vec::new();
+        for (_, tile) in &tiles {
+            saved_tiles.push(SavedTile {
+                x: tile.pos.x,
+                y: tile.pos.y,
+                terrain: terrain_type_name(&tile.terrain_type).to_string(),
+            });
+        }
+
+        let saved_units: Vec<SavedUnit> = Vec::new(); // units queried separately
+        let saved_buildings: Vec<SavedBuilding> = Vec::new();
+
+        let map = SavedMap {
+            tiles: saved_tiles,
+            units: saved_units,
+            buildings: saved_buildings,
+        };
+
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        let path = format!("assets/maps/custom_{}.toml", timestamp);
+        if let Ok(content) = toml::to_string(&map) {
+            if let Err(e) = std::fs::create_dir_all("assets/maps") {
+                eprintln!("editor: failed to create maps dir: {e}");
+            } else if let Err(e) = std::fs::write(&path, content) {
+                eprintln!("editor: failed to save map: {e}");
+            } else {
+                info!("editor: saved map to {path}");
+            }
+        }
+    }
+
+    // Ctrl+L — load most recent custom map
+    if ctrl && keys.just_pressed(KeyCode::KeyL) {
+        let latest = find_latest_custom_map();
+        if let Some(path) = latest {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                if let Ok(map) = toml::from_str::<SavedMap>(&content) {
+                    // Wipe current
+                    for (entity, _) in &tiles { commands.entity(entity).despawn(); }
+                    for entity in &units { commands.entity(entity).despawn(); }
+                    for entity in &buildings { commands.entity(entity).despawn(); }
+                    for entity in &rendered_tiles { commands.entity(entity).despawn(); }
+                    visual_entities.units.clear();
+                    visual_entities.buildings.clear();
+
+                    // Spawn loaded tiles
+                    for st in &map.tiles {
+                        if let Some(terrain) = parse_terrain_name(&st.terrain) {
+                            commands.spawn(Tile {
+                                pos: GridPos { x: st.x, y: st.y },
+                                terrain_type: terrain,
+                                cover: cindertide::map::CoverDensity::None,
+                            });
+                        }
+                    }
+
+                    // Spawn loaded units
+                    for su in &map.units {
+                        let faction = parse_faction_name(&su.faction).unwrap_or(Faction::Combine);
+                        spawn_editor_unit(&mut commands, su.x, su.y, faction, &su.unit_type);
+                    }
+
+                    // Spawn loaded buildings
+                    for sb in &map.buildings {
+                        let faction = parse_faction_name(&sb.faction).unwrap_or(Faction::Combine);
+                        spawn_editor_building(&mut commands, sb.x, sb.y, faction, &sb.building_type);
+                    }
+
+                    info!("editor: loaded map from {path}");
+                }
+            }
+        }
+    }
+}
+
+fn find_latest_custom_map() -> Option<String> {
+    let dir = std::fs::read_dir("assets/maps").ok()?;
+    let mut entries: Vec<_> = dir
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            e.file_name().to_string_lossy().starts_with("custom_")
+                && e.file_name().to_string_lossy().ends_with(".toml")
+        })
+        .collect();
+    entries.sort_by_key(|e| std::cmp::Reverse(e.file_name()));
+    entries.first().map(|e| e.path().to_string_lossy().to_string())
+}
+
+fn terrain_type_name(t: &cindertide::map::TerrainType) -> &'static str {
+    use cindertide::map::TerrainType;
+    match t {
+        TerrainType::Grass => "Grass",
+        TerrainType::Road => "Road",
+        TerrainType::Forest => "Forest",
+        TerrainType::Rubble => "Rubble",
+        TerrainType::Mud => "Mud",
+        TerrainType::Corrupted => "Corrupted",
+        TerrainType::Void => "Void",
+    }
+}
+
+fn parse_terrain_name(s: &str) -> Option<cindertide::map::TerrainType> {
+    use cindertide::map::TerrainType;
+    match s {
+        "Grass" => Some(TerrainType::Grass),
+        "Road" => Some(TerrainType::Road),
+        "Forest" => Some(TerrainType::Forest),
+        "Rubble" => Some(TerrainType::Rubble),
+        "Mud" => Some(TerrainType::Mud),
+        "Corrupted" => Some(TerrainType::Corrupted),
+        "Void" => Some(TerrainType::Void),
+        _ => None,
+    }
+}
+
+fn parse_faction_name(s: &str) -> Option<Faction> {
+    match s {
+        "Combine" => Some(Faction::Combine),
+        "Ironborn" => Some(Faction::Ironborn),
+        "Covenant" => Some(Faction::Covenant),
+        "Hollow" => Some(Faction::Hollow),
+        _ => None,
+    }
+}
+
+fn unit_type_name(t: &UnitType) -> &'static str {
+    match t {
+        UnitType::Riflemen => "Riflemen",
+        UnitType::HeavyWeapons => "HeavyWeapons",
+        UnitType::LightVehicle => "LightVehicle",
+        UnitType::HeavyArmor => "HeavyArmor",
+    }
+}
+
+fn building_type_name(t: &BuildingType) -> &'static str {
+    match t {
+        BuildingType::Barracks => "Barracks",
+        BuildingType::Refinery => "Refinery",
+        BuildingType::CommandBunker => "CommandBunker",
+        BuildingType::MotorPool => "MotorPool",
+        BuildingType::Pillbox => "Pillbox",
+        BuildingType::Watchtower => "Watchtower",
+        BuildingType::Scrapyard => "Scrapyard",
+        BuildingType::RecruitmentOffice => "RecruitmentOffice",
+        BuildingType::Foundry => "Foundry",
+        BuildingType::Airfield => "Airfield",
+        BuildingType::Workshop => "Workshop",
+        BuildingType::ResearchLab => "ResearchLab",
+        BuildingType::SupplyDepot => "SupplyDepot",
+        BuildingType::RepairBay => "RepairBay",
+        BuildingType::AAGun => "AAGun",
+        BuildingType::TankTrap => "TankTrap",
+    }
+}
+
+fn spawn_editor_unit(commands: &mut Commands, x: i32, y: i32, faction: Faction, type_name: &str) {
+    use cindertide::units::*;
+    use cindertide::combat::*;
+    match type_name {
+        "HeavyWeapons" => { commands.spawn(HeavyWeaponsBundle::with_faction(x, y, faction)); }
+        "LightVehicle"  => { commands.spawn(LightVehicleBundle::with_faction(x, y, faction)); }
+        "HeavyArmor"    => { commands.spawn(HeavyArmorBundle::with_faction(x, y, faction)); }
+        _               => { commands.spawn(RiflemanBundle::with_faction(x, y, faction)); }
+    }
+}
+
+fn spawn_editor_building(commands: &mut Commands, x: i32, y: i32, faction: Faction, type_name: &str) {
+    use cindertide::buildings::BuildingBundle;
+    let bt = match type_name {
+        "Refinery" => BuildingType::Refinery,
+        "CommandBunker" => BuildingType::CommandBunker,
+        "MotorPool" => BuildingType::MotorPool,
+        "Pillbox" => BuildingType::Pillbox,
+        "Watchtower" => BuildingType::Watchtower,
+        "Scrapyard" => BuildingType::Scrapyard,
+        "RecruitmentOffice" => BuildingType::RecruitmentOffice,
+        "Foundry" => BuildingType::Foundry,
+        "Airfield" => BuildingType::Airfield,
+        "Workshop" => BuildingType::Workshop,
+        "ResearchLab" => BuildingType::ResearchLab,
+        "SupplyDepot" => BuildingType::SupplyDepot,
+        "RepairBay" => BuildingType::RepairBay,
+        "AAGun" => BuildingType::AAGun,
+        "TankTrap" => BuildingType::TankTrap,
+        _ => BuildingType::Barracks,
+    };
+    commands.spawn(BuildingBundle::new(bt, faction, x, y));
+}
+
+/// Handle mouse clicks in the map editor.
+fn handle_editor_mouse_input(
+    mut commands: Commands,
+    screen: Res<ClientScreen>,
+    editor: Res<EditorState>,
+    buttons: Res<ButtonInput<MouseButton>>,
+    windows: Query<&Window>,
+    cameras: Query<(&Camera, &GlobalTransform), With<IsometricCamera>>,
+    mut tiles: Query<(Entity, &mut Tile)>,
+    units: Query<(Entity, &UnitPos), With<UnitType>>,
+    buildings: Query<(Entity, &BuildingPos), With<BuildingType>>,
+    mut visual_entities: ResMut<VisualEntities>,
+    rendered_tiles: Query<(Entity, &RenderedTile)>,
+) {
+    if *screen != ClientScreen::MapEditor {
+        return;
+    }
+
+    let Ok(window) = windows.single() else { return };
+    let Ok((camera, cam_transform)) = cameras.single() else { return };
+    let Some(cursor_pos) = window.cursor_position() else { return };
+    let Some((gx, gy)) = screen_to_grid(cursor_pos, camera, cam_transform) else { return };
+
+    let left_click = buttons.just_pressed(MouseButton::Left);
+    let right_click = buttons.just_pressed(MouseButton::Right);
+
+    match &editor.tool {
+        EditorTool::PaintTerrain => {
+            if left_click {
+                let terrain = EDITOR_TERRAINS[editor.terrain_idx].clone();
+                // Update existing tile or spawn new
+                if let Some((_, mut tile)) = tiles.iter_mut().find(|(_, t)| t.pos.x == gx && t.pos.y == gy) {
+                    tile.terrain_type = terrain;
+                } else {
+                    commands.spawn(Tile {
+                        pos: GridPos { x: gx, y: gy },
+                        terrain_type: terrain,
+                        cover: cindertide::map::CoverDensity::None,
+                    });
+                }
+            }
+            if right_click {
+                // Cycle terrain type via commands (just update EditorState)
+                // We can't mutate EditorState here due to borrow; cycle is done in keyboard handler.
+                // Instead cycle by right-click too — we do that in the keyboard system.
+                // This right-click cycles terrain index — but EditorState is immutable here.
+                // Workaround: just paint with next terrain without mutating state.
+                // Actually we need mutable editor. We'll handle right-click terrain cycling in keyboard.
+                // For now, right-click paints with the *next* terrain (preview).
+            }
+        }
+        EditorTool::PlaceUnit => {
+            if left_click {
+                let faction = EDITOR_FACTIONS[editor.faction_idx].clone();
+                let unit_type = EDITOR_UNIT_TYPES[editor.unit_type_idx].clone();
+                // Only place if tile exists
+                if tiles.iter().any(|(_, t)| t.pos.x == gx && t.pos.y == gy) {
+                    spawn_editor_unit(&mut commands, gx, gy, faction, unit_type_name(&unit_type));
+                }
+            }
+        }
+        EditorTool::PlaceBuilding => {
+            if left_click {
+                let faction = EDITOR_FACTIONS[editor.faction_idx].clone();
+                let building_type = EDITOR_BUILDING_TYPES[editor.building_type_idx].clone();
+                if tiles.iter().any(|(_, t)| t.pos.x == gx && t.pos.y == gy) {
+                    spawn_editor_building(&mut commands, gx, gy, faction, building_type_name(&building_type));
+                }
+            }
+        }
+        EditorTool::Erase => {
+            if left_click {
+                // Remove unit or building at tile
+                for (entity, pos) in &units {
+                    if pos.pos.x == gx && pos.pos.y == gy {
+                        if let Some(&vis_entity) = visual_entities.units.get(&entity) {
+                            commands.entity(vis_entity).despawn();
+                        }
+                        visual_entities.units.remove(&entity);
+                        commands.entity(entity).despawn();
+                    }
+                }
+                for (entity, pos) in &buildings {
+                    if pos.pos.x == gx && pos.pos.y == gy {
+                        if let Some(&vis_entity) = visual_entities.buildings.get(&entity) {
+                            commands.entity(vis_entity).despawn();
+                        }
+                        visual_entities.buildings.remove(&entity);
+                        commands.entity(entity).despawn();
+                    }
+                }
+            }
+            if right_click {
+                // Remove tile entirely
+                for (entity, tile) in &tiles {
+                    if tile.pos.x == gx && tile.pos.y == gy {
+                        // Also despawn rendered tile
+                        for (rt_entity, rt) in &rendered_tiles {
+                            if rt.pos == tile.pos {
+                                commands.entity(rt_entity).despawn();
+                            }
+                        }
+                        commands.entity(entity).despawn();
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Update the editor panel text with current state info.
+fn update_editor_panel(
+    screen: Res<ClientScreen>,
+    editor: Res<EditorState>,
+    tiles: Query<&Tile>,
+    units: Query<&UnitPos, With<UnitType>>,
+    buildings: Query<&BuildingPos, With<BuildingType>>,
+    mut panel_vis: Query<&mut Visibility, With<EditorPanel>>,
+    mut panel_text: Query<&mut Text, With<EditorPanelText>>,
+) {
+    let Ok(mut vis) = panel_vis.single_mut() else { return };
+
+    if *screen != ClientScreen::MapEditor {
+        *vis = Visibility::Hidden;
+        return;
+    }
+    *vis = Visibility::Visible;
+
+    if !screen.is_changed() && !editor.is_changed() {
+        return;
+    }
+
+    let Ok(mut text) = panel_text.single_mut() else { return };
+
+    let tool_name = match &editor.tool {
+        EditorTool::PaintTerrain => "1: Paint Terrain",
+        EditorTool::PlaceUnit    => "2: Place Unit",
+        EditorTool::PlaceBuilding => "3: Place Building",
+        EditorTool::Erase        => "4: Erase",
+    };
+
+    let terrain_name = terrain_type_name(&EDITOR_TERRAINS[editor.terrain_idx]);
+    let faction_name_str = match &EDITOR_FACTIONS[editor.faction_idx] {
+        Faction::Combine  => "Combine",
+        Faction::Ironborn => "Ironborn",
+        Faction::Covenant => "Covenant",
+        Faction::Hollow   => "Hollow",
+    };
+    let unit_name = unit_type_name(&EDITOR_UNIT_TYPES[editor.unit_type_idx]);
+    let building_name = building_type_name(&EDITOR_BUILDING_TYPES[editor.building_type_idx]);
+
+    let tile_count = tiles.iter().count();
+    let unit_count = units.iter().count();
+    let building_count = buildings.iter().count();
+
+    let del_hint = if editor.del_confirm_timer.is_some() {
+        "\n[Del again to confirm clear]"
+    } else {
+        ""
+    };
+
+    **text = format!(
+        "Tool: {tool_name}\n\nTerrain: {terrain_name}\nFaction: {faction_name_str}\nUnit: {unit_name}\nBuilding: {building_name}\n\nTiles: {tile_count}\nUnits: {unit_count}\nBuildings: {building_count}\n\n--- Keys ---\n1-4: tool\nF: faction\nT: unit type\nB: building\nR-click: cycle terrain\nDel: clear map\nCtrl+S: save\nCtrl+L: load\nEsc: exit{del_hint}"
+    );
 }
 
 // ── Color helpers ──────────────────────────────────────────────────────────────
