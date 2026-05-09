@@ -79,6 +79,7 @@ fn main() {
         .init_resource::<LoadedCampaigns>()
         .init_resource::<CampaignEditorState>()
         .init_resource::<GeneratePanel>()
+        .init_resource::<LobbyConfig>()
         .insert_resource(MinimapTimer(0.0))
         .insert_resource(NetBroadcastTimer(0.0))
         .add_systems(Startup, setup_scene)
@@ -135,6 +136,7 @@ fn main() {
 enum ClientScreen {
     Title,
     MultiplayerMenu { hosting: bool, ip_input: String },
+    MultiplayerLobby { hosting: bool, ip_input: String },
     /// Campaign picker — replaces old hardcoded FactionPicker.
     FactionPicker { selected: usize },
     Briefing { title: String, briefing: String },
@@ -640,7 +642,69 @@ enum ClientCommand {
 enum NetMessage {
     State(NetGameState),
     Command(ClientCommand),
+    LobbyState(LobbyConfig),
+    LobbyReady,
 }
+
+// ── Lobby slot types ─────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum SlotController {
+    Human,
+    Ai(String),   // "easy", "normal", "hard"
+    Open,         // waiting for a player to join
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LobbySlot {
+    pub id: usize,
+    pub team: String,          // "Alpha", "Bravo", "Charlie", "Delta", or "FFA-N"
+    pub faction: String,       // "Combine", "Ironborn", "Covenant", "Hollow"
+    pub controller: SlotController,
+    pub spawn_zone: usize,     // index into map's spawn_zones list
+}
+
+#[derive(Resource, Clone, Default, Debug, Serialize, Deserialize)]
+pub struct LobbyConfig {
+    pub slots: Vec<LobbySlot>,
+    pub map_path: Option<String>,    // which map to load
+    pub win_condition: String,        // "Control", "Assault", "Ffa", "KingOfTheHill", "Assassination"
+    pub selected_slot: usize,         // cursor in the lobby UI
+    pub selected_field: LobbyField,   // which field is being edited
+}
+
+#[derive(Default, Clone, PartialEq, Debug, Serialize, Deserialize)]
+pub enum LobbyField {
+    #[default] Slot,
+    Team,
+    Faction,
+    Controller,
+    WinCondition,
+}
+
+impl LobbyConfig {
+    fn default_2_slot() -> Self {
+        LobbyConfig {
+            slots: vec![
+                LobbySlot { id: 0, team: "Alpha".into(), faction: "Combine".into(), controller: SlotController::Human, spawn_zone: 0 },
+                LobbySlot { id: 1, team: "Bravo".into(), faction: "Ironborn".into(), controller: SlotController::Ai("normal".into()), spawn_zone: 1 },
+            ],
+            map_path: None,
+            win_condition: "Assault".into(),
+            selected_slot: 0,
+            selected_field: LobbyField::Slot,
+        }
+    }
+}
+
+const LOBBY_TEAMS: &[&str] = &["Alpha", "Bravo", "Charlie", "Delta", "FFA-0", "FFA-1", "FFA-2", "FFA-3"];
+const LOBBY_FACTIONS: &[&str] = &["Combine", "Ironborn", "Covenant", "Hollow"];
+const LOBBY_WIN_CONDITIONS: &[&str] = &["Assault", "Control", "Ffa", "KingOfTheHill", "Assassination", "Defense"];
+const LOBBY_CONTROLLERS: &[SlotController] = &[
+    SlotController::Human,
+    SlotController::Ai(String::new()), // placeholder, handled via cycle_controller
+    SlotController::Open,
+];
 
 /// Role of this process in a multiplayer session.
 #[derive(Resource, Default, Clone, PartialEq, Debug)]
@@ -1283,13 +1347,15 @@ fn update_screen_overlay(
     progress: Res<GlobalProgress>,
     active: Res<ActiveRun>,
     loaded_campaigns: Res<LoadedCampaigns>,
+    lobby: Res<LobbyConfig>,
+    mp_role: Res<MultiplayerRole>,
     mut overlay_vis: Query<&mut Visibility, With<ScreenOverlay>>,
     mut title_text: Query<&mut Text, (With<OverlayTitleText>, Without<OverlayBodyText>, Without<OverlayHintText>)>,
     mut body_text: Query<&mut Text, (With<OverlayBodyText>, Without<OverlayTitleText>, Without<OverlayHintText>)>,
     mut hint_text: Query<&mut Text, (With<OverlayHintText>, Without<OverlayTitleText>, Without<OverlayBodyText>)>,
     narrative: Option<Res<NarrativeData>>,
 ) {
-    if !screen.is_changed() && !active.is_changed() && !progress.is_changed() {
+    if !screen.is_changed() && !active.is_changed() && !progress.is_changed() && !lobby.is_changed() {
         return;
     }
 
@@ -1323,6 +1389,47 @@ fn update_screen_overlay(
             };
             **body = status;
             **hint = "H = host on port 5555  |  J = join  |  Enter = start singleplayer".to_string();
+        }
+        ClientScreen::MultiplayerLobby { hosting, ip_input } => {
+            *vis = Visibility::Visible;
+            **title = "MULTIPLAYER LOBBY".to_string();
+
+            let mut lines = String::new();
+
+            // Win condition row
+            let wc = &lobby.win_condition;
+            let wc_marker = if lobby.selected_field == LobbyField::WinCondition { ">" } else { " " };
+            lines.push_str(&format!("{}  Win Condition: [{}]  ←→ to change\n\n", wc_marker, wc));
+
+            // Slot table header
+            lines.push_str("  Slot  Team      Faction    Controller    Zone\n");
+            lines.push_str("  ─────────────────────────────────────────────\n");
+
+            for slot in &lobby.slots {
+                let selected = slot.id == lobby.selected_slot;
+                let row_marker = if selected { ">" } else { " " };
+                let ctrl_str = match &slot.controller {
+                    SlotController::Human => "YOU".to_string(),
+                    SlotController::Ai(level) => format!("AI:{}", level),
+                    SlotController::Open => "Open".to_string(),
+                };
+                lines.push_str(&format!("{}  [{}]   {:<8}  {:<9}  {:<12}  {}\n",
+                    row_marker, slot.id, slot.team, slot.faction, ctrl_str, slot.spawn_zone));
+            }
+
+            lines.push('\n');
+
+            let net_status = if *hosting {
+                "[HOSTING — waiting for players...]".to_string()
+            } else if matches!(*mp_role, MultiplayerRole::Client { .. }) {
+                format!("[CONNECTED TO {}]", ip_input)
+            } else {
+                format!("H: Host on :{LAN_PORT}  J: Join {}", ip_input)
+            };
+            lines.push_str(&net_status);
+
+            **body = lines;
+            **hint = "↑↓ slot  ←→ cycle field  Tab: next field  N: add slot  Del: remove  H: host  J: join  Enter: start  Esc: back".to_string();
         }
         ClientScreen::FactionPicker { selected } => {
             *vis = Visibility::Visible;
@@ -1399,6 +1506,8 @@ fn handle_ui_input(
     narrative: Option<Res<NarrativeData>>,
     loaded_campaigns: Res<LoadedCampaigns>,
     mut mp_role: ResMut<MultiplayerRole>,
+    mut lobby: ResMut<LobbyConfig>,
+    net_channels: Option<Res<NetChannels>>,
     mut commands: Commands,
 ) {
     // Only handle UI input when not in mission or editor
@@ -1421,7 +1530,8 @@ fn handle_ui_input(
                     .unwrap_or(0);
                 *screen = ClientScreen::FactionPicker { selected: first_unlocked };
             } else if keys.just_pressed(KeyCode::KeyM) {
-                *screen = ClientScreen::MultiplayerMenu {
+                *lobby = LobbyConfig::default_2_slot();
+                *screen = ClientScreen::MultiplayerLobby {
                     hosting: false,
                     ip_input: "127.0.0.1".to_string(),
                 };
@@ -1520,6 +1630,167 @@ fn handle_ui_input(
             }
         }
 
+        ClientScreen::MultiplayerLobby { hosting, ip_input } => {
+            let hosting = hosting.clone();
+            let ip_input = ip_input.clone();
+
+            if keys.just_pressed(KeyCode::Escape) {
+                *screen = ClientScreen::Title;
+                *mp_role = MultiplayerRole::None;
+                return;
+            }
+
+            let left = keys.just_pressed(KeyCode::ArrowLeft);
+            let right = keys.just_pressed(KeyCode::ArrowRight);
+            let tab = keys.just_pressed(KeyCode::Tab);
+
+            // N: add slot (up to 4)
+            if keys.just_pressed(KeyCode::KeyN) {
+                if lobby.slots.len() < 4 {
+                    let id = lobby.slots.len();
+                    let zones = &["Alpha", "Bravo", "Charlie", "Delta"];
+                    lobby.slots.push(LobbySlot {
+                        id,
+                        team: zones.get(id).unwrap_or(&"Delta").to_string(),
+                        faction: "Combine".into(),
+                        controller: SlotController::Open,
+                        spawn_zone: id,
+                    });
+                    // Re-index ids
+                    for (i, s) in lobby.slots.iter_mut().enumerate() { s.id = i; }
+                }
+            }
+
+            // Delete: remove selected slot (keep at least 1)
+            if keys.just_pressed(KeyCode::Delete) {
+                let sel = lobby.selected_slot;
+                if lobby.slots.len() > 1 {
+                    lobby.slots.remove(sel);
+                    for (i, s) in lobby.slots.iter_mut().enumerate() { s.id = i; }
+                    if lobby.selected_slot >= lobby.slots.len() {
+                        lobby.selected_slot = lobby.slots.len() - 1;
+                    }
+                }
+            }
+
+            // Up/Down: move selected_slot
+            if up {
+                if lobby.selected_slot > 0 { lobby.selected_slot -= 1; }
+            }
+            if down {
+                let max_slot = lobby.slots.len().saturating_sub(1);
+                if lobby.selected_slot < max_slot { lobby.selected_slot += 1; }
+            }
+
+            // Tab: cycle selected_field
+            if tab {
+                lobby.selected_field = match lobby.selected_field {
+                    LobbyField::Slot        => LobbyField::Team,
+                    LobbyField::Team        => LobbyField::Faction,
+                    LobbyField::Faction     => LobbyField::Controller,
+                    LobbyField::Controller  => LobbyField::WinCondition,
+                    LobbyField::WinCondition => LobbyField::Slot,
+                };
+            }
+
+            // Left/Right: cycle value of selected_field
+            if left || right {
+                let step: i32 = if right { 1 } else { -1 };
+                match lobby.selected_field {
+                    LobbyField::WinCondition => {
+                        let idx = LOBBY_WIN_CONDITIONS.iter().position(|&w| w == lobby.win_condition.as_str()).unwrap_or(0);
+                        let new_idx = ((idx as i32 + step).rem_euclid(LOBBY_WIN_CONDITIONS.len() as i32)) as usize;
+                        lobby.win_condition = LOBBY_WIN_CONDITIONS[new_idx].to_string();
+                    }
+                    LobbyField::Team => {
+                        let sel = lobby.selected_slot;
+                        if let Some(slot) = lobby.slots.get_mut(sel) {
+                            let idx = LOBBY_TEAMS.iter().position(|&t| t == slot.team.as_str()).unwrap_or(0);
+                            let new_idx = ((idx as i32 + step).rem_euclid(LOBBY_TEAMS.len() as i32)) as usize;
+                            slot.team = LOBBY_TEAMS[new_idx].to_string();
+                        }
+                    }
+                    LobbyField::Faction => {
+                        let sel = lobby.selected_slot;
+                        if let Some(slot) = lobby.slots.get_mut(sel) {
+                            let idx = LOBBY_FACTIONS.iter().position(|&f| f == slot.faction.as_str()).unwrap_or(0);
+                            let new_idx = ((idx as i32 + step).rem_euclid(LOBBY_FACTIONS.len() as i32)) as usize;
+                            slot.faction = LOBBY_FACTIONS[new_idx].to_string();
+                        }
+                    }
+                    LobbyField::Controller => {
+                        let sel = lobby.selected_slot;
+                        if let Some(slot) = lobby.slots.get_mut(sel) {
+                            let controllers = vec![
+                                SlotController::Human,
+                                SlotController::Ai("easy".into()),
+                                SlotController::Ai("normal".into()),
+                                SlotController::Ai("hard".into()),
+                                SlotController::Open,
+                            ];
+                            let idx = controllers.iter().position(|c| c == &slot.controller).unwrap_or(0);
+                            let new_idx = ((idx as i32 + step).rem_euclid(controllers.len() as i32)) as usize;
+                            slot.controller = controllers[new_idx].clone();
+                        }
+                    }
+                    LobbyField::Slot => {
+                        // Left/Right on Slot field moves selected_slot
+                        if left && lobby.selected_slot > 0 { lobby.selected_slot -= 1; }
+                        if right {
+                            let max_slot = lobby.slots.len().saturating_sub(1);
+                            if lobby.selected_slot < max_slot { lobby.selected_slot += 1; }
+                        }
+                    }
+                }
+            }
+
+            // H: host
+            if keys.just_pressed(KeyCode::KeyH) && !hosting {
+                let (tx_in, rx_in) = mpsc::channel::<NetMessage>();
+                let (tx_out, rx_out) = mpsc::channel::<NetMessage>();
+                let rx_out_arc = Arc::new(Mutex::new(rx_out));
+                spawn_host_thread(tx_in.clone(), rx_out_arc);
+                commands.insert_resource(NetChannels {
+                    outbox: Arc::new(Mutex::new(tx_out)),
+                    inbox: Arc::new(Mutex::new(rx_in)),
+                });
+                *mp_role = MultiplayerRole::Host;
+                *screen = ClientScreen::MultiplayerLobby { hosting: true, ip_input: ip_input.clone() };
+                return;
+            }
+
+            // J: join
+            if keys.just_pressed(KeyCode::KeyJ) {
+                let ip = ip_input.clone();
+                let (tx_in, rx_in) = mpsc::channel::<NetMessage>();
+                let (tx_out, rx_out) = mpsc::channel::<NetMessage>();
+                let rx_out_arc = Arc::new(Mutex::new(rx_out));
+                spawn_client_thread(ip.clone(), tx_in.clone(), rx_out_arc);
+                commands.insert_resource(NetChannels {
+                    outbox: Arc::new(Mutex::new(tx_out)),
+                    inbox: Arc::new(Mutex::new(rx_in)),
+                });
+                *mp_role = MultiplayerRole::Client { server_ip: ip };
+                *screen = ClientScreen::MultiplayerLobby { hosting: false, ip_input: ip_input.clone() };
+                return;
+            }
+
+            // After state changes, broadcast lobby state to clients if hosting
+            if hosting {
+                if let Some(ref channels) = net_channels {
+                    let _ = channels.outbox.lock().unwrap().send(NetMessage::LobbyState(lobby.clone()));
+                }
+            }
+
+            // Enter: start mission (host) or singleplayer
+            if enter {
+                let lobby_clone = lobby.clone();
+                commands.queue(move |world: &mut World| {
+                    start_mission_from_lobby(world, &lobby_clone);
+                });
+            }
+        }
+
         ClientScreen::FactionPicker { selected } => {
             let count = loaded_campaigns.0.len().max(1);
             if up {
@@ -1563,6 +1834,41 @@ fn handle_ui_input(
 
         ClientScreen::Briefing { .. } => {
             if enter {
+                // Populate LobbyConfig with single-player defaults before starting
+                {
+                    let active = active.as_ref();
+                    let player_faction_str = active.run.as_ref()
+                        .map(|r| match map_faction(r.faction) {
+                            Faction::Ironborn => "Ironborn",
+                            Faction::Covenant => "Covenant",
+                            Faction::Hollow => "Hollow",
+                            _ => "Combine",
+                        })
+                        .unwrap_or("Combine")
+                        .to_string();
+                    let map_path_str = active.run.as_ref().and_then(|r| {
+                        let idx = r.current_mission;
+                        r.mission_maps.get(idx).cloned()
+                    });
+                    let wc = active.run.as_ref()
+                        .and_then(|r| next_mission_type(r))
+                        .map(|mt| format!("{:?}", mt))
+                        .unwrap_or_else(|| "Assault".to_string());
+
+                    let opp_faction = if player_faction_str == "Combine" { "Ironborn" } else { "Combine" };
+
+                    *lobby = LobbyConfig {
+                        slots: vec![
+                            LobbySlot { id: 0, team: "Alpha".into(), faction: player_faction_str, controller: SlotController::Human, spawn_zone: 0 },
+                            LobbySlot { id: 1, team: "Bravo".into(), faction: opp_faction.into(), controller: SlotController::Ai("normal".into()), spawn_zone: 1 },
+                        ],
+                        map_path: map_path_str,
+                        win_condition: wc,
+                        selected_slot: 0,
+                        selected_field: LobbyField::Slot,
+                    };
+                }
+
                 commands.queue(|world: &mut World| {
                     cindertide::wipe_world_entities(world);
 
@@ -1694,8 +2000,7 @@ fn handle_ui_input(
         ClientScreen::TestMission { .. } => {}
         ClientScreen::MapEditor => {}
         ClientScreen::CampaignEditor => {}
-        // MultiplayerMenu handled above; this arm exists so the compiler is happy
-        // if we ever reach it again from a re-match (shouldn't happen).
+        // MultiplayerMenu and MultiplayerLobby handled above.
     }
 }
 
@@ -1712,6 +2017,147 @@ fn get_mission_narrative(
         }
     }
     (format!("Mission {}", index + 1), String::new())
+}
+
+// ── Lobby mission start ────────────────────────────────────────────────────────
+
+/// Parse a lobby win_condition string into a MissionType.
+fn parse_win_condition(s: &str) -> MissionType {
+    match s {
+        "Control"        => MissionType::Control,
+        "Defense"        => MissionType::Defense,
+        "Ffa"            => MissionType::Ffa,
+        "KingOfTheHill"  => MissionType::KingOfTheHill,
+        "Assassination"  => MissionType::Assassination,
+        _                => MissionType::Assault,
+    }
+}
+
+/// Parse a faction string to Faction.
+fn lobby_faction_to_map(s: &str) -> Faction {
+    match s {
+        "Ironborn" => Faction::Ironborn,
+        "Covenant" => Faction::Covenant,
+        "Hollow"   => Faction::Hollow,
+        _          => Faction::Combine,
+    }
+}
+
+/// Start a mission from a LobbyConfig (used by multiplayer lobby and single-player shortcut).
+fn start_mission_from_lobby(world: &mut World, lobby: &LobbyConfig) {
+    cindertide::wipe_world_entities(world);
+
+    // Determine player faction (first Human slot, fallback Combine)
+    let player_slot = lobby.slots.iter().find(|s| s.controller == SlotController::Human);
+    let player_faction = player_slot.map(|s| lobby_faction_to_map(&s.faction)).unwrap_or(Faction::Combine);
+
+    // Opponent faction: first non-Human slot, fallback Ironborn
+    let opponent_faction = lobby.slots.iter()
+        .find(|s| s.controller != SlotController::Human)
+        .map(|s| lobby_faction_to_map(&s.faction))
+        .unwrap_or(Faction::Ironborn);
+
+    let mission_type = parse_win_condition(&lobby.win_condition);
+
+    world.spawn(FactionBundle::new(player_faction.clone()));
+
+    let mission_entity = world.spawn(Mission {
+        mission_type,
+        player_faction: player_faction.clone(),
+        opponent_faction: opponent_faction.clone(),
+        status: MissionStatus::Active,
+        elapsed: 0.0,
+        deadline: 300.0,
+        hill_timer: 0.0,
+        hill_threshold: 180.0,
+        assassination_target: None,
+        ffa_check_timer: 0.0,
+    }).id();
+
+    // Try to load map file
+    let mut map_loaded = false;
+    let map_path = lobby.map_path.clone();
+
+    if let Some(ref rel_path) = map_path {
+        let full_path = format!("assets/{}", rel_path);
+        if let Ok(content) = std::fs::read_to_string(&full_path) {
+            if let Ok(saved) = toml::from_str::<SavedMap>(&content) {
+                for st in &saved.tiles {
+                    if let Some(terrain) = parse_terrain_name(&st.terrain) {
+                        world.spawn(Tile {
+                            pos: GridPos { x: st.x, y: st.y },
+                            terrain_type: terrain,
+                            cover: cindertide::map::CoverDensity::None,
+                        });
+                    }
+                }
+                // Spawn units from the map, but also place faction starting units at spawn zones
+                for su in &saved.units {
+                    let faction = parse_faction_name(&su.faction).unwrap_or(Faction::Combine);
+                    spawn_unit_world(world, su.x, su.y, faction, &su.unit_type);
+                }
+                for sb in &saved.buildings {
+                    let faction = parse_faction_name(&sb.faction).unwrap_or(Faction::Combine);
+                    spawn_building_world(world, sb.x, sb.y, faction, &sb.building_type);
+                }
+
+                // Place faction starting units at spawn zone positions from LobbyConfig
+                let spawn_zones = &saved.spawn_zones;
+                if !spawn_zones.is_empty() {
+                    for slot in &lobby.slots {
+                        let zone_idx = slot.spawn_zone.min(spawn_zones.len().saturating_sub(1));
+                        if let Some(zone) = spawn_zones.get(zone_idx) {
+                            let faction = lobby_faction_to_map(&slot.faction);
+                            // Spawn a starting unit bundle at the zone position
+                            spawn_unit_world(world, zone.x, zone.y, faction.clone(), "Riflemen");
+                            spawn_building_world(world, zone.x + 1, zone.y, faction, "CommandBunker");
+                        }
+                    }
+                }
+
+                map_loaded = true;
+                info!("Lobby: loaded map from {}", full_path);
+            }
+        }
+    }
+
+    if !map_loaded {
+        // Default: place player and opponent at corners
+        let player_zone_x = 4;
+        let player_zone_y = 4;
+        let opp_zone_x: i32;
+        let opp_zone_y: i32;
+
+        // Try to use spawn zone data if lobby has zone indices
+        if let Some(player_slot) = player_slot {
+            let pzx = (player_slot.spawn_zone as i32 * 20 + 4).min(100);
+            let pzy = 4;
+            opp_zone_x = pzx + 40;
+            opp_zone_y = 20;
+            cindertide::setup_demo_scenario(world, &player_faction, 0);
+            let _ = (player_zone_x, player_zone_y, pzx, pzy); // used above
+        } else {
+            opp_zone_x = 44;
+            opp_zone_y = 20;
+            cindertide::setup_demo_scenario(world, &player_faction, 0);
+        }
+        let _ = (opp_zone_x, opp_zone_y); // suppress warning
+    }
+
+    cindertide::bake_navmesh(world);
+
+    let mut active = world.resource_mut::<ActiveRun>();
+    active.current_mission_entity = Some(mission_entity);
+    drop(active);
+
+    *world.resource_mut::<GameState>() = GameState::InMission;
+    world.insert_resource(PlayerFaction(player_faction));
+    *world.resource_mut::<ClientScreen>() = ClientScreen::InMission;
+
+    // Broadcast LobbyReady to clients if hosting
+    if let Some(channels) = world.get_resource::<NetChannels>() {
+        let _ = channels.outbox.lock().unwrap().send(NetMessage::LobbyReady);
+    }
 }
 
 // ── Poll mission end ──────────────────────────────────────────────────────────
@@ -5483,19 +5929,27 @@ fn receive_net_messages(
     mp_role: Res<MultiplayerRole>,
     net_channels: Option<Res<NetChannels>>,
     mut remote_state: ResMut<RemoteGameState>,
+    mut lobby: ResMut<LobbyConfig>,
     mut commands: Commands,
     units: Query<(Entity, &NetId, &UnitPos), With<UnitType>>,
     tiles: Query<&Tile>,
 ) {
     let Some(channels) = net_channels else { return };
 
-    // Drain all pending messages
-    loop {
-        let msg = match channels.inbox.lock().unwrap().try_recv() {
-            Ok(m) => m,
-            Err(_) => break,
-        };
+    // Drain all pending messages (collect to avoid holding lock across commands)
+    let messages: Vec<NetMessage> = {
+        let inbox = channels.inbox.lock().unwrap();
+        let mut msgs = Vec::new();
+        loop {
+            match inbox.try_recv() {
+                Ok(m) => msgs.push(m),
+                Err(_) => break,
+            }
+        }
+        msgs
+    };
 
+    for msg in messages {
         match msg {
             NetMessage::State(state) => {
                 // Client stores remote state for rendering
@@ -5507,6 +5961,26 @@ fn receive_net_messages(
                 // Host applies commands from client
                 if *mp_role == MultiplayerRole::Host {
                     apply_client_command(&mut commands, cmd, &units, &tiles);
+                }
+            }
+            NetMessage::LobbyState(received_lobby) => {
+                // Client updates local lobby display from host
+                if matches!(*mp_role, MultiplayerRole::Client { .. }) {
+                    // Preserve local selected_slot/field, update the rest
+                    let sel_slot = lobby.selected_slot;
+                    let sel_field = lobby.selected_field.clone();
+                    *lobby = received_lobby;
+                    lobby.selected_slot = sel_slot;
+                    lobby.selected_field = sel_field;
+                }
+            }
+            NetMessage::LobbyReady => {
+                // Client starts mission from current lobby state
+                if matches!(*mp_role, MultiplayerRole::Client { .. }) {
+                    let lobby_clone = lobby.clone();
+                    commands.queue(move |world: &mut World| {
+                        start_mission_from_lobby(world, &lobby_clone);
+                    });
                 }
             }
         }
