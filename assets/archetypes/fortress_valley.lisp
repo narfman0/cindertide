@@ -9,4 +9,4 @@
     (ridgelines 1)
     (rubble 2 :placement center)
     (resources 6 :placement scattered)
-    (bases :player bottom-left :enemy top-right :clear-radius 5)))
+    (spawn-zones 2 :layout corners :clear-radius 5)))

@@ -8,4 +8,4 @@
     (ridgelines ridgeline-count)
     (rubble 2 :placement center)
     (resources 6 :placement flanks)
-    (bases :player bottom-left :enemy top-right :clear-radius 6)))
+    (spawn-zones 2 :layout mirror :clear-radius 6)))

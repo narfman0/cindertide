@@ -7,4 +7,4 @@
     (fill Mud)
     (islands island-count)
     (resources 8 :placement scattered)
-    (bases :player bottom-left :enemy top-right :clear-radius 5)))
+    (spawn-zones 4 :layout corners :clear-radius 5)))

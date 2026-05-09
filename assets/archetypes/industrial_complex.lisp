@@ -9,4 +9,4 @@
     (rubble ruin-clusters :placement center)
     (forests 2 :placement flanks)
     (resources resource-count :placement center)
-    (bases :player bottom-left :enemy top-right :clear-radius 6)))
+    (spawn-zones 4 :layout sides :clear-radius 6)))

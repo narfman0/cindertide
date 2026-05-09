@@ -12,4 +12,4 @@
     (forests 3 :placement flanks)
     (rubble 2 :placement center)
     (resources 6 :placement scattered)
-    (bases :player bottom-left :enemy top-right :clear-radius 6)))
+    (spawn-zones 2 :layout mirror :clear-radius 6)))

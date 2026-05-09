@@ -7,4 +7,4 @@
     (fill Grass)
     (forests forest-patches :placement random)
     (resources 8 :placement scattered)
-    (bases :player bottom-left :enemy top-right :clear-radius 6)))
+    (spawn-zones 4 :layout corners :clear-radius 6)))

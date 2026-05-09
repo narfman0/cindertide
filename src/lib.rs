@@ -2852,7 +2852,21 @@ fn default_opponent(player: &Faction) -> Faction {
 /// Generate a Control map and place loadouts for both factions.
 /// Called from `mission/select` on the way into a mission.
 /// `mission_index` controls the player starting loadout (0 = tutorial-rich, 4 = bare).
+/// `spawn_zone_overrides`: if provided, use zone 0 as player base and zone 1 as AI base
+///   instead of the procedurally-generated base positions.
 pub fn setup_demo_scenario(world: &mut World, player: &Faction, mission_index: usize) {
+    setup_demo_scenario_with_spawns(world, player, mission_index, None);
+}
+
+/// Like `setup_demo_scenario` but accepts optional spawn zone overrides.
+/// When `spawn_overrides` is `Some((player_pos, opponent_pos))`, use those positions
+/// instead of the procedurally-generated base positions.
+pub fn setup_demo_scenario_with_spawns(
+    world: &mut World,
+    player: &Faction,
+    mission_index: usize,
+    spawn_overrides: Option<(GridPos, GridPos)>,
+) {
     let opponent = default_opponent(player);
     let m = mapgen::generate_for_mission(17, mapgen::MissionType::Control);
     for t in &m.tiles {
@@ -2865,8 +2879,13 @@ pub fn setup_demo_scenario(world: &mut World, player: &Faction, mission_index: u
 
     let half_x = m.width / 2;
     let mid_y = m.height / 2;
-    let p_base = m.bases.first().cloned().unwrap_or(GridPos { x: 5, y: mid_y });
-    let o_base = m.bases.get(1).cloned().unwrap_or(GridPos { x: m.width - 6, y: mid_y });
+    let (p_base, o_base) = if let Some((pz, oz)) = spawn_overrides {
+        (pz, oz)
+    } else {
+        let p = m.bases.first().cloned().unwrap_or(GridPos { x: 5, y: mid_y });
+        let o = m.bases.get(1).cloned().unwrap_or(GridPos { x: m.width - 6, y: mid_y });
+        (p, o)
+    };
 
     apply_faction_loadout(world, player, &p_base, mission_index, true);
     apply_faction_loadout(world, &opponent, &o_base, 0, false);

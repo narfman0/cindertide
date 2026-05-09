@@ -9,7 +9,7 @@ use cindertide::campaign::{CampaignRun, CampaignDef, PlayableFaction, GlobalProg
 use cindertide::game::{ActiveRun, GameState};
 use cindertide::mission::{Mission, MissionStatus};
 use cindertide::mapgen::MissionType;
-use cindertide::mapgen::{ArchetypeDef, generate_from_archetype, scan_archetypes};
+use cindertide::mapgen::{ArchetypeDef, SpawnZone, SpawnLayout, generate_from_archetype, scan_archetypes};
 use cindertide::narrative::NarrativeData;
 use cindertide::resources::{FactionBundle, FactionEntity, ResourcePool};
 use cindertide::tech::{Tech, ResearchInProgress, ResearchTarget, Tier, Doctrine, start_research};
@@ -201,6 +201,7 @@ struct GeneratePanel {
     width: i32,
     height: i32,
     seed: u64,
+    last_spawn_zones: Vec<SpawnZone>,
 }
 
 impl Default for GeneratePanel {
@@ -212,8 +213,15 @@ impl Default for GeneratePanel {
             width: 128,
             height: 80,
             seed: 42,
+            last_spawn_zones: Vec::new(),
         }
     }
+}
+
+/// Tag component for spawn zone marker entities in the 3D world.
+#[derive(Component)]
+struct SpawnMarker {
+    zone_id: usize,
 }
 
 // ── Map editor tool ──────────────────────────────────────────────────────────
@@ -363,6 +371,15 @@ struct SavedBuilding {
     building_type: String,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+struct SavedSpawnZone {
+    id: usize,
+    x: i32,
+    y: i32,
+    clear_radius: i32,
+    suggested_team: Option<usize>,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct SavedMap {
     tiles: Vec<SavedTile>,
@@ -387,6 +404,8 @@ struct SavedMap {
     mission_index_override: Option<usize>,
     #[serde(default)]
     script_events: Vec<ScriptEventDef>,
+    #[serde(default)]
+    spawn_zones: Vec<SavedSpawnZone>,
 }
 
 // ── Components ──────────────────────────────────────────────────────────────
@@ -2419,6 +2438,7 @@ fn handle_paused_menu_input(
             loss_override: None,
             mission_index_override: None,
             script_events: Vec::new(),
+            spawn_zones: Vec::new(),
         };
         if let Ok(content) = toml::to_string(&map) {
             let _ = std::fs::create_dir_all("assets/maps");
@@ -2565,6 +2585,7 @@ fn handle_editor_keyboard(
     mut screen: ResMut<ClientScreen>,
     mut editor: ResMut<EditorState>,
     time: Res<Time>,
+    gen: Res<GeneratePanel>,
     tiles: Query<(Entity, &Tile)>,
     units: Query<Entity, With<UnitType>>,
     buildings: Query<Entity, With<BuildingType>>,
@@ -2854,6 +2875,14 @@ fn handle_editor_keyboard(
         let saved_units: Vec<SavedUnit> = Vec::new(); // units queried separately
         let saved_buildings: Vec<SavedBuilding> = Vec::new();
 
+        let saved_spawn_zones: Vec<SavedSpawnZone> = gen.last_spawn_zones.iter().map(|z| SavedSpawnZone {
+            id: z.id,
+            x: z.x,
+            y: z.y,
+            clear_radius: z.clear_radius,
+            suggested_team: z.suggested_team,
+        }).collect();
+
         let map = SavedMap {
             tiles: saved_tiles,
             units: saved_units,
@@ -2867,6 +2896,7 @@ fn handle_editor_keyboard(
             loss_override: None,
             mission_index_override: None,
             script_events: editor.script_events.clone(),
+            spawn_zones: saved_spawn_zones,
         };
 
         let timestamp = std::time::SystemTime::now()
@@ -2968,6 +2998,13 @@ fn handle_editor_keyboard(
             loss_override: None,
             mission_index_override: None,
             script_events: editor.script_events.clone(),
+            spawn_zones: gen.last_spawn_zones.iter().map(|z| SavedSpawnZone {
+                id: z.id,
+                x: z.x,
+                y: z.y,
+                clear_radius: z.clear_radius,
+                suggested_team: z.suggested_team,
+            }).collect(),
         };
 
         let timestamp = std::time::SystemTime::now()
@@ -3104,7 +3141,10 @@ fn handle_generate_panel(
     units: Query<Entity, With<UnitType>>,
     buildings: Query<Entity, With<BuildingType>>,
     rendered_tiles: Query<Entity, With<RenderedTile>>,
+    spawn_markers: Query<Entity, With<SpawnMarker>>,
     mut visual_entities: ResMut<VisualEntities>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     if *screen != ClientScreen::MapEditor {
         // If we leave the editor while panel is open, close it.
@@ -3184,16 +3224,17 @@ fn handle_generate_panel(
         for entity in &units { commands.entity(entity).despawn(); }
         for entity in &buildings { commands.entity(entity).despawn(); }
         for entity in &rendered_tiles { commands.entity(entity).despawn(); }
+        for entity in &spawn_markers { commands.entity(entity).despawn(); }
         visual_entities.units.clear();
         visual_entities.buildings.clear();
 
         // Generate the map
-        let tile_map = generate_from_archetype(&def, &std::collections::HashMap::new(), width, height, seed);
+        let generated = generate_from_archetype(&def, &std::collections::HashMap::new(), width, height, seed);
 
         // Spawn tiles
         for y in 0..height {
             for x in 0..width {
-                let terrain = tile_map.get(&(x, y))
+                let terrain = generated.tiles.get(&(x, y))
                     .cloned()
                     .unwrap_or(cindertide::map::TerrainType::Grass);
                 let cover = match &terrain {
@@ -3211,7 +3252,35 @@ fn handle_generate_panel(
             }
         }
 
-        info!("Generated map from archetype '{}' ({}x{}, seed {})", def.name, width, height, seed);
+        // Spawn 3D marker cylinders for each spawn zone
+        let tile_size = 1.0f32;
+        for zone in &generated.spawn_zones {
+            let color = match zone.suggested_team {
+                Some(0) => Color::srgb(1.0, 1.0, 0.0),   // yellow
+                Some(1) => Color::srgb(1.0, 0.2, 0.2),   // red
+                Some(2) => Color::srgb(0.2, 0.4, 1.0),   // blue
+                Some(3) => Color::srgb(0.2, 0.9, 0.2),   // green
+                _       => Color::srgb(1.0, 1.0, 1.0),   // white (FFA)
+            };
+            let wx = zone.x as f32 * tile_size;
+            let wz = zone.y as f32 * tile_size;
+            commands.spawn((
+                Mesh3d(meshes.add(Cylinder::new(zone.clear_radius as f32 * tile_size, 0.3))),
+                MeshMaterial3d(materials.add(StandardMaterial {
+                    base_color: color.with_alpha(0.5),
+                    alpha_mode: AlphaMode::Blend,
+                    ..default()
+                })),
+                Transform::from_xyz(wx, 0.2, wz),
+                SpawnMarker { zone_id: zone.id },
+            ));
+        }
+
+        info!(
+            "Generated map from archetype '{}' ({}x{}, seed {}), {} spawn zones",
+            def.name, width, height, seed, generated.spawn_zones.len()
+        );
+        gen.last_spawn_zones = generated.spawn_zones;
         gen.open = false;
     }
 }
@@ -3951,6 +4020,29 @@ fn update_editor_panel(
         lines.push(String::new());
         lines.push(format!("Width: {}  Height: {}  Seed: {}", gen.width, gen.height, gen.seed));
         lines.push(String::new());
+        // Show last spawn zones if any
+        if !gen.last_spawn_zones.is_empty() {
+            let layout_hint = if gen.last_spawn_zones.len() == 2 {
+                let teams: Vec<_> = gen.last_spawn_zones.iter().filter_map(|z| z.suggested_team).collect();
+                if teams.len() == 2 && teams[0] != teams[1] { "1v1".to_string() } else { "FFA".to_string() }
+            } else if gen.last_spawn_zones.len() == 4 {
+                let team0 = gen.last_spawn_zones.iter().filter(|z| z.suggested_team == Some(0)).count();
+                let team1 = gen.last_spawn_zones.iter().filter(|z| z.suggested_team == Some(1)).count();
+                if team0 == 2 && team1 == 2 { "2v2".to_string() } else { "FFA".to_string() }
+            } else {
+                "FFA".to_string()
+            };
+            let team_names = ["Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf", "Hotel"];
+            lines.push(format!("Spawn zones: {}  Teams: {}", gen.last_spawn_zones.len(), layout_hint));
+            for zone in &gen.last_spawn_zones {
+                let team_label = match zone.suggested_team {
+                    Some(t) => team_names.get(t).copied().unwrap_or("?"),
+                    None => "FFA",
+                };
+                lines.push(format!("  Zone {} @ ({}, {}) — Team {}", zone.id, zone.x, zone.y, team_label));
+            }
+            lines.push(String::new());
+        }
         lines.push("[↑↓] select archetype".to_string());
         lines.push("[←→] adjust width".to_string());
         lines.push("[Shift+←→] adjust height".to_string());

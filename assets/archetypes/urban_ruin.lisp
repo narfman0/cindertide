@@ -7,4 +7,4 @@
     (fill Grass)
     (urban-ruins ruin-density)
     (resources 4 :placement scattered)
-    (bases :player bottom-left :enemy top-right :clear-radius 8)))
+    (spawn-zones 4 :layout corners :clear-radius 8)))
