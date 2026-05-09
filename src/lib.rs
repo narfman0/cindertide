@@ -1515,7 +1515,7 @@ fn handle_hero_ability_use(In(params): In<Option<Value>>, world: &mut World) -> 
 
 /// Despawn all gameplay entities and clear gameplay resources. Shared by
 /// dev/reset and game/new.
-fn wipe_world_entities(world: &mut World) {
+pub fn wipe_world_entities(world: &mut World) {
     let mut to_despawn: Vec<Entity> = Vec::new();
     {
         let mut q = world.query_filtered::<Entity, Or<(
@@ -2734,7 +2734,7 @@ fn default_opponent(player: &Faction) -> Faction {
 
 /// Generate a 40x25 Control map and place loadouts for both factions.
 /// Called from `mission/select` on the way into a mission.
-fn setup_demo_scenario(world: &mut World, player: &Faction) {
+pub fn setup_demo_scenario(world: &mut World, player: &Faction) {
     let opponent = default_opponent(player);
     let m = mapgen::generate(40, 25, 17, mapgen::MissionType::Control);
     for t in &m.tiles {
