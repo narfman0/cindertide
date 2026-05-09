@@ -5,10 +5,11 @@ use bevy::render::camera::ScalingMode;
 use cindertide::map::{Faction, GridPos, Tile};
 use cindertide::units::{UnitPos, UnitType};
 use cindertide::buildings::{BuildingPos, BuildingType};
-use cindertide::campaign::{CampaignRun, PlayableFaction};
+use cindertide::campaign::{CampaignRun, PlayableFaction, GlobalProgress, apply_mission_outcome, next_mission_type};
 use cindertide::game::{ActiveRun, GameState};
 use cindertide::mission::{Mission, MissionStatus};
 use cindertide::mapgen::MissionType;
+use cindertide::narrative::NarrativeData;
 use cindertide::resources::FactionBundle;
 use cindertide::combat::{PlayerAttackOrder, AttackMoveOrder, HoldPosition};
 use cindertide::units::{MoveTarget, MoveProgress, UnitKind};
@@ -53,9 +54,10 @@ fn main() {
         .init_resource::<DragState>()
         .init_resource::<AttackMoveMode>()
         .init_resource::<Paused>()
+        .init_resource::<ClientScreen>()
         .add_systems(Startup, setup_scene)
         .add_systems(Startup, setup_ui)
-        .add_systems(PostStartup, auto_start_mission)
+        .add_systems(Startup, load_narrative)
         .add_systems(Update, render_tiles)
         .add_systems(Update, spawn_unit_visuals)
         .add_systems(Update, sync_unit_positions)
@@ -67,7 +69,28 @@ fn main() {
         .add_systems(Update, update_drag_rect)
         .add_systems(Update, handle_keyboard_commands)
         .add_systems(Update, update_paused_overlay)
+        .add_systems(Update, handle_ui_input)
+        .add_systems(Update, update_screen_overlay)
+        .add_systems(Update, poll_mission_end)
         .run();
+}
+
+// ── ClientScreen resource ────────────────────────────────────────────────────
+
+#[derive(Resource, Debug, Clone, PartialEq)]
+enum ClientScreen {
+    Title,
+    FactionPicker { selected: usize },
+    Briefing { title: String, briefing: String },
+    InMission,
+    Debrief { title: String, text: String, won: bool },
+    GameOver { won: bool, handler_unlocked: bool },
+}
+
+impl Default for ClientScreen {
+    fn default() -> Self {
+        ClientScreen::Title
+    }
 }
 
 // ── Components ──────────────────────────────────────────────────────────────
@@ -91,6 +114,22 @@ struct DragRectUi;
 
 #[derive(Component)]
 struct PausedOverlay;
+
+/// Marker for the full-screen campaign overlay panel root node.
+#[derive(Component)]
+struct ScreenOverlay;
+
+/// Text node that shows the main title in the overlay.
+#[derive(Component)]
+struct OverlayTitleText;
+
+/// Text node that shows the body/sub-text in the overlay.
+#[derive(Component)]
+struct OverlayBodyText;
+
+/// Text node for the secondary hint line ("Press Enter…")
+#[derive(Component)]
+struct OverlayHintText;
 
 // ── Resources ────────────────────────────────────────────────────────────────
 
@@ -155,7 +194,46 @@ fn drag_rect(start: Vec2, current: Vec2) -> (Vec2, Vec2) {
     (min, max - min)
 }
 
+fn faction_name(f: PlayableFaction) -> &'static str {
+    match f {
+        PlayableFaction::Combine => "Combine",
+        PlayableFaction::Ironborn => "Ironborn",
+        PlayableFaction::Handler => "The Architect",
+    }
+}
+
+fn faction_narrative_key(f: PlayableFaction) -> &'static str {
+    match f {
+        PlayableFaction::Combine => "combine",
+        PlayableFaction::Ironborn => "ironborn",
+        PlayableFaction::Handler => "architect",
+    }
+}
+
+fn map_faction(f: PlayableFaction) -> Faction {
+    match f {
+        PlayableFaction::Combine => Faction::Combine,
+        PlayableFaction::Ironborn => Faction::Ironborn,
+        PlayableFaction::Handler => Faction::Combine, // Handler uses Combine visuals
+    }
+}
+
 // ── Startup systems ───────────────────────────────────────────────────────────
+
+fn load_narrative(mut commands: Commands) {
+    let narrative = cindertide::narrative::NarrativeData::load("assets/narrative.toml")
+        .unwrap_or_else(|e| {
+            eprintln!("Warning: could not load assets/narrative.toml: {e}");
+            cindertide::narrative::NarrativeData {
+                factions: Default::default(),
+                finales: cindertide::narrative::Finales {
+                    combine_first: String::new(),
+                    ironborn_first: String::new(),
+                },
+            }
+        });
+    commands.insert_resource(narrative);
+}
 
 fn setup_scene(mut commands: Commands) {
     commands.spawn((
@@ -224,43 +302,361 @@ fn setup_ui(mut commands: Commands) {
                 },
             ));
         });
+
+        // Full-screen campaign overlay
+        parent.spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(0.0),
+                top: Val::Px(0.0),
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.85)),
+            Visibility::Visible,
+            ScreenOverlay,
+        )).with_children(|p| {
+            // Title text
+            p.spawn((
+                Text::new("CINDERTIDE"),
+                TextColor(Color::srgb(1.0, 0.85, 0.2)),
+                TextFont { font_size: 72.0, ..default() },
+                OverlayTitleText,
+            ));
+
+            // Body text
+            p.spawn((
+                Node {
+                    margin: UiRect::top(Val::Px(24.0)),
+                    max_width: Val::Px(800.0),
+                    ..default()
+                },
+                Text::new("a dieselpunk RTS"),
+                TextColor(Color::srgb(0.85, 0.85, 0.85)),
+                TextFont { font_size: 26.0, ..default() },
+                OverlayBodyText,
+            ));
+
+            // Hint text
+            p.spawn((
+                Node {
+                    margin: UiRect::top(Val::Px(48.0)),
+                    ..default()
+                },
+                Text::new("Press Enter to begin"),
+                TextColor(Color::srgb(0.65, 0.65, 0.65)),
+                TextFont { font_size: 20.0, ..default() },
+                OverlayHintText,
+            ));
+        });
     });
 }
 
-fn auto_start_mission(world: &mut World) {
-    let player = Faction::Combine;
+// ── Screen overlay update ─────────────────────────────────────────────────────
 
-    cindertide::wipe_world_entities(world);
+fn update_screen_overlay(
+    screen: Res<ClientScreen>,
+    progress: Res<GlobalProgress>,
+    active: Res<ActiveRun>,
+    mut overlay_vis: Query<&mut Visibility, With<ScreenOverlay>>,
+    mut title_text: Query<&mut Text, (With<OverlayTitleText>, Without<OverlayBodyText>, Without<OverlayHintText>)>,
+    mut body_text: Query<&mut Text, (With<OverlayBodyText>, Without<OverlayTitleText>, Without<OverlayHintText>)>,
+    mut hint_text: Query<&mut Text, (With<OverlayHintText>, Without<OverlayTitleText>, Without<OverlayBodyText>)>,
+    narrative: Option<Res<NarrativeData>>,
+) {
+    if !screen.is_changed() && !active.is_changed() && !progress.is_changed() {
+        return;
+    }
 
-    *world.resource_mut::<ActiveRun>() = ActiveRun {
-        run: Some(CampaignRun {
-            faction: PlayableFaction::Combine,
-            current_mission: 0,
-            outcomes: Vec::new(),
-            complete: false,
-        }),
-        current_mission_entity: None,
-        missions_won: 0,
-        missions_lost: 0,
+    let Ok(mut vis) = overlay_vis.single_mut() else { return };
+    let Ok(mut title) = title_text.single_mut() else { return };
+    let Ok(mut body) = body_text.single_mut() else { return };
+    let Ok(mut hint) = hint_text.single_mut() else { return };
+
+    match screen.as_ref() {
+        ClientScreen::InMission => {
+            *vis = Visibility::Hidden;
+        }
+        ClientScreen::Title => {
+            *vis = Visibility::Visible;
+            **title = "CINDERTIDE".to_string();
+            **body = "a dieselpunk RTS".to_string();
+            **hint = "Press Enter to begin".to_string();
+        }
+        ClientScreen::FactionPicker { selected } => {
+            *vis = Visibility::Visible;
+            **title = "Choose Your Faction".to_string();
+
+            let factions: &[PlayableFaction] = if progress.handler_unlocked {
+                &[PlayableFaction::Combine, PlayableFaction::Ironborn, PlayableFaction::Handler]
+            } else {
+                &[PlayableFaction::Combine, PlayableFaction::Ironborn]
+            };
+
+            let mut lines = String::new();
+            for (i, &f) in factions.iter().enumerate() {
+                let marker = if i == *selected { "> " } else { "  " };
+                lines.push_str(&format!("{}{}\n", marker, faction_name(f)));
+            }
+            **body = lines.trim_end().to_string();
+            **hint = "W/S or Arrow keys to select, Enter to confirm".to_string();
+        }
+        ClientScreen::Briefing { title: mission_title, briefing } => {
+            *vis = Visibility::Visible;
+            **title = mission_title.clone();
+            **body = briefing.clone();
+            **hint = "Press Enter to deploy".to_string();
+        }
+        ClientScreen::Debrief { title: mission_title, text, won } => {
+            *vis = Visibility::Visible;
+            let outcome = if *won { "VICTORY" } else { "DEFEAT" };
+            **title = format!("{} — {}", outcome, mission_title);
+            **body = text.clone();
+            **hint = "Press Enter to continue".to_string();
+        }
+        ClientScreen::GameOver { won, handler_unlocked } => {
+            *vis = Visibility::Visible;
+            let outcome = if *won { "CAMPAIGN COMPLETE" } else { "CAMPAIGN ENDED" };
+            **title = outcome.to_string();
+
+            let finale_text = if let Some(ref nd) = narrative {
+                let combine_first = matches!(
+                    active.run.as_ref().map(|r| r.faction),
+                    Some(PlayableFaction::Combine)
+                );
+                nd.finale(combine_first).to_string()
+            } else {
+                String::new()
+            };
+
+            let mut body_str = finale_text;
+            if *handler_unlocked {
+                body_str.push_str("\n\nTHE ARCHITECT IS UNLOCKED");
+            }
+            **body = body_str;
+            **hint = "Press Enter to return to faction select".to_string();
+        }
+    }
+}
+
+// ── UI input handler ──────────────────────────────────────────────────────────
+
+fn handle_ui_input(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut screen: ResMut<ClientScreen>,
+    mut active: ResMut<ActiveRun>,
+    mut game_state: ResMut<GameState>,
+    progress: Res<GlobalProgress>,
+    narrative: Option<Res<NarrativeData>>,
+    mut commands: Commands,
+) {
+    // Only handle UI input when not in mission
+    if *screen == ClientScreen::InMission {
+        return;
+    }
+
+    let enter = keys.just_pressed(KeyCode::Enter);
+    let up = keys.just_pressed(KeyCode::ArrowUp) || keys.just_pressed(KeyCode::KeyW);
+    let down = keys.just_pressed(KeyCode::ArrowDown) || keys.just_pressed(KeyCode::KeyS);
+
+    match screen.clone() {
+        ClientScreen::Title => {
+            if enter {
+                *screen = ClientScreen::FactionPicker { selected: 0 };
+            }
+        }
+
+        ClientScreen::FactionPicker { selected } => {
+            let count = if progress.handler_unlocked { 3 } else { 2 };
+            if up {
+                let new = if selected == 0 { count - 1 } else { selected - 1 };
+                *screen = ClientScreen::FactionPicker { selected: new };
+            } else if down {
+                *screen = ClientScreen::FactionPicker { selected: (selected + 1) % count };
+            } else if enter {
+                let factions: &[PlayableFaction] = if progress.handler_unlocked {
+                    &[PlayableFaction::Combine, PlayableFaction::Ironborn, PlayableFaction::Handler]
+                } else {
+                    &[PlayableFaction::Combine, PlayableFaction::Ironborn]
+                };
+                let faction = factions[selected];
+
+                // Create a new campaign run
+                let run = CampaignRun {
+                    faction,
+                    current_mission: 0,
+                    outcomes: Vec::new(),
+                    complete: false,
+                };
+                *active = ActiveRun {
+                    run: Some(run),
+                    current_mission_entity: None,
+                    missions_won: 0,
+                    missions_lost: 0,
+                };
+
+                // Transition to briefing for mission 0
+                let (title, briefing) = get_mission_narrative(&narrative, faction, 0);
+                *screen = ClientScreen::Briefing { title, briefing };
+            }
+        }
+
+        ClientScreen::Briefing { .. } => {
+            if enter {
+                commands.queue(|world: &mut World| {
+                    cindertide::wipe_world_entities(world);
+
+                    let player = world.resource::<ActiveRun>()
+                        .run.as_ref()
+                        .map(|r| map_faction(r.faction))
+                        .unwrap_or(Faction::Combine);
+
+                    let opponent = if player == Faction::Combine {
+                        Faction::Ironborn
+                    } else {
+                        Faction::Combine
+                    };
+
+                    let mission_type = world.resource::<ActiveRun>()
+                        .run.as_ref()
+                        .and_then(|r| next_mission_type(r))
+                        .unwrap_or(MissionType::Assault);
+
+                    world.spawn(FactionBundle::new(player.clone()));
+
+                    let mission_entity = world.spawn(Mission {
+                        mission_type,
+                        player_faction: player.clone(),
+                        opponent_faction: opponent,
+                        status: MissionStatus::Active,
+                        elapsed: 0.0,
+                        deadline: 300.0,
+                    }).id();
+
+                    cindertide::setup_demo_scenario(world, &player);
+
+                    world.resource_mut::<ActiveRun>().current_mission_entity = Some(mission_entity);
+                    *world.resource_mut::<GameState>() = GameState::InMission;
+                    world.insert_resource(PlayerFaction(player));
+                    *world.resource_mut::<ClientScreen>() = ClientScreen::InMission;
+                });
+            }
+        }
+
+        ClientScreen::Debrief { won, .. } => {
+            if enter {
+                // Advance campaign
+                let done = if let Some(ref run) = active.run {
+                    run.current_mission >= 5 || run.complete
+                } else {
+                    true
+                };
+
+                if done {
+                    let handler_unlocked = progress.handler_unlocked;
+                    *screen = ClientScreen::GameOver { won, handler_unlocked };
+                } else {
+                    // Get next briefing
+                    if let Some(ref run) = active.run {
+                        let faction = run.faction;
+                        let mission_idx = run.current_mission;
+                        let (title, briefing) = get_mission_narrative(&narrative, faction, mission_idx);
+                        *screen = ClientScreen::Briefing { title, briefing };
+                    } else {
+                        *screen = ClientScreen::FactionPicker { selected: 0 };
+                    }
+                }
+            }
+        }
+
+        ClientScreen::GameOver { .. } => {
+            if enter {
+                *screen = ClientScreen::FactionPicker { selected: 0 };
+                // Reset the active run
+                *active = ActiveRun::default();
+                *game_state = GameState::Title;
+            }
+        }
+
+        ClientScreen::InMission => {}
+    }
+}
+
+/// Fetch narrative title + briefing for a faction/mission index.
+fn get_mission_narrative(
+    narrative: &Option<Res<NarrativeData>>,
+    faction: PlayableFaction,
+    index: usize,
+) -> (String, String) {
+    if let Some(ref nd) = narrative {
+        let key = faction_narrative_key(faction);
+        if let Some(mn) = nd.mission(key, index) {
+            return (mn.title.clone(), mn.briefing.clone());
+        }
+    }
+    (format!("Mission {}", index + 1), String::new())
+}
+
+// ── Poll mission end ──────────────────────────────────────────────────────────
+
+fn poll_mission_end(
+    mut screen: ResMut<ClientScreen>,
+    mut active: ResMut<ActiveRun>,
+    mut progress: ResMut<GlobalProgress>,
+    missions: Query<&Mission>,
+    narrative: Option<Res<NarrativeData>>,
+) {
+    if *screen != ClientScreen::InMission {
+        return;
+    }
+
+    let Some(mission_entity) = active.current_mission_entity else {
+        return;
     };
 
-    world.spawn(FactionBundle::new(player.clone()));
+    let Ok(m) = missions.get(mission_entity) else {
+        return;
+    };
 
-    let mission_entity = world.spawn(Mission {
-        mission_type: MissionType::Control,
-        player_faction: player.clone(),
-        opponent_faction: Faction::Ironborn,
-        status: MissionStatus::Active,
-        elapsed: 0.0,
-        deadline: 300.0,
-    }).id();
+    if m.status == MissionStatus::Active {
+        return;
+    }
 
-    cindertide::setup_demo_scenario(world, &player);
+    let won = m.status == MissionStatus::Won;
+    let mission_type = m.mission_type.clone();
+    let player_faction = m.player_faction.clone();
 
-    world.resource_mut::<ActiveRun>().current_mission_entity = Some(mission_entity);
-    *world.resource_mut::<GameState>() = GameState::InMission;
+    // Determine debrief narrative
+    let faction_playable = active.run.as_ref().map(|r| r.faction).unwrap_or(PlayableFaction::Combine);
+    let mission_idx = active.run.as_ref().map(|r| r.current_mission).unwrap_or(0);
+    let key = faction_narrative_key(faction_playable);
 
-    world.insert_resource(PlayerFaction(player.clone()));
+    let (title, debrief_text) = if let Some(ref nd) = narrative {
+        if let Some(mn) = nd.mission(key, mission_idx) {
+            let text = if won { mn.win.clone() } else { mn.loss.clone() };
+            (mn.title.clone(), text)
+        } else {
+            (format!("Mission {}", mission_idx + 1), String::new())
+        }
+    } else {
+        (format!("Mission {}", mission_idx + 1), String::new())
+    };
+
+    // Apply outcome to campaign run
+    if let Some(ref mut run) = active.run {
+        apply_mission_outcome(run, &mut progress, won, mission_type);
+    }
+    active.current_mission_entity = None;
+
+    *screen = ClientScreen::Debrief {
+        title,
+        text: debrief_text,
+        won,
+    };
 }
 
 // ── Render systems ────────────────────────────────────────────────────────────
@@ -366,7 +762,13 @@ fn handle_mouse_input(
     tiles: Query<&Tile>,
     mut drag_state: ResMut<DragState>,
     attack_move_mode: Res<AttackMoveMode>,
+    screen: Res<ClientScreen>,
 ) {
+    // Only handle mouse input during mission
+    if *screen != ClientScreen::InMission {
+        return;
+    }
+
     let Some(player_faction) = player_faction else { return };
     let Ok(window) = windows.single() else { return };
     let Ok((camera, cam_transform)) = cameras.single() else { return };
@@ -547,8 +949,6 @@ fn handle_mouse_input(
             }
         } else if shift_held {
             // Shift+right-click: queue waypoint
-            // MoveTarget only holds one destination; for now issue normal move
-            // and print a note. A multi-step queue would require a Vec<GridPos> in MoveTarget.
             info!("queued waypoint at ({gx}, {gy}) — single-target MoveTarget used");
             let tile_map: HashMap<(i32, i32), cindertide::map::TerrainType> = tiles
                 .iter()
@@ -642,7 +1042,13 @@ fn handle_keyboard_commands(
     mut time: ResMut<Time<Virtual>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    screen: Res<ClientScreen>,
 ) {
+    // Only handle gameplay keys during mission
+    if *screen != ClientScreen::InMission {
+        return;
+    }
+
     // A key — toggle attack-move mode
     if keys.just_pressed(KeyCode::KeyA) {
         attack_move_mode.0 = !attack_move_mode.0;
@@ -788,7 +1194,11 @@ fn edge_scroll(
     mut cameras: Query<(&mut Transform, &IsometricCamera)>,
     windows: Query<&Window>,
     time: Res<Time>,
+    screen: Res<ClientScreen>,
 ) {
+    if *screen != ClientScreen::InMission {
+        return;
+    }
     let Ok(window) = windows.single() else { return };
     let Ok((mut transform, cam)) = cameras.single_mut() else { return };
     let Some(cursor) = window.cursor_position() else { return };
@@ -809,7 +1219,14 @@ fn camera_pan_zoom(
     keys: Res<ButtonInput<KeyCode>>,
     mut scroll: EventReader<MouseWheel>,
     time: Res<Time>,
+    screen: Res<ClientScreen>,
 ) {
+    if *screen != ClientScreen::InMission {
+        // Still consume scroll events to avoid buildup
+        for _ in scroll.read() {}
+        return;
+    }
+
     let Ok((mut transform, mut projection, cam)) = query.single_mut() else { return };
 
     let dt = time.delta_secs();
