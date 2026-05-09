@@ -11,7 +11,8 @@ use cindertide::mission::{Mission, MissionStatus};
 use cindertide::mapgen::MissionType;
 use cindertide::narrative::NarrativeData;
 use cindertide::resources::{FactionBundle, FactionEntity, ResourcePool};
-use cindertide::combat::{PlayerAttackOrder, AttackMoveOrder, HoldPosition, AttackTarget, Health};
+use cindertide::tech::{Tech, ResearchInProgress, ResearchTarget, Tier, Doctrine, start_research};
+use cindertide::combat::{PlayerAttackOrder, AttackMoveOrder, HoldPosition, AttackTarget, Health, Suppressed, AbilityCooldowns};
 use cindertide::units::{MoveTarget, MoveProgress, UnitKind};
 use cindertide::buildings::Built;
 use cindertide::production::{ProductionQueue, unit_production_seconds};
@@ -35,7 +36,7 @@ use cindertide::{
     save::SavePlugin,
     game::GamePlugin,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use serde::{Serialize, Deserialize};
 
 fn main() {
@@ -59,6 +60,7 @@ fn main() {
         .init_resource::<Paused>()
         .init_resource::<ClientScreen>()
         .init_resource::<EditorState>()
+        .init_resource::<FogOfWar>()
         .insert_resource(MinimapTimer(0.0))
         .add_systems(Startup, setup_scene)
         .add_systems(Startup, setup_ui)
@@ -89,6 +91,7 @@ fn main() {
         .add_systems(Update, update_minimap)
         .add_systems(Update, handle_minimap_click)
         .add_systems(Update, update_mission_objectives)
+        .add_systems(Update, update_fog_of_war)
         .run();
 }
 
@@ -299,10 +302,23 @@ struct ObjectivesText;
 #[derive(Resource)]
 struct MinimapTimer(f32);
 
+/// Fog of war state: which tiles are currently visible and which have been explored.
+#[derive(Resource, Default)]
+struct FogOfWar {
+    /// Tiles currently within vision range of at least one player unit/building.
+    visible: HashSet<(i32, i32)>,
+    /// Tiles ever seen by a player unit/building (superset of visible).
+    explored: HashSet<(i32, i32)>,
+    /// Countdown timer — fog updates every 0.25 s.
+    timer: f32,
+}
+
 #[derive(Resource, Default)]
 struct VisualEntities {
     units: HashMap<Entity, Entity>,
     buildings: HashMap<Entity, Entity>,
+    /// Maps grid position to the StandardMaterial handle of that tile's mesh.
+    tile_materials: HashMap<(i32, i32), Handle<StandardMaterial>>,
 }
 
 #[derive(Resource, Default)]
@@ -996,18 +1012,23 @@ fn render_tiles(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut visual_entities: ResMut<VisualEntities>,
     tiles: Query<&Tile, Without<RenderedTile>>,
 ) {
     for tile in &tiles {
-        let color = terrain_color(&tile.terrain_type);
+        // Start tiles as nearly black (never-seen) until fog of war reveals them.
+        let color = Color::srgb(0.02, 0.02, 0.02);
         let pos = grid_to_world(tile.pos.x, tile.pos.y);
+        let mat_handle = materials.add(StandardMaterial {
+            base_color: color,
+            perceptual_roughness: 0.9,
+            ..default()
+        });
+        let key = (tile.pos.x, tile.pos.y);
+        visual_entities.tile_materials.insert(key, mat_handle.clone());
         commands.spawn((
             Mesh3d(meshes.add(Plane3d::default().mesh().size(0.95, 0.95))),
-            MeshMaterial3d(materials.add(StandardMaterial {
-                base_color: color,
-                perceptual_roughness: 0.9,
-                ..default()
-            })),
+            MeshMaterial3d(mat_handle),
             Transform::from_translation(pos),
             RenderedTile { pos: tile.pos.clone() },
         ));
@@ -2492,6 +2513,138 @@ fn update_mission_objectives(
     };
 
     **text = obj_text;
+}
+
+// ── Fog of War system ─────────────────────────────────────────────────────────
+
+/// Vision radius in tiles for each entity type.
+const VISION_INFANTRY: i32 = 6;
+const VISION_VEHICLE: i32 = 10;
+const VISION_BUILDING: i32 = 8;
+
+/// Update fog of war every 0.25 s while InMission.
+fn update_fog_of_war(
+    screen: Res<ClientScreen>,
+    time: Res<Time>,
+    player_faction: Option<Res<PlayerFaction>>,
+    units: Query<(&UnitPos, &Faction, &UnitKind), With<UnitType>>,
+    buildings: Query<(&BuildingPos, &Faction), With<BuildingType>>,
+    mut fog: ResMut<FogOfWar>,
+    tiles: Query<&Tile>,
+    visual_entities: Res<VisualEntities>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    unit_visuals: Query<(&Faction, &UnitPos), With<UnitType>>,
+    building_visuals: Query<(&Faction, &BuildingPos), With<BuildingType>>,
+    mut vis_query: Query<(&mut Visibility, Entity)>,
+) {
+    if *screen != ClientScreen::InMission {
+        return;
+    }
+
+    fog.timer -= time.delta_secs();
+    if fog.timer > 0.0 {
+        return;
+    }
+    fog.timer = 0.25;
+
+    let Some(pf) = player_faction else { return };
+    let player_f = &pf.0;
+
+    // Recompute visible set from all player units + buildings.
+    let mut new_visible: HashSet<(i32, i32)> = HashSet::new();
+
+    for (pos, faction, kind) in &units {
+        if faction != player_f {
+            continue;
+        }
+        let radius = match kind {
+            UnitKind::Vehicle => VISION_VEHICLE,
+            UnitKind::Infantry => VISION_INFANTRY,
+        };
+        let cx = pos.pos.x;
+        let cy = pos.pos.y;
+        for dy in -radius..=radius {
+            for dx in -radius..=radius {
+                if dx * dx + dy * dy <= radius * radius {
+                    new_visible.insert((cx + dx, cy + dy));
+                }
+            }
+        }
+    }
+
+    for (bpos, faction) in &buildings {
+        if faction != player_f {
+            continue;
+        }
+        let radius = VISION_BUILDING;
+        let cx = bpos.pos.x;
+        let cy = bpos.pos.y;
+        for dy in -radius..=radius {
+            for dx in -radius..=radius {
+                if dx * dx + dy * dy <= radius * radius {
+                    new_visible.insert((cx + dx, cy + dy));
+                }
+            }
+        }
+    }
+
+    fog.visible = new_visible;
+    // Explored is a superset — never shrinks.
+    let newly_seen: Vec<(i32, i32)> = fog.visible.iter().copied().collect();
+    for pos in newly_seen {
+        fog.explored.insert(pos);
+    }
+
+    // Update tile material colors based on fog state.
+    for tile in &tiles {
+        let key = (tile.pos.x, tile.pos.y);
+        let Some(mat_handle) = visual_entities.tile_materials.get(&key) else { continue };
+        let Some(mat) = materials.get_mut(mat_handle) else { continue };
+
+        if fog.visible.contains(&key) {
+            // Fully visible — normal terrain color.
+            mat.base_color = terrain_color(&tile.terrain_type);
+        } else if fog.explored.contains(&key) {
+            // Shrouded — darkened version of terrain color.
+            let c = terrain_color(&tile.terrain_type);
+            let LinearRgba { red, green, blue, alpha } = c.to_linear();
+            mat.base_color = Color::linear_rgba(red * 0.4, green * 0.4, blue * 0.4, alpha);
+        } else {
+            // Never seen — nearly black.
+            mat.base_color = Color::srgb(0.02, 0.02, 0.02);
+        }
+    }
+
+    // Hide enemy units/buildings not in visible set; always show player units/buildings.
+    // We iterate the visual entity map to find the visual entity and toggle its Visibility.
+    // Unit visuals
+    for (logic_entity, &vis_entity) in &visual_entities.units {
+        // Try to get faction + pos for this logic entity
+        if let Ok((faction, pos)) = unit_visuals.get(*logic_entity) {
+            let should_show = if faction == player_f {
+                true // player units always visible
+            } else {
+                fog.visible.contains(&(pos.pos.x, pos.pos.y))
+            };
+            if let Ok((mut visibility, _)) = vis_query.get_mut(vis_entity) {
+                *visibility = if should_show { Visibility::Visible } else { Visibility::Hidden };
+            }
+        }
+    }
+
+    // Building visuals
+    for (logic_entity, &vis_entity) in &visual_entities.buildings {
+        if let Ok((faction, bpos)) = building_visuals.get(*logic_entity) {
+            let should_show = if faction == player_f {
+                true
+            } else {
+                fog.visible.contains(&(bpos.pos.x, bpos.pos.y))
+            };
+            if let Ok((mut visibility, _)) = vis_query.get_mut(vis_entity) {
+                *visibility = if should_show { Visibility::Visible } else { Visibility::Hidden };
+            }
+        }
+    }
 }
 
 // ── Color helpers ──────────────────────────────────────────────────────────────
