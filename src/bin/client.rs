@@ -80,6 +80,7 @@ fn main() {
         .init_resource::<CampaignEditorState>()
         .init_resource::<GeneratePanel>()
         .init_resource::<LobbyConfig>()
+        .init_resource::<LobbyPreviewState>()
         .insert_resource(MinimapTimer(0.0))
         .insert_resource(NetBroadcastTimer(0.0))
         .add_systems(Startup, setup_scene)
@@ -117,6 +118,7 @@ fn main() {
         .add_systems(Update, update_production_queue)
         .add_systems(Update, update_minimap)
         .add_systems(Update, handle_minimap_click)
+        .add_systems(Update, update_lobby_map_preview)
         .add_systems(Update, update_mission_objectives)
         .add_systems(Update, update_dialogue_bar)
         .add_systems(Update, handle_ability_input)
@@ -501,6 +503,20 @@ struct TechPanel;
 /// Text inside the tech tree panel.
 #[derive(Component)]
 struct TechPanelText;
+
+/// Root panel of the lobby map preview (240×160 px, right side of lobby screen).
+#[derive(Component)]
+struct LobbyMapPreview;
+
+/// Colored dot/tile node inside the lobby map preview.
+#[derive(Component)]
+struct LobbyMapPreviewDot;
+
+/// Tracks the last rendered map path so preview only rebuilds on map change.
+#[derive(Resource, Default)]
+struct LobbyPreviewState {
+    last_map_path: String,
+}
 
 /// Resource tracking tech panel open/close state and selected index.
 #[derive(Resource, Default)]
@@ -1395,6 +1411,24 @@ fn setup_ui(mut commands: Commands) {
                 TechPanelText,
             ));
         });
+
+        // Lobby map preview panel (240×160 px, top-right, visible only in MultiplayerLobby)
+        parent.spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                right: Val::Px(20.0),
+                top: Val::Px(80.0),
+                width: Val::Px(244.0),
+                height: Val::Px(164.0),
+                overflow: Overflow::clip(),
+                border: UiRect::all(Val::Px(2.0)),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.05, 0.05, 0.05, 0.9)),
+            BorderColor(Color::srgb(0.4, 0.4, 0.4)),
+            Visibility::Hidden,
+            LobbyMapPreview,
+        ));
     });
 }
 
@@ -5002,6 +5036,203 @@ fn update_minimap(
                 },
                 BackgroundColor(color),
                 MinimapDot,
+            ));
+        }
+    });
+}
+
+// ── Lobby map preview ─────────────────────────────────────────────────────────
+
+const PREVIEW_W: f32 = 240.0;
+const PREVIEW_H: f32 = 160.0;
+
+/// Return the team color for a team name (Alpha=yellow, Bravo=red, Charlie=blue, etc.).
+fn lobby_team_color(team: &str) -> Color {
+    match team {
+        "Alpha"   => Color::srgb(1.0, 0.95, 0.0),
+        "Bravo"   => Color::srgb(1.0, 0.15, 0.15),
+        "Charlie" => Color::srgb(0.15, 0.35, 1.0),
+        "Delta"   => Color::srgb(0.10, 0.80, 0.10),
+        "Echo"    => Color::srgb(0.0, 0.90, 0.90),
+        "Foxtrot" => Color::srgb(0.85, 0.0, 0.85),
+        "Golf"    => Color::srgb(1.0, 0.55, 0.0),
+        "Hotel"   => Color::srgb(0.95, 0.95, 0.95),
+        _         => Color::srgb(0.6, 0.6, 0.6),
+    }
+}
+
+/// Brighter version of terrain_color for preview tiles.
+fn terrain_color_preview(terrain: &cindertide::map::TerrainType) -> Color {
+    use cindertide::map::TerrainType;
+    match terrain {
+        TerrainType::Grass     => Color::srgb(0.38, 0.62, 0.25),
+        TerrainType::Road      => Color::srgb(0.52, 0.52, 0.52),
+        TerrainType::Forest    => Color::srgb(0.12, 0.44, 0.12),
+        TerrainType::Rubble    => Color::srgb(0.62, 0.56, 0.50),
+        TerrainType::Mud       => Color::srgb(0.55, 0.38, 0.18),
+        TerrainType::Corrupted => Color::srgb(0.75, 0.12, 0.75),
+        _                      => Color::srgb(0.60, 0.60, 0.60),
+    }
+}
+
+/// Rebuild the 2D map preview whenever the selected map changes in MultiplayerLobby.
+fn update_lobby_map_preview(
+    mut commands: Commands,
+    screen: Res<ClientScreen>,
+    lobby: Res<LobbyConfig>,
+    mut preview_state: ResMut<LobbyPreviewState>,
+    panel_q: Query<Entity, With<LobbyMapPreview>>,
+    dot_q: Query<Entity, With<LobbyMapPreviewDot>>,
+    mut panel_vis_q: Query<&mut Visibility, With<LobbyMapPreview>>,
+) {
+    let in_lobby = matches!(*screen, ClientScreen::MultiplayerLobby { .. });
+
+    // Show/hide panel based on screen state
+    for mut vis in &mut panel_vis_q {
+        *vis = if in_lobby { Visibility::Visible } else { Visibility::Hidden };
+    }
+
+    if !in_lobby {
+        return;
+    }
+
+    // Determine current map path string (empty if none selected)
+    let current_map = lobby.map_path.as_deref().unwrap_or("").to_string();
+
+    // Skip rebuild if map hasn't changed
+    if current_map == preview_state.last_map_path {
+        return;
+    }
+    preview_state.last_map_path = current_map.clone();
+
+    // Despawn all existing preview dots
+    for dot_entity in &dot_q {
+        commands.entity(dot_entity).despawn();
+    }
+
+    let Ok(panel_entity) = panel_q.single() else { return };
+
+    if current_map.is_empty() {
+        return;
+    }
+
+    // Load the saved map file
+    let full_path = format!("assets/{}", current_map);
+    let saved: SavedMap = match std::fs::read_to_string(&full_path)
+        .ok()
+        .and_then(|content| toml::from_str(&content).ok())
+    {
+        Some(s) => s,
+        None => return,
+    };
+
+    // Build tile list: use saved tiles if any, otherwise generate procedurally
+    // Each entry: (x, y, terrain_string_or_type)
+    struct PreviewTile {
+        x: i32,
+        y: i32,
+        terrain: cindertide::map::TerrainType,
+    }
+
+    let preview_tiles: Vec<PreviewTile> = if !saved.tiles.is_empty() {
+        saved.tiles.iter().map(|t| {
+            use cindertide::map::TerrainType;
+            let terrain = match t.terrain.as_str() {
+                "Grass"     => TerrainType::Grass,
+                "Road"      => TerrainType::Road,
+                "Forest"    => TerrainType::Forest,
+                "Rubble"    => TerrainType::Rubble,
+                "Mud"       => TerrainType::Mud,
+                "Corrupted" => TerrainType::Corrupted,
+                _           => TerrainType::Grass,
+            };
+            PreviewTile { x: t.x, y: t.y, terrain }
+        }).collect()
+    } else {
+        // Generate procedurally from mission_type
+        let mission_type = match saved.mission_type.as_deref().unwrap_or("Assault") {
+            "Defense"       => cindertide::mapgen::MissionType::Defense,
+            "Extraction"    => cindertide::mapgen::MissionType::Extraction,
+            "Survival"      => cindertide::mapgen::MissionType::Survival,
+            "Control"       => cindertide::mapgen::MissionType::Control,
+            "Ffa"           => cindertide::mapgen::MissionType::Ffa,
+            "KingOfTheHill" => cindertide::mapgen::MissionType::KingOfTheHill,
+            "Assassination" => cindertide::mapgen::MissionType::Assassination,
+            _               => cindertide::mapgen::MissionType::Assault,
+        };
+        let gen = cindertide::mapgen::generate_for_mission(42, mission_type);
+        gen.tiles.iter().map(|t| PreviewTile {
+            x: t.pos.x,
+            y: t.pos.y,
+            terrain: t.terrain.clone(),
+        }).collect()
+    };
+
+    if preview_tiles.is_empty() {
+        return;
+    }
+
+    // Compute bounds
+    let min_x = preview_tiles.iter().map(|t| t.x).min().unwrap_or(0);
+    let min_y = preview_tiles.iter().map(|t| t.y).min().unwrap_or(0);
+    let max_x = preview_tiles.iter().map(|t| t.x).max().unwrap_or(0);
+    let max_y = preview_tiles.iter().map(|t| t.y).max().unwrap_or(0);
+
+    let map_w = (max_x - min_x + 1) as f32;
+    let map_h = (max_y - min_y + 1) as f32;
+    if map_w <= 0.0 || map_h <= 0.0 {
+        return;
+    }
+
+    let scale_x = PREVIEW_W / map_w;
+    let scale_y = PREVIEW_H / map_h;
+
+    // Subsample large maps: skip every other tile if map > 128×80
+    let step = if map_w > 128.0 || map_h > 80.0 { 2usize } else { 1usize };
+
+    // Build dots list: terrain tiles
+    let mut dots: Vec<(f32, f32, f32, f32, Color)> = Vec::new(); // (left, top, w, h, color)
+
+    for (i, tile) in preview_tiles.iter().enumerate() {
+        if step > 1 && i % step != 0 {
+            continue;
+        }
+        let px = (tile.x - min_x) as f32 * scale_x;
+        // Flip Y: bottom of map = bottom of preview
+        let py = (max_y - tile.y) as f32 * scale_y;
+        let tw = scale_x.ceil().max(1.0);
+        let th = scale_y.ceil().max(1.0);
+        let color = terrain_color_preview(&tile.terrain);
+        dots.push((px, py, tw, th, color));
+    }
+
+    // Spawn zone dots (6×6 px)
+    for zone in &saved.spawn_zones {
+        // Find team for this zone from lobby slots
+        let team = lobby.slots.iter()
+            .find(|s| s.spawn_zone == zone.id)
+            .map(|s| s.team.as_str())
+            .unwrap_or("Alpha");
+        let color = lobby_team_color(team);
+        let px = (zone.x - min_x) as f32 * scale_x - 3.0;
+        let py = (max_y - zone.y) as f32 * scale_y - 3.0;
+        dots.push((px.max(0.0), py.max(0.0), 6.0, 6.0, color));
+    }
+
+    // Spawn all dots as children of preview panel
+    commands.entity(panel_entity).with_children(|parent| {
+        for (left, top, w, h, color) in dots {
+            parent.spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(left + 2.0), // +2 for border inset
+                    top: Val::Px(top + 2.0),
+                    width: Val::Px(w),
+                    height: Val::Px(h),
+                    ..default()
+                },
+                BackgroundColor(color),
+                LobbyMapPreviewDot,
             ));
         }
     });
