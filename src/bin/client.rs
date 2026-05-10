@@ -85,6 +85,7 @@ fn main() {
         .init_resource::<PlayerCheats>()
         .insert_resource(MinimapTimer(0.0))
         .insert_resource(NetBroadcastTimer(0.0))
+        .insert_resource(cindertide::factions::LoadedFactions::load_from_dir("assets/factions"))
         .add_systems(Startup, setup_scene)
         .add_systems(Startup, setup_ui)
         .add_systems(Startup, load_narrative)
@@ -268,6 +269,7 @@ struct ScriptEventDef {
 struct ActionDef {
     action_type: String,  // "dialogue", "spawn_units", "objective", "win_mission", "lose_mission"
     text: String,         // for dialogue / objective
+    #[serde(default)]
     speaker: String,      // for dialogue (optional speaker tag)
     faction: String,      // for spawn_units
     unit_type: String,    // for spawn_units
@@ -2294,8 +2296,8 @@ fn handle_ui_input(
                                     let faction = parse_faction_name(&sb.faction).unwrap_or_else(Faction::combine);
                                     spawn_building_world(world, sb.x, sb.y, faction, &sb.building_type);
                                 }
-                                map_loaded = true;
-                                info!("Loaded mission map from {}", full_path);
+                                map_loaded = !saved.tiles.is_empty();
+                                info!("Loaded mission map from {} ({} tiles)", full_path, saved.tiles.len());
                             }
                         }
                         if !map_loaded {
@@ -2644,9 +2646,9 @@ fn render_tiles(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut visual_entities: ResMut<VisualEntities>,
-    tiles: Query<&Tile, Without<RenderedTile>>,
+    tiles: Query<(Entity, &Tile), Without<RenderedTile>>,
 ) {
-    for tile in &tiles {
+    for (tile_entity, tile) in &tiles {
         // Start tiles as nearly black (never-seen) until fog of war reveals them.
         let color = Color::srgb(0.02, 0.02, 0.02);
         let pos = grid_to_world(tile.pos.x, tile.pos.y);
@@ -2661,8 +2663,9 @@ fn render_tiles(
             Mesh3d(meshes.add(Plane3d::default().mesh().size(0.95, 0.95))),
             MeshMaterial3d(mat_handle),
             Transform::from_translation(pos),
-            RenderedTile { pos: tile.pos.clone() },
         ));
+        // Mark the tile entity as rendered so this system skips it next frame.
+        commands.entity(tile_entity).insert(RenderedTile { pos: tile.pos.clone() });
     }
 }
 
