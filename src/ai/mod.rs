@@ -433,8 +433,8 @@ pub fn attack_wave_system(
         let target_pos: Option<GridPos> = {
             let mut best: Option<(GridPos, i32)> = None;
             for (b_faction, b_pos) in &enemy_buildings {
-                if ai_factions.contains(b_faction) {
-                    continue; // skip friendly buildings
+                if b_faction == &fe.faction {
+                    continue; // skip own buildings
                 }
                 let dx = (ctrl.home.x - b_pos.pos.x).abs();
                 let dy = (ctrl.home.y - b_pos.pos.y).abs();
@@ -447,7 +447,7 @@ pub fn attack_wave_system(
             }
             if best.is_none() {
                 for (_, u_faction, u_pos) in &enemy_units {
-                    if ai_factions.contains(u_faction) {
+                    if u_faction == &fe.faction {
                         continue;
                     }
                     let dx = (ctrl.home.x - u_pos.pos.x).abs();
@@ -565,8 +565,8 @@ pub fn defensive_response_system(
             continue;
         }
         for (e_entity, e_faction, e_pos) in &enemy_units {
-            if ai_factions.contains(e_faction) {
-                continue; // friendly
+            if e_faction == b_faction {
+                continue; // same faction as the building
             }
             let dx = (b_pos.pos.x - e_pos.pos.x).abs();
             let dy = (b_pos.pos.y - e_pos.pos.y).abs();

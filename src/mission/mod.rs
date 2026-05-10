@@ -82,6 +82,7 @@ pub fn evaluate_status(
         MissionType::Assault => {
             if !opponent_command_alive { MissionStatus::Won }
             else if !player_command_alive { MissionStatus::Lost }
+            else if elapsed >= deadline { MissionStatus::Lost } // attacker failed to break through
             else { MissionStatus::Active }
         }
         MissionType::Control => {

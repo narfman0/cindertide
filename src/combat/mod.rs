@@ -631,8 +631,8 @@ pub fn clear_took_damage_system(
 /// but will pause to attack any enemy unit they encounter within range.
 pub fn attack_move_system(
     mut commands: Commands,
-    attackers: Query<(Entity, &AttackMoveOrder, &UnitPos, &AttackRange, Option<&UnitKind>), (Without<Dead>, Without<HoldPosition>)>,
-    enemies: Query<(Entity, &UnitPos), (Without<Dead>, With<crate::map::Faction>)>,
+    attackers: Query<(Entity, &AttackMoveOrder, &UnitPos, &AttackRange, Option<&UnitKind>, &crate::map::Faction, Option<&MoveTarget>), (Without<Dead>, Without<HoldPosition>)>,
+    enemies: Query<(Entity, &UnitPos, &crate::map::Faction), Without<Dead>>,
     tiles: Query<&Tile>,
 ) {
     let tile_map: std::collections::HashMap<(i32, i32), TerrainType> = tiles
@@ -642,23 +642,29 @@ pub fn attack_move_system(
     let max_x = tile_map.keys().map(|(x, _)| *x).max().unwrap_or(32);
     let max_y = tile_map.keys().map(|(_, y)| *y).max().unwrap_or(32);
 
-    for (attacker_entity, order, unit_pos, range, unit_kind) in &attackers {
+    for (attacker_entity, order, unit_pos, range, unit_kind, attacker_faction, existing_move) in &attackers {
         // Check if destination reached
         if unit_pos.pos.x == order.target.x && unit_pos.pos.y == order.target.y {
             commands.entity(attacker_entity).remove::<AttackMoveOrder>();
             continue;
         }
 
-        // Find nearest enemy in range
+        // Find nearest enemy (different faction) in range
         let nearest_enemy = enemies.iter()
-            .filter(|(_, epos)| is_in_range(&unit_pos.pos, &epos.pos, range.tiles))
-            .min_by_key(|(_, epos)| chebyshev_distance(&unit_pos.pos, &epos.pos) as i32);
+            .filter(|(_, epos, efaction)| {
+                *efaction != attacker_faction && is_in_range(&unit_pos.pos, &epos.pos, range.tiles)
+            })
+            .min_by_key(|(_, epos, _)| chebyshev_distance(&unit_pos.pos, &epos.pos) as i32);
 
-        if let Some((enemy_entity, _)) = nearest_enemy {
+        if let Some((enemy_entity, _, _)) = nearest_enemy {
             // Attack the nearby enemy; pause movement
             commands.entity(attacker_entity)
                 .insert(AttackTarget { entity: enemy_entity });
         } else {
+            // Already moving toward this target — don't reset the path.
+            if existing_move.map(|mt| &mt.target == &order.target).unwrap_or(false) {
+                continue;
+            }
             // No enemy nearby: pathfind toward destination
             let pf_kind = match unit_kind {
                 Some(UnitKind::Vehicle) => PfUnitKind::Vehicle,

@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use serde::{Serialize, Deserialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use crate::mapgen::MissionType;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,6 +41,10 @@ pub struct GlobalProgress {
     pub first_beaten: Option<PlayableFaction>,
     #[serde(default)]
     pub campaigns_beaten: HashSet<String>,
+    /// Highest mission index unlocked per campaign (= number of missions beaten,
+    /// i.e. the frontier mission index the player can start from).
+    #[serde(default)]
+    pub missions_reached: HashMap<String, usize>,
 }
 
 // ── Data-driven campaign definitions ────────────────────────────────────────
@@ -208,7 +212,15 @@ pub fn apply_mission_outcome(
         won,
         mission_type,
     });
+    if !won {
+        return;
+    }
     run.current_mission += 1;
+    // Update missions_reached to track the frontier mission index.
+    if !run.campaign_id.is_empty() {
+        let reached = progress.missions_reached.entry(run.campaign_id.clone()).or_insert(0);
+        *reached = (*reached).max(run.current_mission);
+    }
     let total_missions = if run.mission_maps.is_empty() { 5 } else { run.mission_maps.len() };
     if run.current_mission >= total_missions {
         run.complete = true;
@@ -321,7 +333,7 @@ mod tests {
         let mut run = fresh_run(PlayableFaction::Ironborn);
         let mut prog = GlobalProgress::default();
         for _ in 0..5 {
-            apply_mission_outcome(&mut run, &mut prog, false, MissionType::Defense);
+            apply_mission_outcome(&mut run, &mut prog, true, MissionType::Defense);
         }
         assert!(prog.ironborn_beaten);
         assert!(prog.handler_unlocked);

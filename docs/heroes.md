@@ -18,7 +18,9 @@ Heroes do not count toward population cap.
 
 ## Progression
 
-Heroes gain experience from combat and mission completion. Experience unlocks predefined upgrade tiers — no player choice, no skill tree. Each tier makes the hero meaningfully stronger and changes their appearance.
+Heroes gain experience from combat within a single mission. Tiers reset at the start of each mission — XP does not carry across campaign. This is intentional: cross-mission persistence would incentivize farming earlier missions for free power before harder ones.
+
+Experience unlocks predefined upgrade tiers — no player choice, no skill tree. Each tier makes the hero meaningfully stronger and changes their appearance.
 
 ### Tier Thresholds
 | Tier | Name | Notes |

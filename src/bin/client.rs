@@ -144,6 +144,9 @@ enum ClientScreen {
     MultiplayerLobby { hosting: bool, ip_input: String },
     /// Campaign picker — replaces old hardcoded FactionPicker.
     FactionPicker { selected: usize },
+    /// Mission select screen — shown when the player has already beaten at least one mission
+    /// and can choose which mission to start from.
+    MissionSelect { campaign_idx: usize, selected: usize },
     Briefing { title: String, briefing: String },
     InMission,
     /// Running a mission that was started directly from the map editor (P key).
@@ -153,6 +156,8 @@ enum ClientScreen {
     GameOver { won: bool, handler_unlocked: bool },
     MapEditor,
     CampaignEditor,
+    /// Single-player bot match setup — uses LobbyConfig resource, same as MultiplayerLobby but no networking.
+    Skirmish,
     PlayerSettings { selected_field: PlayerSettingsField },
 }
 
@@ -831,6 +836,7 @@ fn scan_available_maps() -> Vec<String> {
 }
 
 const LOBBY_TEAMS: &[&str] = &["Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf", "Hotel"];
+const SKIRMISH_DIFFICULTIES: &[&str] = &["easy", "normal", "hard"];
 const LOBBY_FACTIONS: &[&str] = &["Combine", "Ironborn", "Covenant", "Hollow"];
 const LOBBY_WIN_CONDITIONS: &[&str] = &["Assault", "Control", "Ffa", "KingOfTheHill", "Assassination", "Defense"];
 const LOBBY_CONTROLLERS: &[SlotController] = &[
@@ -1507,7 +1513,7 @@ fn update_screen_overlay(
                 .find(|c| c.is_unlocked(&progress))
                 .map(|c| c.name.as_str())
                 .unwrap_or("Campaign");
-            **hint = format!("Enter — Start [{}]  |  E — Map Editor  |  M — Multiplayer  |  C — Player Settings", first_campaign_name);
+            **hint = format!("Enter — Start [{}]  |  S — Skirmish  |  M — Multiplayer  |  E — Editor  |  C — Settings", first_campaign_name);
         }
         ClientScreen::MultiplayerMenu { hosting, ip_input } => {
             *vis = Visibility::Visible;
@@ -1567,6 +1573,38 @@ fn update_screen_overlay(
             **body = lines;
             **hint = "↑↓ slot  ←→ cycle field  Tab: next field  ←→ on Map: change map  H: host  J: join  Enter: start  Esc: back".to_string();
         }
+        ClientScreen::Skirmish => {
+            *vis = Visibility::Visible;
+            **title = "SKIRMISH".to_string();
+
+            let mut lines = String::new();
+
+            let map_marker = if lobby.selected_field == LobbyField::Map { ">" } else { " " };
+            let map_display = lobby.map_path.as_deref().unwrap_or("(none)");
+            let slot_count = lobby.slots.len();
+            lines.push_str(&format!("{}  Map: [{}]  ←→ change ({} slots)\n\n", map_marker, map_display, slot_count));
+
+            let wc_marker = if lobby.selected_field == LobbyField::WinCondition { ">" } else { " " };
+            lines.push_str(&format!("{}  Win Condition: [{}]  ←→ to change\n\n", wc_marker, &lobby.win_condition));
+
+            lines.push_str("  Slot  Team      Faction    Controller    Zone\n");
+            lines.push_str("  ─────────────────────────────────────────────\n");
+
+            for slot in &lobby.slots {
+                let selected = slot.id == lobby.selected_slot;
+                let row_marker = if selected && matches!(lobby.selected_field, LobbyField::Slot | LobbyField::Team | LobbyField::Faction | LobbyField::Controller) { ">" } else { " " };
+                let ctrl_str = match &slot.controller {
+                    SlotController::Human    => "YOU".to_string(),
+                    SlotController::Ai(lvl) => format!("AI:{}", lvl),
+                    SlotController::Open     => "Open".to_string(),
+                };
+                lines.push_str(&format!("{}  [{}]   {:<8}  {:<9}  {:<12}  {}\n",
+                    row_marker, slot.id, slot.team, slot.faction, ctrl_str, slot.spawn_zone));
+            }
+
+            **body = lines;
+            **hint = "↑↓ slot  Tab: next field  ←→ change  Enter: start  Esc: back".to_string();
+        }
         ClientScreen::FactionPicker { selected } => {
             *vis = Visibility::Visible;
             **title = "Choose Your Campaign".to_string();
@@ -1592,6 +1630,29 @@ fn update_screen_overlay(
             }
             **body = lines.trim_end().to_string();
             **hint = "W/S or Arrow keys to select, Enter to confirm".to_string();
+        }
+        ClientScreen::MissionSelect { campaign_idx, selected } => {
+            *vis = Visibility::Visible;
+            **title = "SELECT MISSION".to_string();
+
+            let campaign = loaded_campaigns.0.get(*campaign_idx);
+            let campaign_id = campaign.map(|c| c.id.as_str()).unwrap_or("");
+            let faction = campaign.map(|c| c.playable_faction()).unwrap_or(PlayableFaction::Combine);
+            let missions_reached = progress.missions_reached.get(campaign_id).copied().unwrap_or(0);
+
+            let mut lines = String::new();
+            for i in 0..=missions_reached {
+                let cursor = if i == *selected { ">" } else { " " };
+                let status = if i < missions_reached {
+                    "[DONE]"
+                } else {
+                    "[CURRENT]"
+                };
+                let (mission_title, _) = get_mission_narrative(&narrative, faction, i);
+                lines.push_str(&format!("{} {}. {} {}\n", cursor, i + 1, mission_title, status));
+            }
+            **body = lines.trim_end().to_string();
+            **hint = "↑↓ select  Enter: start  Esc: back".to_string();
         }
         ClientScreen::Briefing { title: mission_title, briefing } => {
             *vis = Visibility::Visible;
@@ -1712,6 +1773,22 @@ fn handle_ui_input(
                     hosting: false,
                     ip_input: "127.0.0.1".to_string(),
                 };
+            } else if keys.just_pressed(KeyCode::KeyS) {
+                let available_maps = scan_available_maps();
+                let map_path = available_maps.first().cloned();
+                let slots = map_path.as_deref()
+                    .map(lobby_slots_from_map)
+                    .unwrap_or_else(|| LobbyConfig::default_2_slot().slots);
+                *lobby = LobbyConfig {
+                    slots,
+                    map_path,
+                    win_condition: "Assault".into(),
+                    selected_slot: 0,
+                    selected_field: LobbyField::Slot,
+                    available_maps,
+                    selected_map: 0,
+                };
+                *screen = ClientScreen::Skirmish;
             } else if keys.just_pressed(KeyCode::KeyC) {
                 *screen = ClientScreen::PlayerSettings { selected_field: PlayerSettingsField::ResourceMultiplier };
             } else if keys.just_pressed(KeyCode::KeyE) {
@@ -1953,6 +2030,102 @@ fn handle_ui_input(
             }
         }
 
+        ClientScreen::Skirmish => {
+            if keys.just_pressed(KeyCode::Escape) {
+                *screen = ClientScreen::Title;
+                return;
+            }
+
+            let left = keys.just_pressed(KeyCode::ArrowLeft);
+            let right = keys.just_pressed(KeyCode::ArrowRight);
+            let tab = keys.just_pressed(KeyCode::Tab);
+
+            if up {
+                if lobby.selected_slot > 0 { lobby.selected_slot -= 1; }
+            }
+            if down {
+                let max_slot = lobby.slots.len().saturating_sub(1);
+                if lobby.selected_slot < max_slot { lobby.selected_slot += 1; }
+            }
+
+            if tab {
+                lobby.selected_field = match lobby.selected_field {
+                    LobbyField::Slot         => LobbyField::Team,
+                    LobbyField::Team         => LobbyField::Faction,
+                    LobbyField::Faction      => LobbyField::Controller,
+                    LobbyField::Controller   => LobbyField::Map,
+                    LobbyField::Map          => LobbyField::WinCondition,
+                    LobbyField::WinCondition => LobbyField::Slot,
+                };
+            }
+
+            if left || right {
+                let step: i32 = if right { 1 } else { -1 };
+                match lobby.selected_field {
+                    LobbyField::Map => {
+                        if !lobby.available_maps.is_empty() {
+                            let new_idx = ((lobby.selected_map as i32 + step)
+                                .rem_euclid(lobby.available_maps.len() as i32)) as usize;
+                            lobby.selected_map = new_idx;
+                            let map_path = lobby.available_maps[new_idx].clone();
+                            lobby.slots = lobby_slots_from_map(&map_path);
+                            lobby.map_path = Some(map_path);
+                            lobby.selected_slot = 0;
+                        }
+                    }
+                    LobbyField::WinCondition => {
+                        let idx = LOBBY_WIN_CONDITIONS.iter().position(|&w| w == lobby.win_condition.as_str()).unwrap_or(0);
+                        let new_idx = ((idx as i32 + step).rem_euclid(LOBBY_WIN_CONDITIONS.len() as i32)) as usize;
+                        lobby.win_condition = LOBBY_WIN_CONDITIONS[new_idx].to_string();
+                    }
+                    LobbyField::Team => {
+                        let sel = lobby.selected_slot;
+                        if let Some(slot) = lobby.slots.get_mut(sel) {
+                            let idx = LOBBY_TEAMS.iter().position(|&t| t == slot.team.as_str()).unwrap_or(0);
+                            let new_idx = ((idx as i32 + step).rem_euclid(LOBBY_TEAMS.len() as i32)) as usize;
+                            slot.team = LOBBY_TEAMS[new_idx].to_string();
+                        }
+                    }
+                    LobbyField::Faction => {
+                        let sel = lobby.selected_slot;
+                        if let Some(slot) = lobby.slots.get_mut(sel) {
+                            let idx = LOBBY_FACTIONS.iter().position(|&f| f == slot.faction.as_str()).unwrap_or(0);
+                            let new_idx = ((idx as i32 + step).rem_euclid(LOBBY_FACTIONS.len() as i32)) as usize;
+                            slot.faction = LOBBY_FACTIONS[new_idx].to_string();
+                        }
+                    }
+                    LobbyField::Controller => {
+                        let sel = lobby.selected_slot;
+                        if let Some(slot) = lobby.slots.get_mut(sel) {
+                            let controllers = vec![
+                                SlotController::Human,
+                                SlotController::Ai("easy".into()),
+                                SlotController::Ai("normal".into()),
+                                SlotController::Ai("hard".into()),
+                            ];
+                            let idx = controllers.iter().position(|c| c == &slot.controller).unwrap_or(0);
+                            let new_idx = ((idx as i32 + step).rem_euclid(controllers.len() as i32)) as usize;
+                            slot.controller = controllers[new_idx].clone();
+                        }
+                    }
+                    LobbyField::Slot => {
+                        if left && lobby.selected_slot > 0 { lobby.selected_slot -= 1; }
+                        if right {
+                            let max_slot = lobby.slots.len().saturating_sub(1);
+                            if lobby.selected_slot < max_slot { lobby.selected_slot += 1; }
+                        }
+                    }
+                }
+            }
+
+            if enter {
+                let lobby_clone = lobby.clone();
+                commands.queue(move |world: &mut World| {
+                    start_mission_from_lobby(world, &lobby_clone);
+                });
+            }
+        }
+
         ClientScreen::FactionPicker { selected } => {
             let count = loaded_campaigns.0.len().max(1);
             if up {
@@ -1987,10 +2160,40 @@ fn handle_ui_input(
                         missions_lost: 0,
                     };
 
-                    // Transition to briefing for mission 0
-                    let (title, briefing) = get_mission_narrative(&narrative, faction, 0);
-                    *screen = ClientScreen::Briefing { title, briefing };
+                    // If the player has already beaten at least one mission in this campaign,
+                    // show the mission select screen so they can resume or replay.
+                    let missions_reached = progress.missions_reached.get(&campaign.id).copied().unwrap_or(0);
+                    if missions_reached > 0 {
+                        *screen = ClientScreen::MissionSelect { campaign_idx: selected, selected: missions_reached };
+                    } else {
+                        // Transition to briefing for mission 0
+                        let (title, briefing) = get_mission_narrative(&narrative, faction, 0);
+                        *screen = ClientScreen::Briefing { title, briefing };
+                    }
                 }
+            }
+        }
+
+        ClientScreen::MissionSelect { campaign_idx, selected } => {
+            let campaign_id = loaded_campaigns.0.get(campaign_idx).map(|c| c.id.as_str()).unwrap_or("");
+            let missions_reached = progress.missions_reached.get(campaign_id).copied().unwrap_or(0);
+            let max_sel = missions_reached;
+            if up {
+                let new = if selected == 0 { 0 } else { selected - 1 };
+                *screen = ClientScreen::MissionSelect { campaign_idx, selected: new };
+            } else if down {
+                let new = if selected >= max_sel { max_sel } else { selected + 1 };
+                *screen = ClientScreen::MissionSelect { campaign_idx, selected: new };
+            } else if enter {
+                let mission_idx = selected;
+                if let Some(ref mut run) = active.run {
+                    run.current_mission = mission_idx;
+                }
+                let faction = active.run.as_ref().map(|r| r.faction).unwrap_or(PlayableFaction::Combine);
+                let (title, briefing) = get_mission_narrative(&narrative, faction, mission_idx);
+                *screen = ClientScreen::Briefing { title, briefing };
+            } else if keys.just_pressed(KeyCode::Escape) {
+                *screen = ClientScreen::FactionPicker { selected: campaign_idx };
             }
         }
 

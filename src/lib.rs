@@ -1697,6 +1697,7 @@ fn handle_game_load(In(params): In<Option<Value>>, world: &mut World) -> BrpResu
             handler_beaten: gp["handler_beaten"].as_bool().unwrap_or(false),
             first_beaten,
             campaigns_beaten: Default::default(),
+            missions_reached: Default::default(),
         };
     }
 
@@ -2949,6 +2950,227 @@ pub fn setup_demo_scenario_with_spawns(
     let script_name = format!("{faction_name}_m{mission_index}");
     if let Some(mut script_state) = world.get_resource_mut::<mission_script::ScriptState>() {
         script_state.load_script(&script_name);
+    }
+}
+
+// =============================================================================
+// Campaign map loader.
+// =============================================================================
+
+#[derive(serde::Deserialize, Default)]
+struct RawMapUnit {
+    faction: String,
+    unit_type: String,
+    x: i32,
+    y: i32,
+}
+
+#[derive(serde::Deserialize, Default)]
+struct RawMapBuilding {
+    faction: String,
+    building_type: String,
+    x: i32,
+    y: i32,
+}
+
+#[derive(serde::Deserialize, Default)]
+struct RawMap {
+    #[serde(default)]
+    units: Vec<RawMapUnit>,
+    #[serde(default)]
+    buildings: Vec<RawMapBuilding>,
+    #[serde(default)]
+    player_faction: Option<String>,
+    #[serde(default)]
+    opponent_faction: Option<String>,
+    #[serde(default)]
+    mission_type: Option<String>,
+    #[serde(default)]
+    deadline_seconds: Option<f32>,
+}
+
+/// Convert CamelCase type names from map TOMLs to the lowercase snake_case ids
+/// used internally (e.g. "HeavyWeapons" → "heavy_weapons").
+fn camel_to_snake(s: &str) -> String {
+    let mut out = String::new();
+    for (i, c) in s.chars().enumerate() {
+        if c.is_uppercase() && i > 0 {
+            out.push('_');
+        }
+        out.push(c.to_lowercase().next().unwrap());
+    }
+    out
+}
+
+/// Load a campaign mission map TOML from `map_path`, spawn all units/buildings,
+/// spawn a `Mission` entity, and wire up AI controllers for both factions.
+///
+/// This is the headless equivalent of `setup_demo_scenario` but driven entirely
+/// by the data in the TOML rather than procedural generation.
+pub fn load_campaign_map(world: &mut World, map_path: &str) {
+    let raw_toml = std::fs::read_to_string(map_path)
+        .unwrap_or_else(|e| panic!("Failed to read map file {map_path}: {e}"));
+    let raw: RawMap = toml::from_str(&raw_toml)
+        .unwrap_or_else(|e| panic!("Failed to parse map TOML {map_path}: {e}"));
+
+    // Determine mission type.
+    let mission_type_str = raw.mission_type.as_deref().unwrap_or("Control");
+    let mt = match mission_type_str {
+        "Assault"      => mapgen::MissionType::Assault,
+        "Defense"      => mapgen::MissionType::Defense,
+        "Extraction"   => mapgen::MissionType::Extraction,
+        "Survival"     => mapgen::MissionType::Survival,
+        "Ffa"          => mapgen::MissionType::Ffa,
+        "KingOfTheHill"=> mapgen::MissionType::KingOfTheHill,
+        "Assassination"=> mapgen::MissionType::Assassination,
+        _              => mapgen::MissionType::Control,
+    };
+
+    // Spawn flat grass tiles covering all unit/building positions plus margin.
+    // Campaign maps define their own placements; procedurally-generated terrain
+    // would introduce random obstacles that block paths between the two bases.
+    let xs: Vec<i32> = raw.units.iter().map(|u| u.x)
+        .chain(raw.buildings.iter().map(|b| b.x)).collect();
+    let ys: Vec<i32> = raw.units.iter().map(|u| u.y)
+        .chain(raw.buildings.iter().map(|b| b.y)).collect();
+    let min_x = xs.iter().copied().min().unwrap_or(0) - 5;
+    let max_x = xs.iter().copied().max().unwrap_or(128) + 5;
+    let min_y = ys.iter().copied().min().unwrap_or(0) - 5;
+    let max_y = ys.iter().copied().max().unwrap_or(80) + 5;
+    for y in min_y..=max_y {
+        for x in min_x..=max_x {
+            world.spawn(map::Tile {
+                pos: GridPos { x, y },
+                terrain_type: map::TerrainType::Grass,
+                cover: map::CoverDensity::None,
+            });
+        }
+    }
+    // Keep a generated map reference for control-point midline calculation.
+    let generated = mapgen::generate_for_mission(17, mt.clone());
+
+    let loaded = world.resource::<LoadedFactions>().clone();
+
+    // Spawn units from the TOML.
+    for u in &raw.units {
+        let faction = Faction::new(&u.faction.to_lowercase());
+        let unit_id = camel_to_snake(&u.unit_type);
+        spawn_unit_type_at(world, faction, &unit_id, u.x, u.y);
+    }
+
+    // Spawn buildings from the TOML.
+    for b in &raw.buildings {
+        let faction = Faction::new(&b.faction.to_lowercase());
+        let building_id = camel_to_snake(&b.building_type);
+        spawn_built_building(world, BuildingTypeId::new(&building_id), faction, b.x, b.y, &loaded);
+    }
+
+    // Determine factions.
+    let player_faction_str = raw.player_faction.as_deref().unwrap_or("combine");
+    let opponent_faction_str = raw.opponent_faction.as_deref().unwrap_or("ironborn");
+    let player_faction = Faction::new(&player_faction_str.to_lowercase());
+    let opponent_faction = Faction::new(&opponent_faction_str.to_lowercase());
+
+    // Derive home positions from CommandBunker buildings, falling back to unit
+    // centroid, then map corners.
+    let find_home = |faction_str: &str| -> GridPos {
+        let id_lower = faction_str.to_lowercase();
+        // Try command_bunker first.
+        if let Some(b) = raw.buildings.iter().find(|b| {
+            b.faction.to_lowercase() == id_lower && camel_to_snake(&b.building_type) == "command_bunker"
+        }) {
+            return GridPos { x: b.x, y: b.y };
+        }
+        // Fall back to centroid of all units for this faction.
+        let faction_units: Vec<_> = raw.units.iter()
+            .filter(|u| u.faction.to_lowercase() == id_lower)
+            .collect();
+        if !faction_units.is_empty() {
+            let sum_x: i32 = faction_units.iter().map(|u| u.x).sum();
+            let sum_y: i32 = faction_units.iter().map(|u| u.y).sum();
+            let n = faction_units.len() as i32;
+            return GridPos { x: sum_x / n, y: sum_y / n };
+        }
+        GridPos { x: 10, y: 10 }
+    };
+    let player_home   = find_home(player_faction_str);
+    let opponent_home = find_home(opponent_faction_str);
+    let deadline = raw.deadline_seconds.unwrap_or(300.0);
+
+    // Spawn the Mission entity.
+    world.spawn(Mission {
+        mission_type: mt,
+        player_faction: player_faction.clone(),
+        opponent_faction: opponent_faction.clone(),
+        status: mission::MissionStatus::Active,
+        elapsed: 0.0,
+        deadline,
+        hill_timer: 0.0,
+        hill_threshold: 180.0,
+        assassination_target: None,
+        ffa_check_timer: 0.0,
+    });
+
+    // Ensure FactionBundle entities exist for both factions.
+    let mut has_player = false;
+    let mut has_opponent = false;
+    {
+        let mut q = world.query::<&resources::FactionEntity>();
+        for fe in q.iter(world) {
+            if &fe.faction == &player_faction   { has_player = true; }
+            if &fe.faction == &opponent_faction { has_opponent = true; }
+        }
+    }
+    if !has_player   { world.spawn(FactionBundle::new(player_faction.clone())); }
+    if !has_opponent { world.spawn(FactionBundle::new(opponent_faction.clone())); }
+
+    // Spawn some neutral control points along the midline so Control missions
+    // have something to contest.
+    let mid_x = generated.width / 2;
+    let mid_y = generated.height / 2;
+    for i in 0..3i32 {
+        let offset = (i - 1) * 15;
+        world.spawn(map::ControlPoint {
+            point_type: map::ControlPointType::Strategic,
+            pos: GridPos { x: mid_x + offset, y: mid_y },
+            capture_radius: 2.0,
+            owner: None,
+            contesting: None,
+            capture_progress: 0.0,
+        });
+    }
+
+    // Wire up AI controllers for both factions.
+    let mut player_entity: Option<Entity> = None;
+    let mut opponent_entity: Option<Entity> = None;
+    {
+        let mut q = world.query::<(Entity, &resources::FactionEntity)>();
+        for (e, fe) in q.iter(world) {
+            if &fe.faction == &player_faction   { player_entity = Some(e); }
+            if &fe.faction == &opponent_faction { opponent_entity = Some(e); }
+        }
+    }
+
+
+    if let Some(e) = player_entity {
+        if let Ok(mut em) = world.get_entity_mut(e) {
+            em.insert(AiController::new(player_home.x, player_home.y, tech::Doctrine::Assault));
+            if let Some(mut pool) = em.get_mut::<ResourcePool>() {
+                pool.fuel     += 600.0;
+                pool.scrap    += 600.0;
+                pool.manpower += 30.0;
+            }
+        }
+    }
+    if let Some(e) = opponent_entity {
+        if let Ok(mut em) = world.get_entity_mut(e) {
+            em.insert(AiController::new(opponent_home.x, opponent_home.y, tech::Doctrine::Assault));
+            if let Some(mut pool) = em.get_mut::<ResourcePool>() {
+                pool.fuel     += 600.0;
+                pool.scrap    += 600.0;
+                pool.manpower += 30.0;
+            }
+        }
     }
 }
 
