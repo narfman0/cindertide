@@ -4,7 +4,7 @@
 
 use bevy::prelude::*;
 use std::collections::HashSet;
-use crate::combat::{AttackTarget, LastAttackedBy, Routing, Dead, Pinned};
+use crate::combat::{AttackTarget, AttackMoveOrder, LastAttackedBy, Routing, Dead, Pinned};
 use crate::units::{UnitPos, HomeBase, MovementSpeed, MoveProgress, UnitKind};
 use crate::map::NavMesh;
 use crate::map::pathfinding::{PathfindingGrid, UnitKind as PfUnitKind};
@@ -37,13 +37,23 @@ pub fn threat_memory_decay_system(
     }
 }
 
-/// Unit returned fire: if attacked and no current order, target the attacker.
+/// Unit returned fire: if attacked and no current order, move toward the attacker
+/// using attack-move so the unit closes to attack range instead of receiving a bare
+/// AttackTarget that the attack_system immediately discards when the attacker is out
+/// of range, creating a permanent stalemate.
 pub fn threat_response_system(
     mut commands: Commands,
-    q: Query<(Entity, &LastAttackedBy), (Without<AttackTarget>, Without<Dead>, Without<Routing>)>,
+    q: Query<(Entity, &LastAttackedBy), (Without<AttackTarget>, Without<AttackMoveOrder>, Without<Dead>, Without<Routing>)>,
+    positions: Query<&UnitPos>,
 ) {
     for (entity, last) in &q {
-        commands.entity(entity).insert(AttackTarget { entity: last.attacker });
+        if let Ok(attacker_pos) = positions.get(last.attacker) {
+            // Use attack-move: unit will pathfind toward attacker and engage when in range.
+            commands.entity(entity)
+                .insert(AttackMoveOrder { target: attacker_pos.pos.clone() });
+        } else {
+            // Attacker is gone; nothing to do — LastAttackedBy will expire naturally.
+        }
     }
 }
 

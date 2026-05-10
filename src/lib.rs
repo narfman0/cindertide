@@ -2974,6 +2974,26 @@ struct RawMapBuilding {
 }
 
 #[derive(serde::Deserialize, Default)]
+struct RawScriptAction {
+    action_type: String,
+    #[serde(default)] text: String,
+    #[serde(default)] faction: String,
+    #[serde(default)] unit_type: String,
+    #[serde(default)] count: u32,
+    #[serde(default)] x: i32,
+    #[serde(default)] y: i32,
+}
+
+#[derive(serde::Deserialize)]
+struct RawScriptEvent {
+    id: String,
+    trigger_type: String,
+    #[serde(default)] trigger_seconds: f32,
+    #[serde(default)] trigger_beat: String,
+    #[serde(default)] actions: Vec<RawScriptAction>,
+}
+
+#[derive(serde::Deserialize, Default)]
 struct RawMap {
     #[serde(default)]
     units: Vec<RawMapUnit>,
@@ -2987,6 +3007,8 @@ struct RawMap {
     mission_type: Option<String>,
     #[serde(default)]
     deadline_seconds: Option<f32>,
+    #[serde(default)]
+    script_events: Vec<RawScriptEvent>,
 }
 
 /// Convert CamelCase type names from map TOMLs to the lowercase snake_case ids
@@ -3124,16 +3146,16 @@ pub fn load_campaign_map(world: &mut World, map_path: &str) {
     if !has_player   { world.spawn(FactionBundle::new(player_faction.clone())); }
     if !has_opponent { world.spawn(FactionBundle::new(opponent_faction.clone())); }
 
-    // Spawn some neutral control points along the midline so Control missions
-    // have something to contest.
-    let mid_x = generated.width / 2;
-    let mid_y = generated.height / 2;
-    for i in 0..3i32 {
-        let offset = (i - 1) * 15;
+    // Spawn neutral control points along the diagonal path between the two bases.
+    // Placing them at 1/4, 1/2, 3/4 of the line between player_home and opponent_home
+    // ensures units naturally walk through them as they advance.
+    for frac in [0.25f32, 0.50, 0.75] {
+        let cp_x = (player_home.x as f32 + (opponent_home.x - player_home.x) as f32 * frac) as i32;
+        let cp_y = (player_home.y as f32 + (opponent_home.y - player_home.y) as f32 * frac) as i32;
         world.spawn(map::ControlPoint {
             point_type: map::ControlPointType::Strategic,
-            pos: GridPos { x: mid_x + offset, y: mid_y },
-            capture_radius: 2.0,
+            pos: GridPos { x: cp_x, y: cp_y },
+            capture_radius: 3.0,
             owner: None,
             contesting: None,
             capture_progress: 0.0,
@@ -3170,6 +3192,48 @@ pub fn load_campaign_map(world: &mut World, map_path: &str) {
                 pool.scrap    += 600.0;
                 pool.manpower += 30.0;
             }
+        }
+    }
+
+    // Translate inline script_events from the map TOML into MissionScript format
+    // and load them into ScriptState so MissionScriptPlugin can tick them.
+    if !raw.script_events.is_empty() {
+        let events: Vec<mission_script::ScriptEvent> = raw.script_events.iter().map(|e| {
+            let trigger = if e.trigger_type == "time" {
+                mission_script::Trigger::Time { seconds: e.trigger_seconds }
+            } else {
+                mission_script::Trigger::Condition {
+                    condition: e.trigger_type.clone(),
+                    beat_id: if e.trigger_beat.is_empty() { None } else { Some(e.trigger_beat.clone()) },
+                }
+            };
+            let actions = e.actions.iter().filter_map(|a| {
+                Some(match a.action_type.as_str() {
+                    "dialogue" => mission_script::Action::Dialogue {
+                        speaker: None,
+                        text: a.text.clone(),
+                    },
+                    "spawn_units" => mission_script::Action::SpawnUnits {
+                        faction: a.faction.clone(),
+                        unit_type: a.unit_type.clone(),
+                        count: a.count,
+                        x: a.x,
+                        y: a.y,
+                    },
+                    "objective" => mission_script::Action::Objective { text: a.text.clone() },
+                    "change_objective" => mission_script::Action::ChangeObjective { text: a.text.clone() },
+                    _ => return None,
+                })
+            }).collect();
+            mission_script::ScriptEvent { id: e.id.clone(), trigger, actions }
+        }).collect();
+
+        if let Some(mut state) = world.get_resource_mut::<mission_script::ScriptState>() {
+            state.script = Some(mission_script::MissionScript { events });
+            state.fired.clear();
+            state.dialogue_queue.clear();
+            state.current_objective = None;
+            state.dialogue_timer = 0.0;
         }
     }
 }

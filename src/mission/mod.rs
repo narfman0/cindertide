@@ -74,6 +74,7 @@ pub fn evaluate_status(
     opponent_command_alive: bool,
     player_points_held: u32,
     opponent_points_held: u32,
+    total_points: u32,
 ) -> MissionStatus {
     if *status != MissionStatus::Active {
         return status.clone();
@@ -85,6 +86,12 @@ pub fn evaluate_status(
             else { MissionStatus::Active }
         }
         MissionType::Control => {
+            // Instant win: one side holds all control points.
+            if total_points > 0 && player_points_held == total_points { return MissionStatus::Won; }
+            if total_points > 0 && opponent_points_held == total_points { return MissionStatus::Lost; }
+            // Instant win: opponent forces completely destroyed (annihilation).
+            if !opponent_command_alive && opponent_units_alive == 0 { return MissionStatus::Won; }
+            if !player_command_alive && player_units_alive == 0 { return MissionStatus::Lost; }
             if elapsed >= deadline {
                 if player_points_held > opponent_points_held { MissionStatus::Won }
                 else if opponent_points_held > player_points_held { MissionStatus::Lost }
@@ -95,18 +102,22 @@ pub fn evaluate_status(
         }
         MissionType::Defense => {
             if !player_command_alive { MissionStatus::Lost }
+            // Win early if the entire attacking force is eliminated
+            else if !opponent_command_alive && opponent_units_alive == 0 { MissionStatus::Won }
             else if elapsed >= deadline { MissionStatus::Won }
             else { MissionStatus::Active }
         }
         MissionType::Extraction => {
             if player_units_alive == 0 { MissionStatus::Lost }
+            else if !opponent_command_alive && opponent_units_alive == 0 { MissionStatus::Won }
             else if elapsed >= deadline { MissionStatus::Won }
             else { MissionStatus::Active }
         }
         MissionType::Survival => {
             if player_units_alive == 0 { MissionStatus::Lost }
+            // Win if all enemy forces + their base are destroyed (waves ended)
+            else if !opponent_command_alive && opponent_units_alive == 0 { MissionStatus::Won }
             else if elapsed >= deadline { MissionStatus::Won }
-            else if opponent_units_alive == 0 { MissionStatus::Active } // waves continue
             else { MissionStatus::Active }
         }
         // These mission types have dedicated systems (ffa/koth/assassination_win_system)
@@ -166,7 +177,9 @@ pub fn mission_check_system(
 
         let mut player_points = 0u32;
         let mut opponent_points = 0u32;
+        let mut total_points = 0u32;
         for cp in &points {
+            total_points += 1;
             if let Some(o) = &cp.owner {
                 if o == &m.player_faction { player_points += 1; }
                 else if o == &m.opponent_faction { opponent_points += 1; }
@@ -184,6 +197,7 @@ pub fn mission_check_system(
             opponent_cmd,
             player_points,
             opponent_points,
+            total_points,
         );
 
         // Suppress unused-warning on factions param
@@ -340,7 +354,7 @@ mod tests {
     fn assault_won_when_opponent_command_dies() {
         let s = evaluate_status(
             &MissionType::Assault, &MissionStatus::Active,
-            10.0, 600.0, 5, 5, true, false, 0, 0,
+            10.0, 600.0, 5, 5, true, false, 0, 0, 0,
         );
         assert_eq!(s, MissionStatus::Won);
     }
@@ -349,7 +363,7 @@ mod tests {
     fn assault_lost_when_player_command_dies() {
         let s = evaluate_status(
             &MissionType::Assault, &MissionStatus::Active,
-            10.0, 600.0, 5, 5, false, true, 0, 0,
+            10.0, 600.0, 5, 5, false, true, 0, 0, 0,
         );
         assert_eq!(s, MissionStatus::Lost);
     }
@@ -358,16 +372,34 @@ mod tests {
     fn control_won_at_deadline_with_more_points() {
         let s = evaluate_status(
             &MissionType::Control, &MissionStatus::Active,
-            301.0, 300.0, 5, 5, true, true, 3, 1,
+            301.0, 300.0, 5, 5, true, true, 3, 1, 4,
         );
         assert_eq!(s, MissionStatus::Won);
+    }
+
+    #[test]
+    fn control_won_instantly_when_player_holds_all() {
+        let s = evaluate_status(
+            &MissionType::Control, &MissionStatus::Active,
+            10.0, 300.0, 5, 5, true, true, 3, 0, 3,
+        );
+        assert_eq!(s, MissionStatus::Won);
+    }
+
+    #[test]
+    fn control_lost_instantly_when_opponent_holds_all() {
+        let s = evaluate_status(
+            &MissionType::Control, &MissionStatus::Active,
+            10.0, 300.0, 5, 5, true, true, 0, 3, 3,
+        );
+        assert_eq!(s, MissionStatus::Lost);
     }
 
     #[test]
     fn defense_won_at_deadline_with_command_alive() {
         let s = evaluate_status(
             &MissionType::Defense, &MissionStatus::Active,
-            301.0, 300.0, 1, 0, true, false, 0, 0,
+            301.0, 300.0, 1, 0, true, false, 0, 0, 0,
         );
         assert_eq!(s, MissionStatus::Won);
     }
@@ -376,7 +408,7 @@ mod tests {
     fn extraction_lost_when_all_player_units_die() {
         let s = evaluate_status(
             &MissionType::Extraction, &MissionStatus::Active,
-            10.0, 600.0, 0, 5, true, true, 0, 0,
+            10.0, 600.0, 0, 5, true, true, 0, 0, 0,
         );
         assert_eq!(s, MissionStatus::Lost);
     }
@@ -385,7 +417,34 @@ mod tests {
     fn survival_won_at_deadline() {
         let s = evaluate_status(
             &MissionType::Survival, &MissionStatus::Active,
-            301.0, 300.0, 5, 0, true, false, 0, 0,
+            301.0, 300.0, 5, 0, true, false, 0, 0, 0,
+        );
+        assert_eq!(s, MissionStatus::Won);
+    }
+
+    #[test]
+    fn defense_won_when_all_enemies_destroyed() {
+        let s = evaluate_status(
+            &MissionType::Defense, &MissionStatus::Active,
+            10.0, 1200.0, 5, 0, true, false, 0, 0, 0,
+        );
+        assert_eq!(s, MissionStatus::Won);
+    }
+
+    #[test]
+    fn extraction_won_when_all_enemies_destroyed() {
+        let s = evaluate_status(
+            &MissionType::Extraction, &MissionStatus::Active,
+            10.0, 3600.0, 5, 0, true, false, 0, 0, 0,
+        );
+        assert_eq!(s, MissionStatus::Won);
+    }
+
+    #[test]
+    fn survival_won_when_all_enemies_destroyed() {
+        let s = evaluate_status(
+            &MissionType::Survival, &MissionStatus::Active,
+            10.0, 1800.0, 5, 0, true, false, 0, 0, 0,
         );
         assert_eq!(s, MissionStatus::Won);
     }
@@ -394,7 +453,7 @@ mod tests {
     fn won_status_is_terminal() {
         let s = evaluate_status(
             &MissionType::Assault, &MissionStatus::Won,
-            0.0, 600.0, 0, 0, false, false, 0, 0,
+            0.0, 600.0, 0, 0, false, false, 0, 0, 0,
         );
         assert_eq!(s, MissionStatus::Won);
     }

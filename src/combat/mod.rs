@@ -372,6 +372,10 @@ pub fn attack_system(
             match targets.get_mut(p.target) {
                 Ok((mut health, tpos, cover, tsupp, tfacing, resist)) => {
                     if !is_in_range(&p.attacker_pos, &tpos.pos, p.range) {
+                        // Target is alive but out of range — clear stale AttackTarget so
+                        // the unit can receive new movement orders (attack_wave_system,
+                        // tactical_ai_system) and actually close the gap.
+                        to_remove_target.push(p.attacker);
                         continue;
                     }
                     let angle = tfacing.map(|f| attack_angle(&p.attacker_pos, &tpos.pos, f));

@@ -69,10 +69,10 @@ fn build_headless_app() -> App {
     app
 }
 
-// Cap at 300s for test purposes — real mission deadlines can be 1800s but we
-// only need to confirm the AI makes progress and the mission resolves.
-const TEST_DEADLINE: f32 = 300.0;
-const GRACE: f32 = TEST_DEADLINE + 150.0;
+// Safety ceiling: missions that cannot resolve via objectives within this time
+// are considered deadlocked. Set well above the longest real deadline (3600s)
+// so script events fire and the AI has time to respond.
+const GRACE: f32 = 4200.0;
 
 fn run_map_to_completion(map_path: &str) {
     let mut app = build_headless_app();
@@ -80,14 +80,9 @@ fn run_map_to_completion(map_path: &str) {
 
     load_campaign_map(app.world_mut(), map_path);
     bake_navmesh(app.world_mut());
-
-    // Override mission deadline to the test cap.
-    {
-        let mut q = app.world_mut().query::<&mut Mission>();
-        if let Some(mut m) = q.iter_mut(app.world_mut()).next() {
-            m.deadline = TEST_DEADLINE;
-        }
-    }
+    // No deadline override — mission uses its own deadline and scripts fire
+    // at their scripted times. AI is injected for the player faction by
+    // load_campaign_map so both sides play out.
 
     let mut ticks = 0u32;
 

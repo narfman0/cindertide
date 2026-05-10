@@ -402,7 +402,8 @@ pub fn scouting_system(
 // --- Attack wave system ---
 
 /// Every ATTACK_WAVE_INTERVAL seconds, collect idle AI military units and
-/// send them on an attack-move toward the nearest enemy building or unit.
+/// send them on an attack-move. Prioritises capturing neutral/enemy control
+/// points; falls back to enemy buildings then enemy units.
 pub fn attack_wave_system(
     mut commands: Commands,
     mut ai_states: ResMut<AiStates>,
@@ -413,10 +414,8 @@ pub fn attack_wave_system(
     >,
     enemy_buildings: Query<(&Faction, &BuildingPos), With<Built>>,
     enemy_units: Query<(Entity, &Faction, &UnitPos), (With<UnitTypeId>, Without<crate::combat::Dead>)>,
+    control_points: Query<&crate::map::ControlPoint>,
 ) {
-    use std::collections::HashSet;
-    let ai_factions: HashSet<Faction> = ai.iter().map(|(fe, _)| fe.faction.clone()).collect();
-
     for (fe, ctrl) in &ai {
         let state = match ai_states.0.get_mut(&fe.faction) {
             Some(s) => s,
@@ -429,27 +428,60 @@ pub fn attack_wave_system(
         }
         state.wave_timer = 0.0;
 
-        // Decide attack target: nearest enemy building, or nearest enemy unit.
         let target_pos: Option<GridPos> = {
-            let mut best: Option<(GridPos, i32)> = None;
-            for (b_faction, b_pos) in &enemy_buildings {
-                if b_faction == &fe.faction {
-                    continue; // skip own buildings
+            // Priority 1: nearest enemy-held CP (reclaim / attack their territory).
+            let mut enemy_cp: Option<(GridPos, i32)> = None;
+            // Priority 3: farthest neutral CP (push into enemy territory, not both to middle).
+            let mut neutral_cp: Option<(GridPos, i32)> = None;
+
+            for cp in &control_points {
+                let owner = &cp.owner;
+                let is_friendly = owner.as_ref().map(|o| o == &fe.faction).unwrap_or(false);
+                if is_friendly { continue; }
+
+                let dx = (ctrl.home.x - cp.pos.x).abs();
+                let dy = (ctrl.home.y - cp.pos.y).abs();
+                let d = dx.max(dy);
+
+                if owner.is_some() {
+                    // Enemy-held: pick nearest
+                    match &enemy_cp {
+                        None => enemy_cp = Some((cp.pos.clone(), d)),
+                        Some((_, bd)) if d < *bd => enemy_cp = Some((cp.pos.clone(), d)),
+                        _ => {}
+                    }
+                } else {
+                    // Neutral: pick farthest (push toward enemy's base)
+                    match &neutral_cp {
+                        None => neutral_cp = Some((cp.pos.clone(), d)),
+                        Some((_, bd)) if d > *bd => neutral_cp = Some((cp.pos.clone(), d)),
+                        _ => {}
+                    }
                 }
+            }
+
+            // Priority 2: enemy building (command bunker etc.) — push through
+            // contested neutral CPs toward the enemy base.
+            let mut enemy_building: Option<(GridPos, i32)> = None;
+            for (b_faction, b_pos) in &enemy_buildings {
+                if b_faction == &fe.faction { continue; }
                 let dx = (ctrl.home.x - b_pos.pos.x).abs();
                 let dy = (ctrl.home.y - b_pos.pos.y).abs();
                 let d = dx.max(dy);
-                match &best {
-                    None => best = Some((b_pos.pos.clone(), d)),
-                    Some((_, bd)) if d < *bd => best = Some((b_pos.pos.clone(), d)),
+                match &enemy_building {
+                    None => enemy_building = Some((b_pos.pos.clone(), d)),
+                    Some((_, bd)) if d < *bd => enemy_building = Some((b_pos.pos.clone(), d)),
                     _ => {}
                 }
             }
+
+            // Compose priorities: enemy CP > enemy building > neutral CP
+            let mut best = enemy_cp.or(enemy_building).or(neutral_cp);
+
+            // Priority 4: nearest enemy unit.
             if best.is_none() {
                 for (_, u_faction, u_pos) in &enemy_units {
-                    if u_faction == &fe.faction {
-                        continue;
-                    }
+                    if u_faction == &fe.faction { continue; }
                     let dx = (ctrl.home.x - u_pos.pos.x).abs();
                     let dy = (ctrl.home.y - u_pos.pos.y).abs();
                     let d = dx.max(dy);
@@ -467,9 +499,7 @@ pub fn attack_wave_system(
 
         // Send all idle friendly units on an attack-move.
         for (entity, faction, _pos) in &mut ai_units {
-            if faction != &fe.faction {
-                continue;
-            }
+            if faction != &fe.faction { continue; }
             commands.entity(entity)
                 .insert(AttackWave)
                 .insert(crate::combat::AttackMoveOrder { target: target.clone() });
@@ -480,12 +510,13 @@ pub fn attack_wave_system(
 // --- Retreat logic ---
 
 /// Units whose health drops below RETREAT_HEALTH_FRACTION flee to nearest friendly building.
+/// Units committed to an attack wave (AttackWave) do NOT retreat — they push through.
 pub fn retreat_system(
     mut commands: Commands,
     ai: Query<&FactionEntity, With<AiController>>,
     injured: Query<
         (Entity, &Faction, &UnitPos, &Health),
-        (With<UnitTypeId>, Without<Retreating>, Without<crate::combat::Dead>),
+        (With<UnitTypeId>, Without<Retreating>, Without<crate::combat::Dead>, Without<AttackWave>),
     >,
     friendly_buildings: Query<(&Faction, &BuildingPos), With<Built>>,
 ) {
@@ -580,13 +611,21 @@ pub fn defensive_response_system(
         return;
     }
 
-    // For each AI faction with a threat, send idle nearby units to intercept.
+    // For each AI faction with a threat, send idle nearby units on an attack-move
+    // toward the enemy so they pathfind to close range rather than getting a bare
+    // AttackTarget that attack_system immediately discards when out of range.
     for (ai_faction, enemy_entity) in &threats {
+        // Look up the enemy position so we can issue an AttackMoveOrder.
+        let enemy_pos = enemy_units.iter()
+            .find(|(e, _, _)| e == enemy_entity)
+            .map(|(_, _, pos)| pos.pos.clone());
+        let Some(target_pos) = enemy_pos else { continue };
         for (entity, faction, _pos) in &mut ai_units {
             if faction != ai_faction {
                 continue;
             }
-            commands.entity(entity).insert(AttackTarget { entity: *enemy_entity });
+            commands.entity(entity)
+                .insert(crate::combat::AttackMoveOrder { target: target_pos.clone() });
         }
     }
 }
@@ -627,7 +666,7 @@ pub fn tactical_ai_system(
         let near_home = home_dx.max(home_dy) <= DEFEND_HOME_RADIUS;
 
         // Find nearest enemy unit.
-        let mut best: Option<(Entity, i32)> = None;
+        let mut best: Option<(Entity, GridPos, i32)> = None;
         for (e_entity, e_faction, e_pos) in &enemies {
             if e_faction == faction {
                 continue;
@@ -636,19 +675,22 @@ pub fn tactical_ai_system(
             let dy = (pos.pos.y - e_pos.pos.y).abs();
             let d = dx.max(dy);
             match best {
-                None => best = Some((e_entity, d)),
-                Some((_, bd)) if d < bd => best = Some((e_entity, d)),
+                None => best = Some((e_entity, e_pos.pos.clone(), d)),
+                Some((_, _, bd)) if d < bd => best = Some((e_entity, e_pos.pos.clone(), d)),
                 _ => {}
             }
         }
 
         // If near home, only attack enemies that are also nearby.
-        if let Some((target, dist)) = best {
+        if let Some((target, target_pos, dist)) = best {
             if near_home && dist > DEFENSIVE_RADIUS_TILES {
                 // Don't chase; stay near base.
                 continue;
             }
-            commands.entity(entity).insert(AttackTarget { entity: target });
+            // Use attack-move so the unit actually closes to attack range instead of
+            // setting a bare AttackTarget that attack_system ignores when out of range.
+            commands.entity(entity).insert(crate::combat::AttackMoveOrder { target: target_pos });
+            let _ = target; // AttackTarget will be set by attack_move_system once in range
         }
     }
 }
