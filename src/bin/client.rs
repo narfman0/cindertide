@@ -422,6 +422,13 @@ struct RenderedTile {
     pos: GridPos,
 }
 
+/// Marker on the logical Tile entity once its mesh has been spawned.
+/// Keeps render_tiles from re-processing tiles every frame without touching
+/// the RenderedTile component (which lives on mesh entities and is used by
+/// editor/cleanup systems to find and despawn visual meshes).
+#[derive(Component)]
+struct TileHasMesh;
+
 #[derive(Component)]
 struct SelectionRing {
     unit_entity: Entity,
@@ -2646,7 +2653,7 @@ fn render_tiles(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut visual_entities: ResMut<VisualEntities>,
-    tiles: Query<(Entity, &Tile), Without<RenderedTile>>,
+    tiles: Query<(Entity, &Tile), Without<TileHasMesh>>,
 ) {
     for (tile_entity, tile) in &tiles {
         // Start tiles as nearly black (never-seen) until fog of war reveals them.
@@ -2663,9 +2670,13 @@ fn render_tiles(
             Mesh3d(meshes.add(Plane3d::default().mesh().size(0.95, 0.95))),
             MeshMaterial3d(mat_handle),
             Transform::from_translation(pos),
+            RenderedTile { pos: tile.pos.clone() },
         ));
-        // Mark the tile entity as rendered so this system skips it next frame.
-        commands.entity(tile_entity).insert(RenderedTile { pos: tile.pos.clone() });
+        // Mark the tile entity so render_tiles skips it next frame.
+        // TileHasMesh lives on the logical Tile entity; RenderedTile lives on
+        // the mesh entity so editor/cleanup queries (With<RenderedTile>) still
+        // find the visual meshes, not the game-logic entities.
+        commands.entity(tile_entity).insert(TileHasMesh);
     }
 }
 
