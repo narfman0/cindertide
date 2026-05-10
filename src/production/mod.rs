@@ -4,7 +4,7 @@ use bevy::prelude::*;
 use crate::map::{Faction, GridPos};
 use crate::units::{UnitBundle, HomeBase};
 use crate::buildings::{BuildingPos, BuildingTypeId, Built};
-use crate::resources::{ResourcePool, ResourceCost, FactionEntity, can_afford, spend};
+use crate::resources::{ResourcePool, ResourceCost, FactionEntity, can_afford, spend, refund};
 use crate::factions::LoadedFactions;
 
 pub const QUEUE_CAP: usize = 5;
@@ -21,24 +21,8 @@ pub fn unit_production_seconds(unit_id: &str, loaded: &LoadedFactions) -> f32 {
     loaded.units.get(unit_id).map(|d| d.build_time_seconds).unwrap_or(10.0)
 }
 
-pub fn unit_production_seconds_for_faction(unit_id: &str, faction: &Faction, loaded: &LoadedFactions) -> f32 {
-    loaded.faction_unit(faction.id(), unit_id)
-        .map(|d| d.build_time_seconds)
-        .unwrap_or(10.0)
-}
-
 pub fn unit_production_cost(unit_id: &str, loaded: &LoadedFactions) -> ResourceCost {
     loaded.units.get(unit_id)
-        .map(|d| ResourceCost {
-            fuel: d.production_cost.fuel,
-            scrap: d.production_cost.scrap,
-            manpower: d.production_cost.manpower,
-        })
-        .unwrap_or(ResourceCost { fuel: 50.0, scrap: 50.0, manpower: 5.0 })
-}
-
-pub fn unit_production_cost_for_faction(unit_id: &str, faction: &Faction, loaded: &LoadedFactions) -> ResourceCost {
-    loaded.faction_unit(faction.id(), unit_id)
         .map(|d| ResourceCost {
             fuel: d.production_cost.fuel,
             scrap: d.production_cost.scrap,
@@ -84,25 +68,11 @@ pub fn try_enqueue(
     Ok(())
 }
 
-/// Advance one step of progress. Returns Some(unit_id) if a unit completed.
+/// Advance one step of progress. Returns Some(unit_id) if a unit completed
+/// this step (the caller should spawn it).
 pub fn step_progress(queue: &mut ProductionQueue, dt: f32, loaded: &LoadedFactions) -> Option<String> {
     let head = queue.jobs.first()?.clone();
     let total = unit_production_seconds(&head, loaded);
-    queue.progress += dt;
-    if queue.progress >= total {
-        queue.progress = 0.0;
-        queue.jobs.remove(0);
-        return Some(head);
-    }
-    None
-}
-
-/// Faction-scoped variant — uses the faction's own build time for the unit.
-pub fn step_progress_faction(queue: &mut ProductionQueue, dt: f32, faction_id: &str, loaded: &LoadedFactions) -> Option<String> {
-    let head = queue.jobs.first()?.clone();
-    let total = loaded.faction_unit(faction_id, &head)
-        .map(|d| d.build_time_seconds)
-        .unwrap_or_else(|| unit_production_seconds(&head, loaded));
     queue.progress += dt;
     if queue.progress >= total {
         queue.progress = 0.0;
@@ -119,16 +89,22 @@ pub fn production_system(
     time: Res<Time>,
     loaded: Res<LoadedFactions>,
     mut buildings: Query<(&BuildingPos, &Faction, &mut ProductionQueue), With<Built>>,
+    tech_buffs: Query<(&FactionEntity, &crate::tech::TechBuff)>,
 ) {
     let dt = time.delta_secs();
     for (pos, faction, mut queue) in &mut buildings {
-        let faction_id = faction.id().to_string();
-        // Use faction-scoped build time for step progress
-        if let Some(unit_id) = step_progress_faction(&mut queue, dt, &faction_id, &loaded) {
+        if let Some(unit_id) = step_progress(&mut queue, dt, &loaded) {
             let (x, y, f) = (pos.pos.x, pos.pos.y, faction.clone());
-            // Prefer faction-scoped unit def so stats match the faction's roster
-            if let Some(def) = loaded.faction_unit(&faction_id, &unit_id).cloned() {
-                let id = commands.spawn(UnitBundle::from_def(&def, f, x, y)).id();
+            if let Some(def) = loaded.units.get(&unit_id) {
+                let buff = tech_buffs.iter()
+                    .find(|(fe, _)| fe.faction == f)
+                    .map(|(_, b)| b.clone())
+                    .unwrap_or_default();
+                let mut bundle = UnitBundle::from_def(def, f, x, y);
+                bundle.health.current *= buff.hp_mult;
+                bundle.health.max *= buff.hp_mult;
+                bundle.attack_damage.base *= buff.damage_mult;
+                let id = commands.spawn(bundle).id();
                 commands.entity(id).insert(HomeBase { pos: pos.pos.clone() });
             }
         }
@@ -162,6 +138,7 @@ mod tests {
             health: 80.0,
             attack_damage: 12.0,
             suppression_value: 15.0,
+            suppression_resistance: 0.0,
             attack_speed: 1.2,
             vision_range: 6.0,
             production_cost: crate::factions::ResourceCostDef { fuel: 0.0, scrap: 50.0, manpower: 5.0 },
@@ -180,6 +157,7 @@ mod tests {
             produces: vec!["riflemen".to_string()],
             model_file: String::new(),
             description: String::new(),
+            trickle_fuel: 0.0, trickle_scrap: 0.0, trickle_manpower: 0.0, vision_radius: 0.0,
         });
         loaded.buildings.insert("refinery".to_string(), crate::factions::BuildingDef {
             id: "refinery".to_string(),
@@ -190,6 +168,7 @@ mod tests {
             produces: vec![],
             model_file: String::new(),
             description: String::new(),
+            trickle_fuel: 0.0, trickle_scrap: 0.0, trickle_manpower: 0.0, vision_radius: 0.0,
         });
         loaded
     }

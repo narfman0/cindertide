@@ -62,6 +62,7 @@ pub struct FactionBundle {
     pub trickle: ResourceTrickle,
     pub tech: crate::tech::Tech,
     pub pop_cap: PopCap,
+    pub tech_buff: crate::tech::TechBuff,
 }
 
 impl FactionBundle {
@@ -70,7 +71,7 @@ impl FactionBundle {
             "combine"  => (800.0, 400.0, 100.0),
             "ironborn" => (400.0, 900.0, 120.0),
             "covenant" => (600.0, 600.0, 80.0),
-            "hollow"   => (0.0, 0.0, 0.0),
+            "hollow"   => (800.0, 400.0, 100.0),
             _          => (500.0, 500.0, 100.0),
         };
         Self {
@@ -80,6 +81,7 @@ impl FactionBundle {
             trickle: ResourceTrickle { fuel_per_second: 0.0, scrap_per_second: 0.0, manpower_per_second: 1.0 },
             tech: crate::tech::Tech::default(),
             pop_cap: PopCap { current: 0, max: BASE_POP_CAP },
+            tech_buff: crate::tech::TechBuff::default(),
         }
     }
 }
@@ -155,11 +157,38 @@ pub fn pop_cap_system(
     }
 }
 
+/// Recomputes `ResourceTrickle` each frame from the faction's currently built buildings.
+/// Also applies the faction's `TechBuff.trickle_mult`.
+pub fn building_trickle_system(
+    loaded: Res<crate::factions::LoadedFactions>,
+    buildings: Query<(&crate::buildings::BuildingTypeId, &Faction), With<crate::buildings::Built>>,
+    mut factions: Query<(&FactionEntity, &mut ResourceTrickle, Option<&crate::tech::TechBuff>)>,
+) {
+    for (fe, mut trickle, tech_buff) in &mut factions {
+        trickle.fuel_per_second = 0.0;
+        trickle.scrap_per_second = 0.0;
+        trickle.manpower_per_second = 1.0; // base manpower trickle always 1/s
+        for (bt, bf) in &buildings {
+            if bf != &fe.faction { continue; }
+            if let Some(def) = loaded.faction_building(fe.faction.id(), bt.id()) {
+                trickle.fuel_per_second += def.trickle_fuel;
+                trickle.scrap_per_second += def.trickle_scrap;
+                trickle.manpower_per_second += def.trickle_manpower;
+            }
+        }
+        // Apply tech buff multiplier
+        let mult = tech_buff.map(|b| b.trickle_mult).unwrap_or(1.0);
+        trickle.fuel_per_second *= mult;
+        trickle.scrap_per_second *= mult;
+        trickle.manpower_per_second *= mult;
+    }
+}
+
 pub struct ResourcesPlugin;
 
 impl Plugin for ResourcesPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (resource_trickle_system, pop_cap_system));
+        app.add_systems(Update, (resource_trickle_system, building_trickle_system, pop_cap_system));
     }
 }
 

@@ -37,7 +37,7 @@ use resources::{ResourcesPlugin, FactionBundle, ResourcePool, ResourceTrickle, R
 use control::ControlPlugin;
 use buildings::{BuildingsPlugin, BuildingTypeId, BuildingBundle, BuildingPos, ConstructionProgress, building_cost, building_produces, try_pay, can_place, Built, UnderConstruction};
 use production::{ProductionPlugin, ProductionQueue, try_enqueue, EnqueueError};
-use factions::LoadedFactions;
+use factions::{LoadedFactions, FactionsPlugin};
 use heroes::{HeroPlugin, HeroBundle, Hero, AbilityKind, SignatureAbility, Aura, HeroDowned, is_charge_full, within_aura};
 use tech::{TechPlugin, Tech, Tier, Doctrine, ResearchTarget, ResearchInProgress, start_research};
 use unit_ai::UnitAiPlugin;
@@ -764,10 +764,19 @@ fn handle_building_place(In(params): In<Option<Value>>, world: &mut World) -> Br
         })?;
     }
 
+    // Look up TechBuff for this faction to apply build_time_mult
+    let build_time_mult = {
+        let mut q = world.query::<(&resources::FactionEntity, &tech::TechBuff)>();
+        q.iter(world)
+            .find(|(fe, _)| fe.faction == faction)
+            .map(|(_, b)| b.build_time_mult)
+            .unwrap_or(1.0)
+    };
+
     let bt_for_query = building_type.clone();
-    let entity = world
-        .spawn(BuildingBundle::new(building_type, faction, x, y, &loaded))
-        .id();
+    let mut bundle = BuildingBundle::new(building_type, faction, x, y, &loaded);
+    bundle.construction.total *= build_time_mult;
+    let entity = world.spawn(bundle).id();
 
     if !building_produces(&bt_for_query, &loaded).is_empty() {
         world.entity_mut(entity).insert(ProductionQueue::default());
@@ -986,7 +995,7 @@ fn handle_production_enqueue(In(params): In<Option<Value>>, world: &mut World) -
     })?;
 
     // Snapshot building state.
-    let (bt, building_faction, is_built) = {
+    let (bt, is_built) = {
         let r = world.get_entity(building_entity).map_err(|_| BrpError {
             code: -32602,
             message: format!("building entity {building_id} not found"),
@@ -997,21 +1006,20 @@ fn handle_production_enqueue(In(params): In<Option<Value>>, world: &mut World) -
             message: "entity is not a building".into(),
             data: None,
         })?;
-        let building_faction = r.get::<Faction>().cloned().unwrap_or_else(Faction::combine);
         let is_built = r.get::<Built>().is_some();
-        (bt, building_faction, is_built)
+        (bt, is_built)
     };
 
     // Pay from faction pool, then enqueue on building.
     let loaded = world.resource::<LoadedFactions>().clone();
-    let cost = production::unit_production_cost_for_faction(&unit_type, &building_faction, &loaded);
+    let cost = production::unit_production_cost(&unit_type, &loaded);
     {
         let mut fm = world.get_entity_mut(faction_entity).map_err(|_| BrpError {
             code: -32602,
             message: format!("faction entity {faction_id} not found"),
             data: None,
         })?;
-        let pool = fm.get_mut::<resources::ResourcePool>().ok_or_else(|| BrpError {
+        let mut pool = fm.get_mut::<resources::ResourcePool>().ok_or_else(|| BrpError {
             code: -32602,
             message: "faction has no ResourcePool".into(),
             data: None,
@@ -1024,7 +1032,7 @@ fn handle_production_enqueue(In(params): In<Option<Value>>, world: &mut World) -
                 data: None,
             });
         }
-        if !buildings::building_produces_for_faction(&bt, &building_faction, &loaded).iter().any(|s| *s == unit_type.as_str()) {
+        if !building_produces(&bt, &loaded).iter().any(|s| *s == unit_type.as_str()) {
             return Err(BrpError {
                 code: -32000,
                 message: format!("{} cannot produce {}", bt.id(), unit_type),
@@ -1148,7 +1156,7 @@ fn handle_production_queue_status(In(params): In<Option<Value>>, world: &mut Wor
     let jobs: Vec<String> = q.jobs.iter().cloned().collect();
     let progress = q.progress;
     let head_unit = q.jobs.first().cloned();
-    let _ = r;
+    drop(r);
 
     let loaded = world.resource::<LoadedFactions>().clone();
     let head_total = head_unit.as_deref().map(|u| production::unit_production_seconds(u, &loaded));
@@ -2663,11 +2671,14 @@ fn spawn_built_building(
     }
 }
 
+fn spawn_unit_at(world: &mut World, faction: Faction, x: i32, y: i32) {
+    spawn_unit_type_at(world, faction, "riflemen", x, y);
+}
+
 fn spawn_unit_type_at(world: &mut World, faction: Faction, unit_id: &str, x: i32, y: i32) {
     let loaded = world.resource::<LoadedFactions>().clone();
-    // Prefer faction-scoped def so each faction gets their own stats/display name
-    let id = if let Some(def) = loaded.faction_unit(faction.id(), unit_id).cloned() {
-        world.spawn(UnitBundle::from_def(&def, faction, x, y)).id()
+    let id = if let Some(def) = loaded.units.get(unit_id) {
+        world.spawn(UnitBundle::from_def(def, faction, x, y)).id()
     } else {
         world.spawn(UnitBundle::default_riflemen(faction, x, y)).id()
     };

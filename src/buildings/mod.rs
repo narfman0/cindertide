@@ -33,6 +33,12 @@ pub struct UnderConstruction;
 #[derive(Component, Debug)]
 pub struct Built;
 
+/// Buildings with this component contribute to their faction's fog of war.
+#[derive(Component, Debug, Clone)]
+pub struct VisionProvider {
+    pub radius: f32,
+}
+
 // --- Cost / health / build-time functions (data-driven via LoadedFactions) ---
 
 pub fn building_cost(bt: &BuildingTypeId, loaded: &LoadedFactions) -> ResourceCost {
@@ -50,15 +56,10 @@ pub fn building_construction_seconds(bt: &BuildingTypeId, loaded: &LoadedFaction
 }
 
 /// Which unit IDs does this building produce?
-/// Returns what a building can produce, scoped to a faction roster if provided.
 pub fn building_produces<'a>(bt: &BuildingTypeId, loaded: &'a LoadedFactions) -> Vec<&'a str> {
     loaded.buildings.get(bt.id())
         .map(|d| d.produces.iter().map(|s| s.as_str()).collect())
         .unwrap_or_default()
-}
-
-pub fn building_produces_for_faction<'a>(bt: &BuildingTypeId, faction: &crate::map::Faction, loaded: &'a LoadedFactions) -> Vec<&'a str> {
-    loaded.faction_building_produces(faction.id(), bt.id())
 }
 
 // --- Pure placement helpers ---
@@ -142,12 +143,29 @@ pub fn update_navmesh_on_building_placed(
     }
 }
 
+/// When a building finishes construction, insert `VisionProvider` if the building
+/// definition has a non-zero vision_radius.
+pub fn apply_vision_provider_system(
+    mut commands: Commands,
+    loaded: Res<LoadedFactions>,
+    query: Query<(Entity, &BuildingTypeId, &crate::map::Faction), (Added<Built>, Without<VisionProvider>)>,
+) {
+    for (entity, bt, faction) in &query {
+        if let Some(def) = loaded.faction_building(faction.id(), bt.id()) {
+            if def.vision_radius > 0.0 {
+                commands.entity(entity).insert(VisionProvider { radius: def.vision_radius });
+            }
+        }
+    }
+}
+
 pub struct BuildingsPlugin;
 
 impl Plugin for BuildingsPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Update, construction_system);
         app.add_systems(Update, update_navmesh_on_building_placed);
+        app.add_systems(Update, apply_vision_provider_system);
     }
 }
 
@@ -185,6 +203,7 @@ mod tests {
             produces: vec![],
             model_file: String::new(),
             description: String::new(),
+            trickle_fuel: 0.0, trickle_scrap: 0.0, trickle_manpower: 0.0, vision_radius: 0.0,
         });
         loaded.buildings.insert("command_bunker".to_string(), crate::factions::BuildingDef {
             id: "command_bunker".to_string(),
@@ -195,6 +214,7 @@ mod tests {
             produces: vec![],
             model_file: String::new(),
             description: String::new(),
+            trickle_fuel: 0.0, trickle_scrap: 0.0, trickle_manpower: 0.0, vision_radius: 0.0,
         });
         loaded.buildings.insert("pillbox".to_string(), crate::factions::BuildingDef {
             id: "pillbox".to_string(),
@@ -205,6 +225,7 @@ mod tests {
             produces: vec![],
             model_file: String::new(),
             description: String::new(),
+            trickle_fuel: 0.0, trickle_scrap: 0.0, trickle_manpower: 0.0, vision_radius: 0.0,
         });
         loaded.buildings.insert("tank_trap".to_string(), crate::factions::BuildingDef {
             id: "tank_trap".to_string(),
@@ -215,6 +236,7 @@ mod tests {
             produces: vec![],
             model_file: String::new(),
             description: String::new(),
+            trickle_fuel: 0.0, trickle_scrap: 0.0, trickle_manpower: 0.0, vision_radius: 0.0,
         });
         loaded
     }

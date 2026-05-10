@@ -4,13 +4,13 @@ use bevy::prelude::*;
 use bevy::render::camera::ScalingMode;
 use cindertide::map::{Faction, GridPos, Tile};
 use cindertide::units::{UnitPos, UnitTypeId, UnitBundle};
-use cindertide::buildings::{BuildingPos, BuildingTypeId, BuildingBundle};
+use cindertide::buildings::{BuildingPos, BuildingTypeId, BuildingBundle, building_cost, building_produces, VisionProvider};
 use cindertide::factions::LoadedFactions;
 use cindertide::campaign::{CampaignRun, CampaignDef, PlayableFaction, GlobalProgress, apply_mission_outcome, next_mission_type, save_progress, load_progress};
 use cindertide::game::{ActiveRun, GameState};
 use cindertide::mission::{Mission, MissionStatus};
 use cindertide::mapgen::MissionType;
-use cindertide::mapgen::{ArchetypeDef, SpawnZone, generate_from_archetype, scan_archetypes};
+use cindertide::mapgen::{ArchetypeDef, SpawnZone, SpawnLayout, generate_from_archetype, scan_archetypes};
 use cindertide::narrative::NarrativeData;
 use cindertide::resources::{FactionBundle, FactionEntity, ResourcePool};
 use cindertide::tech::{Tech, ResearchInProgress, ResearchTarget, Tier, Doctrine, start_research};
@@ -87,7 +87,6 @@ fn main() {
         .insert_resource(NetBroadcastTimer(0.0))
         .add_systems(Startup, setup_scene)
         .add_systems(Startup, setup_ui)
-        .add_systems(Startup, load_factions)
         .add_systems(Startup, load_narrative)
         .add_systems(Startup, startup_load_progress)
         .add_systems(Startup, load_model_assets)
@@ -139,7 +138,6 @@ fn main() {
 // ── ClientScreen resource ────────────────────────────────────────────────────
 
 #[derive(Resource, Debug, Clone, PartialEq)]
-#[allow(dead_code)]
 enum ClientScreen {
     Title,
     MultiplayerMenu { hosting: bool, ip_input: String },
@@ -231,7 +229,6 @@ impl Default for GeneratePanel {
 /// Tag component for spawn zone marker entities in the 3D world.
 #[derive(Component)]
 struct SpawnMarker {
-    #[allow(dead_code)]
     zone_id: usize,
 }
 
@@ -274,7 +271,6 @@ struct ActionDef {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-#[allow(dead_code)]
 enum ScriptField {
     TriggerSeconds,
     TriggerBeat,
@@ -531,7 +527,6 @@ struct DeathFlash {
 // `process_audio_events`.
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 enum AudioEvent {
     UnitSelected,
     UnitMoved,
@@ -837,6 +832,12 @@ fn scan_available_maps() -> Vec<String> {
 const LOBBY_TEAMS: &[&str] = &["Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf", "Hotel"];
 const LOBBY_FACTIONS: &[&str] = &["Combine", "Ironborn", "Covenant", "Hollow"];
 const LOBBY_WIN_CONDITIONS: &[&str] = &["Assault", "Control", "Ffa", "KingOfTheHill", "Assassination", "Defense"];
+const LOBBY_CONTROLLERS: &[SlotController] = &[
+    SlotController::Human,
+    SlotController::Ai(String::new()), // placeholder, handled via cycle_controller
+    SlotController::Open,
+];
+
 /// Role of this process in a multiplayer session.
 #[derive(Resource, Default, Clone, PartialEq, Debug)]
 enum MultiplayerRole {
@@ -1073,6 +1074,14 @@ fn drag_rect(start: Vec2, current: Vec2) -> (Vec2, Vec2) {
     (min, max - min)
 }
 
+fn faction_name(f: PlayableFaction) -> &'static str {
+    match f {
+        PlayableFaction::Combine => "Combine",
+        PlayableFaction::Ironborn => "Ironborn",
+        PlayableFaction::Handler => "The Architect",
+    }
+}
+
 fn faction_narrative_key(f: PlayableFaction) -> &'static str {
     match f {
         PlayableFaction::Combine => "combine",
@@ -1090,10 +1099,6 @@ fn map_faction(f: PlayableFaction) -> Faction {
 }
 
 // ── Startup systems ───────────────────────────────────────────────────────────
-
-fn load_factions(mut commands: Commands) {
-    commands.insert_resource(LoadedFactions::load_from_dir("assets/factions"));
-}
 
 fn load_narrative(mut commands: Commands) {
     let narrative = cindertide::narrative::NarrativeData::load("assets/narrative.toml")
@@ -2361,7 +2366,7 @@ fn poll_mission_end(
     mut audio_queue: ResMut<AudioEventQueue>,
 ) {
     // Check if we're in a test mission — if so, handle end by returning to the map editor.
-    if let ClientScreen::TestMission { saved_map_path: _ } = &*screen {
+    if let ClientScreen::TestMission { saved_map_path } = &*screen {
         let Some(mission_entity) = active.current_mission_entity else { return };
         let Ok(m) = missions.get(mission_entity) else { return };
         if m.status == MissionStatus::Active { return; }
@@ -2392,7 +2397,7 @@ fn poll_mission_end(
 
     let won = m.status == MissionStatus::Won;
     let mission_type = m.mission_type.clone();
-    let _player_faction = m.player_faction.clone();
+    let player_faction = m.player_faction.clone();
 
     // Determine debrief narrative
     let faction_playable = active.run.as_ref().map(|r| r.faction).unwrap_or(PlayableFaction::Combine);
@@ -3039,6 +3044,7 @@ fn handle_paused_menu_input(
     keys: Res<ButtonInput<KeyCode>>,
     paused: Res<Paused>,
     mut screen: ResMut<ClientScreen>,
+    mut time: ResMut<Time<Virtual>>,
     mut visual_entities: ResMut<VisualEntities>,
     mut editor: ResMut<EditorState>,
     mut entered_from_game: ResMut<EditorEnteredFromGame>,
@@ -5456,6 +5462,7 @@ fn update_fog_of_war(
     player_cheats: Res<PlayerCheats>,
     units: Query<(&UnitPos, &Faction, &UnitTypeId), With<UnitTypeId>>,
     buildings: Query<(&BuildingPos, &Faction), With<BuildingTypeId>>,
+    vision_buildings: Query<(&BuildingPos, &Faction, &VisionProvider)>,
     mut fog: ResMut<FogOfWar>,
     tiles: Query<&Tile>,
     visual_entities: Res<VisualEntities>,
@@ -5519,6 +5526,21 @@ fn update_fog_of_war(
         for dy in -radius..=radius {
             for dx in -radius..=radius {
                 if dx * dx + dy * dy <= radius * radius {
+                    new_visible.insert((cx + dx, cy + dy));
+                }
+            }
+        }
+    }
+
+    // Watchtowers and other vision buildings (VisionProvider overrides the default radius)
+    for (bpos, bfaction, vision) in &vision_buildings {
+        if bfaction != player_f { continue; }
+        let r = vision.radius as i32;
+        let cx = bpos.pos.x;
+        let cy = bpos.pos.y;
+        for dy in -r..=r {
+            for dx in -r..=r {
+                if dx * dx + dy * dy <= r * r {
                     new_visible.insert((cx + dx, cy + dy));
                 }
             }
@@ -5968,7 +5990,7 @@ fn update_tech_panel(
             let item = &items[tech_vis.selected_idx];
             let can_afford = s.fuel >= item.cost_fuel && s.scrap >= item.cost_scrap;
             if can_afford && !s.researching {
-                if let Ok((ent, tech, _, _, mut pool)) = tech_query.get_mut(s.entity) {
+                if let Ok((ent, mut tech, _, _, mut pool)) = tech_query.get_mut(s.entity) {
                     let target = match &item.target {
                         TechResearchTarget::TierTwo => ResearchTarget::Tier(Tier::Two),
                         TechResearchTarget::TierThree => ResearchTarget::Tier(Tier::Three),

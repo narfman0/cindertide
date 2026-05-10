@@ -1,277 +1,270 @@
 id = "covenant"
 display_name = "Covenant"
 color = [0.20, 0.40, 0.90]
-ai_script = "ai/default.lua"
 default_opponent = "combine"
-
-# ── Units ────────────────────────────────────────────────────────────────────
-# Covenant doctrine: precision and vision. Long range, excellent sight lines,
-# but fragile — they win by seeing the enemy before the enemy sees them.
-# Fuel-intensive; they run on refined propellant and precision optics.
 
 [[units]]
 id = "riflemen"
-display_name = "Vanguard"
+display_name = "Covenant Soldier"
 unit_kind = "infantry"
-attack_range = 5.0
-move_speed = 2.8
-health = 65.0
-attack_damage = 14.0
-suppression_value = 14.0
-attack_speed = 1.1
-vision_range = 9.0
-build_time_seconds = 9.0
+attack_range = 4.0
+move_speed = 2.5
+health = 80.0
+attack_damage = 12.0
+suppression_value = 15.0
+attack_speed = 1.2
+vision_range = 6.0
+build_time_seconds = 8.0
 produced_at = ["barracks"]
 ability_q = "suppressing_fire"
 model_file = "unit_riflemen.glb#Scene0"
-description = "Covenant sharpshooter. Outranges almost any infantry — as long as they're not the ones getting charged."
+description = "Standard Covenant infantry"
 [units.production_cost]
-fuel = 20.0
-scrap = 40.0
+scrap = 50.0
 manpower = 5.0
 
 [[units]]
 id = "heavy_weapons"
-display_name = "Deacon"
+display_name = "Covenant Zealot"
 unit_kind = "infantry"
-attack_range = 8.0
+attack_range = 6.0
 move_speed = 1.5
-health = 85.0
-attack_damage = 32.0
-suppression_value = 44.0
+health = 120.0
+attack_damage = 35.0
+suppression_value = 40.0
 attack_speed = 0.5
-vision_range = 7.0
+vision_range = 5.0
 build_time_seconds = 14.0
 produced_at = ["barracks"]
 ability_q = "suppressing_fire"
 model_file = "unit_heavy_weapons.glb#Scene0"
-description = "Long-range support platform. The Deacon can suppress targets at distances most factions can barely spot."
+description = "Covenant heavy suppressor"
 [units.production_cost]
-fuel = 30.0
-scrap = 75.0
+fuel = 10.0
+scrap = 80.0
 manpower = 5.0
 
 [[units]]
 id = "light_vehicle"
-display_name = "Specter"
+display_name = "Covenant Scout"
 unit_kind = "vehicle"
 attack_range = 5.0
-move_speed = 5.5
-health = 70.0
-attack_damage = 15.0
-suppression_value = 6.0
-attack_speed = 1.0
-vision_range = 14.0
-build_time_seconds = 16.0
+move_speed = 4.0
+health = 100.0
+attack_damage = 20.0
+suppression_value = 10.0
+attack_speed = 0.8
+vision_range = 10.0
+build_time_seconds = 18.0
 produced_at = ["motor_pool"]
 ability_q = "smoke_screen"
 model_file = "unit_light_vehicle.glb#Scene0"
-description = "Fastest vehicle on the field. Fragile, but the vision range it provides turns fog of war into a one-way window."
+description = "Covenant fast scout"
 [units.production_cost]
-fuel = 100.0
-scrap = 50.0
+fuel = 80.0
+scrap = 60.0
 manpower = 3.0
 
 [[units]]
 id = "heavy_armor"
-display_name = "Consecrator"
+display_name = "Covenant Dreadnought"
 unit_kind = "vehicle"
-attack_range = 6.0
-move_speed = 2.0
-health = 200.0
-attack_damage = 55.0
-suppression_value = 18.0
-attack_speed = 0.5
-vision_range = 7.0
-build_time_seconds = 32.0
+attack_range = 4.0
+move_speed = 1.8
+health = 250.0
+attack_damage = 50.0
+suppression_value = 25.0
+attack_speed = 0.4
+vision_range = 4.0
+build_time_seconds = 35.0
 produced_at = ["motor_pool"]
 ability_q = "armor_overdrive"
 model_file = "unit_heavy_armor.glb#Scene0"
-description = "Long-range tank destroyer. Less armor than peers, but it engages before enemies can close the distance."
+description = "Covenant armored juggernaut"
 [units.production_cost]
-fuel = 310.0
-scrap = 180.0
+fuel = 250.0
+scrap = 200.0
 manpower = 5.0
-
-# ── Buildings ────────────────────────────────────────────────────────────────
 
 [[buildings]]
 id = "command_bunker"
-display_name = "Sanctum"
-health = 1100.0
-build_time_seconds = 85.0
+display_name = "Covenant Sanctum"
+health = 1200.0
+build_time_seconds = 90.0
 model_file = "building_command_bunker.glb#Scene0"
-description = "Covenant command center. Slightly less durable than a bunker — they rely on never being found."
+description = "Covenant HQ"
 [buildings.cost]
-fuel = 350.0
-scrap = 160.0
+fuel = 300.0
+scrap = 200.0
 
 [[buildings]]
 id = "barracks"
-display_name = "Assembly Hall"
-health = 580.0
-build_time_seconds = 42.0
+display_name = "Covenant Barracks"
+health = 600.0
+build_time_seconds = 40.0
 produces = ["riflemen", "heavy_weapons"]
 model_file = "building_barracks.glb#Scene0"
-description = "Trains Vanguards and Deacons."
 [buildings.cost]
-fuel = 130.0
-scrap = 130.0
+fuel = 100.0
+scrap = 150.0
 
 [[buildings]]
 id = "motor_pool"
-display_name = "Mechanistry"
-health = 580.0
-build_time_seconds = 42.0
+display_name = "Covenant Motor Pool"
+health = 600.0
+build_time_seconds = 40.0
 produces = ["light_vehicle", "heavy_armor"]
 model_file = "building_motor_pool.glb#Scene0"
-description = "Produces Specters and Consecrators."
 [buildings.cost]
-fuel = 280.0
-scrap = 180.0
+fuel = 250.0
+scrap = 200.0
 
 [[buildings]]
 id = "refinery"
-display_name = "Fuel Shrine"
-health = 480.0
-build_time_seconds = 26.0
+display_name = "Covenant Refinery"
+health = 500.0
+build_time_seconds = 25.0
+trickle_fuel = 5.0
 model_file = "building_refinery.glb#Scene0"
 [buildings.cost]
-fuel = 220.0
-scrap = 45.0
+fuel = 200.0
+scrap = 50.0
 
 [[buildings]]
 id = "scrapyard"
-display_name = "Reliquary"
-health = 340.0
-build_time_seconds = 26.0
+display_name = "Covenant Scrapyard"
+health = 350.0
+build_time_seconds = 25.0
+trickle_scrap = 4.0
 model_file = "building_scrapyard.glb#Scene0"
 [buildings.cost]
-fuel = 60.0
-scrap = 190.0
+fuel = 50.0
+scrap = 200.0
 
 [[buildings]]
 id = "recruitment_office"
-display_name = "Conscription Hall"
-health = 340.0
-build_time_seconds = 16.0
+display_name = "Covenant Recruitment"
+health = 350.0
+build_time_seconds = 15.0
+trickle_manpower = 2.0
 model_file = "building_recruitment_office.glb#Scene0"
 [buildings.cost]
-fuel = 60.0
-scrap = 45.0
+fuel = 50.0
+scrap = 50.0
 
 [[buildings]]
 id = "foundry"
-display_name = "Precision Works"
-health = 780.0
-build_time_seconds = 62.0
+display_name = "Covenant Foundry"
+health = 800.0
+build_time_seconds = 60.0
+trickle_scrap = 1.0
 model_file = "building_foundry.glb#Scene0"
 [buildings.cost]
-fuel = 440.0
-scrap = 320.0
+fuel = 400.0
+scrap = 350.0
 
 [[buildings]]
 id = "airfield"
-display_name = "Sortie Field"
-health = 780.0
-build_time_seconds = 62.0
+display_name = "Covenant Airfield"
+health = 800.0
+build_time_seconds = 60.0
 model_file = "building_airfield.glb#Scene0"
 [buildings.cost]
-fuel = 540.0
-scrap = 370.0
+fuel = 500.0
+scrap = 400.0
 
 [[buildings]]
 id = "workshop"
-display_name = "Optics Lab"
-health = 480.0
-build_time_seconds = 26.0
+display_name = "Covenant Workshop"
+health = 500.0
+build_time_seconds = 25.0
 model_file = "building_workshop.glb#Scene0"
 [buildings.cost]
-fuel = 170.0
-scrap = 90.0
+fuel = 150.0
+scrap = 100.0
 
 [[buildings]]
 id = "research_lab"
-display_name = "Doctrine Archive"
-health = 580.0
-build_time_seconds = 42.0
+display_name = "Covenant Lab"
+health = 600.0
+build_time_seconds = 40.0
 model_file = "building_research_lab.glb#Scene0"
 [buildings.cost]
-fuel = 280.0
-scrap = 180.0
+fuel = 250.0
+scrap = 200.0
 
 [[buildings]]
 id = "supply_depot"
-display_name = "Field Cache"
-health = 340.0
-build_time_seconds = 16.0
+display_name = "Covenant Supply Depot"
+health = 350.0
+build_time_seconds = 15.0
+trickle_manpower = 1.0
 model_file = "building_supply_depot.glb#Scene0"
 [buildings.cost]
-fuel = 110.0
-scrap = 90.0
+fuel = 100.0
+scrap = 100.0
 
 [[buildings]]
 id = "watchtower"
-display_name = "Spire"
-health = 240.0
-build_time_seconds = 11.0
+display_name = "Covenant Watchtower"
+health = 250.0
+build_time_seconds = 10.0
+vision_radius = 8.0
 model_file = "building_watchtower.glb#Scene0"
-description = "Enhanced vision radius — Covenant spires see further than any standard watchtower."
 [buildings.cost]
-fuel = 60.0
-scrap = 70.0
+fuel = 50.0
+scrap = 75.0
 
 [[buildings]]
 id = "repair_bay"
-display_name = "Maintenance Bay"
-health = 480.0
-build_time_seconds = 26.0
+display_name = "Covenant Repair Bay"
+health = 500.0
+build_time_seconds = 25.0
 model_file = "building_repair_bay.glb#Scene0"
 [buildings.cost]
-fuel = 110.0
-scrap = 190.0
+fuel = 100.0
+scrap = 200.0
 
 [[buildings]]
 id = "pillbox"
-display_name = "Gun Emplacement"
-health = 240.0
-build_time_seconds = 11.0
+display_name = "Covenant Pillbox"
+health = 250.0
+build_time_seconds = 10.0
 model_file = "building_pillbox.glb#Scene0"
 [buildings.cost]
-fuel = 60.0
-scrap = 95.0
+fuel = 50.0
+scrap = 100.0
 
 [[buildings]]
 id = "aa_gun"
-display_name = "Flak Battery"
-health = 240.0
-build_time_seconds = 16.0
+display_name = "Covenant AA Gun"
+health = 250.0
+build_time_seconds = 15.0
 model_file = "building_aa_gun.glb#Scene0"
 [buildings.cost]
-fuel = 85.0
-scrap = 140.0
+fuel = 75.0
+scrap = 150.0
 
 [[buildings]]
 id = "tank_trap"
-display_name = "Barrier"
+display_name = "Covenant Barrier"
 health = 100.0
 build_time_seconds = 5.0
 model_file = "building_tank_trap.glb#Scene0"
 [buildings.cost]
 scrap = 50.0
 
-# ── Starting Loadouts ────────────────────────────────────────────────────────
 [[loadouts]]
 [[loadouts.buildings]]
 building = "command_bunker"
 dx = 0
 dy = 0
 [[loadouts.buildings]]
-building = "refinery"
-dx = 2
-dy = 0
+building = "pillbox"
+dx = 3
+dy = -1
 [[loadouts.buildings]]
-building = "barracks"
+building = "workshop"
 dx = 0
 dy = 2
 [[loadouts.units]]
@@ -290,35 +283,3 @@ dy = 4
 unit = "heavy_weapons"
 dx = 3
 dy = 4
-
-[[loadouts]]
-[[loadouts.buildings]]
-building = "command_bunker"
-dx = 0
-dy = 0
-[[loadouts.buildings]]
-building = "refinery"
-dx = 2
-dy = 0
-[[loadouts.units]]
-unit = "riflemen"
-dx = 0
-dy = 4
-[[loadouts.units]]
-unit = "riflemen"
-dx = 1
-dy = 4
-[[loadouts.units]]
-unit = "riflemen"
-dx = 2
-dy = 4
-
-[[loadouts]]
-[[loadouts.buildings]]
-building = "command_bunker"
-dx = 0
-dy = 0
-[[loadouts.units]]
-unit = "riflemen"
-dx = 0
-dy = 3
