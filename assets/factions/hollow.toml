@@ -1,6 +1,6 @@
 id = "hollow"
 display_name = "The Hollow"
-color = [0.70, 0.10, 0.70]
+color = [0.75, 0.05, 0.90]
 default_opponent = "combine"
 
 [[units]]
@@ -17,7 +17,7 @@ vision_range = 6.0
 build_time_seconds = 8.0
 produced_at = ["barracks"]
 ability_q = "suppressing_fire"
-model_file = "unit_riflemen.glb#Scene0"
+model_file = "POLYGON_SciFi_Horror_SourceFiles_v2/SourceFiles/SciFiHorror/FBX/Characters/SM_Chr_Zub_01.glb#Scene0"
 description = "Moves in formation. Coordination suggests memory rather than command. Do not engage at close range."
 [units.production_cost]
 scrap = 50.0
@@ -37,7 +37,7 @@ vision_range = 5.0
 build_time_seconds = 14.0
 produced_at = ["barracks"]
 ability_q = "suppressing_fire"
-model_file = "unit_heavy_weapons.glb#Scene0"
+model_file = "POLYGON_CyberCity_SourceFiles_v3/SourceFiles/FBX/Characters/Individual/SM_Chr_Robot_Damaged_01.glb#Scene0"
 description = "Joints that bend wrong. Carries weight no organic frame should manage. Suppression fire barely registers."
 [units.production_cost]
 fuel = 10.0
@@ -58,7 +58,7 @@ vision_range = 10.0
 build_time_seconds = 18.0
 produced_at = ["motor_pool"]
 ability_q = "smoke_screen"
-model_file = "unit_light_vehicle.glb#Scene0"
+model_file = "POLYGON_CyberCity_SourceFiles_v3/SourceFiles/FBX/Vehicles/SM_Veh_SUV_01.glb#Scene0"
 description = "Six-legged platform. Origin: unknown. Speed: compensates for design. Has not been confirmed to have a driver."
 [units.production_cost]
 fuel = 80.0
@@ -79,7 +79,7 @@ vision_range = 4.0
 build_time_seconds = 35.0
 produced_at = ["motor_pool"]
 ability_q = "armor_overdrive"
-model_file = "unit_heavy_armor.glb#Scene0"
+model_file = "POLYGON_CyberCity_SourceFiles_v3/SourceFiles/FBX/Vehicles/SM_Veh_Truck_01.glb#Scene0"
 description = "First confirmed sighting: the Pale Ground. Has not stopped moving since. Do not engage without armor support."
 [units.production_cost]
 fuel = 250.0
@@ -91,7 +91,7 @@ id = "command_bunker"
 display_name = "Hollow Nexus"
 health = 1200.0
 build_time_seconds = 90.0
-model_file = "building_command_bunker.glb#Scene0"
+model_file = "POLYGON_SciFi_Horror_SourceFiles_v2/SourceFiles/SciFiHorror/FBX/Buildings/SM_Bld_Cockpit_01.glb#Scene0"
 description = "Central node. Disrupting it causes the surrounding Hollow to lose coherence — temporarily."
 [buildings.cost]
 fuel = 300.0
@@ -103,7 +103,7 @@ display_name = "Hollow Hive"
 health = 600.0
 build_time_seconds = 40.0
 produces = ["riflemen", "heavy_weapons"]
-model_file = "building_barracks.glb#Scene0"
+model_file = "POLYGON_SciFi_Horror_SourceFiles_v2/SourceFiles/SciFiHorror/FBX/Buildings/SM_Bld_Alien_Pillar_01.glb#Scene0"
 description = "Interior layout has no human analogue. Units emerge fully formed. How long they have been waiting is not known."
 [buildings.cost]
 fuel = 100.0
@@ -115,7 +115,7 @@ display_name = "Hollow Incubator"
 health = 600.0
 build_time_seconds = 40.0
 produces = ["light_vehicle", "heavy_armor"]
-model_file = "building_motor_pool.glb#Scene0"
+model_file = "POLYGON_SciFi_Horror_SourceFiles_v2/SourceFiles/SciFiHorror/FBX/Buildings/SM_Bld_Wall_Reactor_01.glb#Scene0"
 description = "Vehicles here were not assembled. They grew."
 [buildings.cost]
 fuel = 250.0
@@ -127,7 +127,7 @@ display_name = "Hollow Extractor"
 health = 500.0
 build_time_seconds = 25.0
 trickle_fuel = 5.0
-model_file = "building_refinery.glb#Scene0"
+model_file = "POLYGON_SciFi_Horror_SourceFiles_v2/SourceFiles/SciFiHorror/FBX/Buildings/SM_Bld_Wall_Reactor_02.glb#Scene0"
 description = "Taps something beneath the surface. The output is close enough to fuel to function."
 [buildings.cost]
 fuel = 200.0
@@ -139,7 +139,7 @@ display_name = "Hollow Scrap Pile"
 health = 350.0
 build_time_seconds = 25.0
 trickle_scrap = 4.0
-model_file = "building_scrapyard.glb#Scene0"
+model_file = "POLYGON_SciFi_Horror_SourceFiles_v2/SourceFiles/SciFiHorror/FBX/Buildings/SM_Bld_Alien_Pillar_02.glb#Scene0"
 description = "It takes things. Breaks them into components. Uses them. We haven't identified the logic."
 [buildings.cost]
 fuel = 50.0
@@ -151,7 +151,7 @@ display_name = "Hollow Spawning Pool"
 health = 350.0
 build_time_seconds = 15.0
 trickle_manpower = 2.0
-model_file = "building_recruitment_office.glb#Scene0"
+model_file = "POLYGON_SciFi_Horror_SourceFiles_v2/SourceFiles/SciFiHorror/FBX/Buildings/SM_Bld_Alien_Pillar_03.glb#Scene0"
 description = "Recruits do not come here. They are produced here."
 [buildings.cost]
 fuel = 50.0
@@ -163,7 +163,7 @@ display_name = "Hollow Forge"
 health = 800.0
 build_time_seconds = 60.0
 trickle_scrap = 1.0
-model_file = "building_foundry.glb#Scene0"
+model_file = "POLYGON_SciFi_Horror_SourceFiles_v2/SourceFiles/SciFiHorror/FBX/Buildings/SM_Bld_Wall_Reactor_01.glb#Scene0"
 description = "Heat without fire. The forging process has not been observed directly by anyone who returned to report."
 [buildings.cost]
 fuel = 400.0
@@ -174,7 +174,7 @@ id = "airfield"
 display_name = "Hollow Launch Site"
 health = 800.0
 build_time_seconds = 60.0
-model_file = "building_airfield.glb#Scene0"
+model_file = "POLYGON_SciFi_Horror_SourceFiles_v2/SourceFiles/SciFiHorror/FBX/Buildings/SM_Bld_Cockpit_01.glb#Scene0"
 description = "What launches from here has not matched any known flight profile."
 [buildings.cost]
 fuel = 500.0
@@ -185,7 +185,7 @@ id = "workshop"
 display_name = "Hollow Workshop"
 health = 500.0
 build_time_seconds = 25.0
-model_file = "building_workshop.glb#Scene0"
+model_file = "POLYGON_SciFi_Horror_SourceFiles_v2/SourceFiles/SciFiHorror/FBX/Buildings/SM_Bld_Wall_Reactor_02.glb#Scene0"
 description = "Maintenance in progress, always. We cannot identify what it is maintaining."
 [buildings.cost]
 fuel = 150.0
@@ -196,7 +196,7 @@ id = "research_lab"
 display_name = "Hollow Lab"
 health = 600.0
 build_time_seconds = 40.0
-model_file = "building_research_lab.glb#Scene0"
+model_file = "POLYGON_SciFi_Horror_SourceFiles_v2/SourceFiles/SciFiHorror/FBX/Buildings/SM_Bld_Cockpit_01.glb#Scene0"
 description = "Instruments inside are arranged in ways that suggest purpose. The purpose is not human."
 [buildings.cost]
 fuel = 250.0
@@ -208,7 +208,7 @@ display_name = "Hollow Cache"
 health = 350.0
 build_time_seconds = 15.0
 trickle_manpower = 1.0
-model_file = "building_supply_depot.glb#Scene0"
+model_file = "POLYGON_SciFi_Horror_SourceFiles_v2/SourceFiles/SciFiHorror/FBX/Buildings/SM_Bld_Alien_Pillar_01.glb#Scene0"
 description = "Full. Always full. We do not know the supply chain."
 [buildings.cost]
 fuel = 100.0
@@ -220,7 +220,7 @@ display_name = "Hollow Sentinel"
 health = 250.0
 build_time_seconds = 10.0
 vision_radius = 8.0
-model_file = "building_watchtower.glb#Scene0"
+model_file = "POLYGON_SciFi_Horror_SourceFiles_v2/SourceFiles/SciFiHorror/FBX/Buildings/SM_Bld_Alien_Pillar_02.glb#Scene0"
 description = "No visible occupant. It watches regardless."
 [buildings.cost]
 fuel = 50.0
@@ -231,7 +231,7 @@ id = "repair_bay"
 display_name = "Hollow Regeneration Pod"
 health = 500.0
 build_time_seconds = 25.0
-model_file = "building_repair_bay.glb#Scene0"
+model_file = "POLYGON_SciFi_Horror_SourceFiles_v2/SourceFiles/SciFiHorror/FBX/Buildings/SM_Bld_Wall_Reactor_01.glb#Scene0"
 description = "Units that enter damaged leave whole. The process takes seconds."
 [buildings.cost]
 fuel = 100.0
@@ -242,7 +242,7 @@ id = "pillbox"
 display_name = "Hollow Spine"
 health = 250.0
 build_time_seconds = 10.0
-model_file = "building_pillbox.glb#Scene0"
+model_file = "POLYGON_SciFi_Horror_SourceFiles_v2/SourceFiles/SciFiHorror/FBX/Buildings/SM_Bld_Alien_Pillar_03.glb#Scene0"
 description = "Grew overnight. The material is biological in origin."
 [buildings.cost]
 fuel = 50.0
@@ -253,7 +253,7 @@ id = "aa_gun"
 display_name = "Hollow AA Spore"
 health = 250.0
 build_time_seconds = 15.0
-model_file = "building_aa_gun.glb#Scene0"
+model_file = "POLYGON_SciFi_Horror_SourceFiles_v2/SourceFiles/SciFiHorror/FBX/Buildings/SM_Bld_Alien_Wall_01.glb#Scene0"
 description = "Organic launch platform. Accuracy is inexplicable without targeting systems."
 [buildings.cost]
 fuel = 75.0
@@ -264,7 +264,7 @@ id = "tank_trap"
 display_name = "Hollow Tendril"
 health = 100.0
 build_time_seconds = 5.0
-model_file = "building_tank_trap.glb#Scene0"
+model_file = "POLYGON_SciFi_Horror_SourceFiles_v2/SourceFiles/SciFiHorror/FBX/Buildings/SM_Bld_Alien_Wall_02.glb#Scene0"
 description = "These were roots once. Something changed."
 [buildings.cost]
 scrap = 50.0

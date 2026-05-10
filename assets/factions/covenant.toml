@@ -1,6 +1,6 @@
 id = "covenant"
 display_name = "Covenant"
-color = [0.20, 0.40, 0.90]
+color = [0.05, 0.35, 0.95]
 default_opponent = "combine"
 
 [[units]]
@@ -17,7 +17,7 @@ vision_range = 6.0
 build_time_seconds = 8.0
 produced_at = ["barracks"]
 ability_q = "suppressing_fire"
-model_file = "unit_riflemen.glb#Scene0"
+model_file = "POLYGON_CyberCity_SourceFiles_v3/SourceFiles/FBX/Characters/Individual/SM_Chr_Cyborg_Male_01.glb#Scene0"
 description = "Trained to discipline and purpose. The Covenant does not field soldiers — it fields instruments."
 [units.production_cost]
 scrap = 50.0
@@ -37,7 +37,7 @@ vision_range = 5.0
 build_time_seconds = 14.0
 produced_at = ["barracks"]
 ability_q = "suppressing_fire"
-model_file = "unit_heavy_weapons.glb#Scene0"
+model_file = "POLYGON_CyberCity_SourceFiles_v3/SourceFiles/FBX/Characters/Individual/SM_Chr_Female_Soldier_01.glb#Scene0"
 description = "Committed beyond what contracts allow. The suppression is thorough; the cause is not questioned."
 [units.production_cost]
 fuel = 10.0
@@ -58,7 +58,7 @@ vision_range = 10.0
 build_time_seconds = 18.0
 produced_at = ["motor_pool"]
 ability_q = "smoke_screen"
-model_file = "unit_light_vehicle.glb#Scene0"
+model_file = "POLYGON_CyberCity_SourceFiles_v3/SourceFiles/FBX/Vehicles/SM_Veh_SUV_01.glb#Scene0"
 description = "Eyes and distance. Deployed ahead of the sequence, watching for what was promised."
 [units.production_cost]
 fuel = 80.0
@@ -79,7 +79,7 @@ vision_range = 4.0
 build_time_seconds = 35.0
 produced_at = ["motor_pool"]
 ability_q = "armor_overdrive"
-model_file = "unit_heavy_armor.glb#Scene0"
+model_file = "POLYGON_CyberCity_SourceFiles_v3/SourceFiles/FBX/Vehicles/SM_Veh_Truck_01.glb#Scene0"
 description = "The Covenant's final argument. When it moves, the calculation is already finished."
 [units.production_cost]
 fuel = 250.0
@@ -91,7 +91,7 @@ id = "command_bunker"
 display_name = "Covenant Sanctum"
 health = 1200.0
 build_time_seconds = 90.0
-model_file = "building_command_bunker.glb#Scene0"
+model_file = "POLYGON_Western_Pack_Source_Files_v4/SourceFiles/FBX/SM_Bld_Church_01.glb#Scene0"
 description = "The seat of the work. Nineteen years of research live in these walls."
 [buildings.cost]
 fuel = 300.0
@@ -103,7 +103,7 @@ display_name = "Covenant Barracks"
 health = 600.0
 build_time_seconds = 40.0
 produces = ["riflemen", "heavy_weapons"]
-model_file = "building_barracks.glb#Scene0"
+model_file = "POLYGON_Western_Pack_Source_Files_v4/SourceFiles/FBX/SM_Bld_Double_01.glb#Scene0"
 description = "Where belief becomes capability. The recruits know only the mission; that is enough."
 [buildings.cost]
 fuel = 100.0
@@ -115,7 +115,7 @@ display_name = "Covenant Motor Pool"
 health = 600.0
 build_time_seconds = 40.0
 produces = ["light_vehicle", "heavy_armor"]
-model_file = "building_motor_pool.glb#Scene0"
+model_file = "POLYGON_Western_Pack_Source_Files_v4/SourceFiles/FBX/SM_Bld_Saloon_01.glb#Scene0"
 description = "The Covenant keeps its vehicles in order. Discipline in the machine; discipline in the soldier."
 [buildings.cost]
 fuel = 250.0
@@ -127,7 +127,7 @@ display_name = "Covenant Refinery"
 health = 500.0
 build_time_seconds = 25.0
 trickle_fuel = 5.0
-model_file = "building_refinery.glb#Scene0"
+model_file = "POLYGON_Western_Pack_Source_Files_v4/SourceFiles/FBX/SM_Bld_TowerClock_01.glb#Scene0"
 description = "Fuel for the sequence. Every drop serves a purpose already calculated."
 [buildings.cost]
 fuel = 200.0
@@ -139,7 +139,7 @@ display_name = "Covenant Scrapyard"
 health = 350.0
 build_time_seconds = 25.0
 trickle_scrap = 4.0
-model_file = "building_scrapyard.glb#Scene0"
+model_file = "POLYGON_Western_Pack_Source_Files_v4/SourceFiles/FBX/SM_Bld_Shed_01.glb#Scene0"
 description = "Material salvaged and repurposed. The Architect wastes nothing."
 [buildings.cost]
 fuel = 50.0
@@ -151,7 +151,7 @@ display_name = "Covenant Recruitment"
 health = 350.0
 build_time_seconds = 15.0
 trickle_manpower = 2.0
-model_file = "building_recruitment_office.glb#Scene0"
+model_file = "POLYGON_Western_Pack_Source_Files_v4/SourceFiles/FBX/SM_Bld_Double_Deck_01.glb#Scene0"
 description = "Those who come seeking purpose find it here. The Covenant has always had more volunteers than it needed."
 [buildings.cost]
 fuel = 50.0
@@ -163,7 +163,7 @@ display_name = "Covenant Foundry"
 health = 800.0
 build_time_seconds = 60.0
 trickle_scrap = 1.0
-model_file = "building_foundry.glb#Scene0"
+model_file = "POLYGON_Western_Pack_Source_Files_v4/SourceFiles/FBX/SM_Bld_TrainStation_01.glb#Scene0"
 description = "Where the Architect's requirements become material reality."
 [buildings.cost]
 fuel = 400.0
@@ -174,7 +174,7 @@ id = "airfield"
 display_name = "Covenant Airfield"
 health = 800.0
 build_time_seconds = 60.0
-model_file = "building_airfield.glb#Scene0"
+model_file = "POLYGON_Western_Pack_Source_Files_v4/SourceFiles/FBX/SM_Bld_Large_01.glb#Scene0"
 description = "Cleared for authorized transit. The sequence requires mobility at scale."
 [buildings.cost]
 fuel = 500.0
@@ -185,7 +185,7 @@ id = "workshop"
 display_name = "Covenant Workshop"
 health = 500.0
 build_time_seconds = 25.0
-model_file = "building_workshop.glb#Scene0"
+model_file = "POLYGON_Western_Pack_Source_Files_v4/SourceFiles/FBX/SM_Bld_Jail_01.glb#Scene0"
 description = "Maintenance is devotion. The machines serve; they must be served in return."
 [buildings.cost]
 fuel = 150.0
@@ -196,7 +196,7 @@ id = "research_lab"
 display_name = "Covenant Lab"
 health = 600.0
 build_time_seconds = 40.0
-model_file = "building_research_lab.glb#Scene0"
+model_file = "POLYGON_Western_Pack_Source_Files_v4/SourceFiles/FBX/SM_Bld_Church_01.glb#Scene0"
 description = "Where the old findings are cross-referenced with the new. The work compounds."
 [buildings.cost]
 fuel = 250.0
@@ -208,7 +208,7 @@ display_name = "Covenant Supply Depot"
 health = 350.0
 build_time_seconds = 15.0
 trickle_manpower = 1.0
-model_file = "building_supply_depot.glb#Scene0"
+model_file = "POLYGON_Western_Pack_Source_Files_v4/SourceFiles/FBX/SM_Bld_Single_Deck_01.glb#Scene0"
 description = "The Covenant provisions in advance. Improvisation is a failure of planning."
 [buildings.cost]
 fuel = 100.0
@@ -220,7 +220,7 @@ display_name = "Covenant Watchtower"
 health = 250.0
 build_time_seconds = 10.0
 vision_radius = 8.0
-model_file = "building_watchtower.glb#Scene0"
+model_file = "POLYGON_Western_Pack_Source_Files_v4/SourceFiles/FBX/SM_Bld_Tower_01.glb#Scene0"
 description = "Eyes on the horizon. The Architect has always watched before moving."
 [buildings.cost]
 fuel = 50.0
@@ -231,7 +231,7 @@ id = "repair_bay"
 display_name = "Covenant Repair Bay"
 health = 500.0
 build_time_seconds = 25.0
-model_file = "building_repair_bay.glb#Scene0"
+model_file = "POLYGON_Western_Pack_Source_Files_v4/SourceFiles/FBX/SM_Bld_Windmill_01.glb#Scene0"
 description = "A damaged instrument is a liability. Restore or replace — no other option."
 [buildings.cost]
 fuel = 100.0
@@ -242,7 +242,7 @@ id = "pillbox"
 display_name = "Covenant Pillbox"
 health = 250.0
 build_time_seconds = 10.0
-model_file = "building_pillbox.glb#Scene0"
+model_file = "POLYGON_Western_Pack_Source_Files_v4/SourceFiles/FBX/SM_Bld_Single_01.glb#Scene0"
 description = "Prepared position. The Covenant fortifies what it intends to keep."
 [buildings.cost]
 fuel = 50.0
@@ -253,7 +253,7 @@ id = "aa_gun"
 display_name = "Covenant AA Gun"
 health = 250.0
 build_time_seconds = 15.0
-model_file = "building_aa_gun.glb#Scene0"
+model_file = "POLYGON_Western_Pack_Source_Files_v4/SourceFiles/FBX/SM_Bld_TowerClock_01.glb#Scene0"
 description = "Air denial asset. The sequence does not account for interruption from above."
 [buildings.cost]
 fuel = 75.0
@@ -264,7 +264,7 @@ id = "tank_trap"
 display_name = "Covenant Barrier"
 health = 100.0
 build_time_seconds = 5.0
-model_file = "building_tank_trap.glb#Scene0"
+model_file = "POLYGON_Western_Pack_Source_Files_v4/SourceFiles/FBX/SM_Bld_Shed_01.glb#Scene0"
 description = "Placed with intent. Every obstacle in a Covenant position was placed there for a reason."
 [buildings.cost]
 scrap = 50.0

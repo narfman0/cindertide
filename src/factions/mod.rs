@@ -96,6 +96,17 @@ pub struct LoadedFactions {
 }
 
 impl LoadedFactions {
+    /// Look up a unit definition for a specific faction.
+    /// Falls back to the global units map.
+    pub fn faction_unit(&self, faction_id: &str, unit_id: &str) -> Option<&UnitDef> {
+        if let Some(faction) = self.factions.get(faction_id) {
+            if let Some(def) = faction.units.iter().find(|u| u.id == unit_id) {
+                return Some(def);
+            }
+        }
+        self.units.get(unit_id)
+    }
+
     /// Look up a building definition for a specific faction.
     /// Falls back to the global buildings map (since building IDs are shared across factions).
     pub fn faction_building(&self, faction_id: &str, building_id: &str) -> Option<&BuildingDef> {

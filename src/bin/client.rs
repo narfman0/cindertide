@@ -2491,6 +2491,7 @@ fn spawn_unit_visuals(
     mut visual_entities: ResMut<VisualEntities>,
     model_assets: Res<ModelAssets>,
     asset_server: Res<AssetServer>,
+    loaded: Res<LoadedFactions>,
     units: Query<(Entity, &UnitPos, &Faction, &UnitTypeId), Added<UnitTypeId>>,
 ) {
     for (entity, pos, faction, unit_type) in &units {
@@ -2499,7 +2500,10 @@ fn spawn_unit_visuals(
         // Attempt to load a GLB model if CINDERTIDE_MODEL_PATH is set.
         // Scale factor 0.01 assumes Synty-style centimetre-unit exports — tune per asset pack.
         let visual = if let Some(ref dir) = model_assets.path {
-            let glb_name = unit_model_name(unit_type);
+            let glb_name = loaded.faction_unit(faction.id(), unit_type.id())
+                .map(|def| def.model_file.clone())
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| unit_model_name(unit_type));
             // Strip the "#Scene0" fragment to get the bare file name for existence check.
             let file_name = glb_name.split('#').next().unwrap_or(&glb_name);
             let full_path = dir.join(file_name);
@@ -2583,6 +2587,7 @@ fn spawn_building_visuals(
     mut visual_entities: ResMut<VisualEntities>,
     model_assets: Res<ModelAssets>,
     asset_server: Res<AssetServer>,
+    loaded: Res<LoadedFactions>,
     buildings: Query<(Entity, &BuildingPos, &Faction, &BuildingTypeId), Added<BuildingTypeId>>,
 ) {
     for (entity, pos, faction, building_type) in &buildings {
@@ -2594,7 +2599,10 @@ fn spawn_building_visuals(
         // Attempt to load a GLB model if CINDERTIDE_MODEL_PATH is set.
         // Scale factor 0.015 assumes Synty-style centimetre-unit exports — tune per asset pack.
         let visual = if let Some(ref dir) = model_assets.path {
-            let glb_name = building_model_name(building_type);
+            let glb_name = loaded.faction_building(faction.id(), building_type.id())
+                .map(|def| def.model_file.clone())
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| building_model_name(building_type));
             let file_name = glb_name.split('#').next().unwrap_or(&glb_name);
             let full_path = dir.join(file_name);
             if full_path.exists() {
@@ -5658,10 +5666,10 @@ fn terrain_color(terrain: &cindertide::map::TerrainType) -> Color {
 
 fn faction_color(faction: &Faction) -> Color {
     match faction.id() {
-        "combine"  => Color::srgb(0.90, 0.75, 0.10),
-        "ironborn" => Color::srgb(0.60, 0.60, 0.65),
-        "covenant" => Color::srgb(0.20, 0.40, 0.90),
-        "hollow"   => Color::srgb(0.70, 0.10, 0.70),
+        "combine"  => Color::srgb(0.98, 0.82, 0.05), // electric gold
+        "ironborn" => Color::srgb(0.95, 0.38, 0.05), // forge orange-red
+        "covenant" => Color::srgb(0.05, 0.35, 0.95), // deep electric blue
+        "hollow"   => Color::srgb(0.75, 0.05, 0.90), // vivid neon purple
         _          => Color::srgb(0.50, 0.50, 0.50),
     }
 }

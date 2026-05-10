@@ -1,6 +1,6 @@
 id = "ironborn"
 display_name = "Ironborn"
-color = [0.60, 0.60, 0.65]
+color = [0.95, 0.38, 0.05]
 default_opponent = "combine"
 
 [[units]]
@@ -17,7 +17,7 @@ vision_range = 6.0
 build_time_seconds = 8.0
 produced_at = ["barracks"]
 ability_q = "suppressing_fire"
-model_file = "unit_riflemen.glb#Scene0"
+model_file = "POLYGON_CyberCity_SourceFiles_v3/SourceFiles/FBX/Characters/Individual/SM_Chr_Mercenary_Male_01.glb#Scene0"
 description = "Backbone of the Ironfields. They built this place and they'll defend it the same way."
 [units.production_cost]
 scrap = 50.0
@@ -37,7 +37,7 @@ vision_range = 5.0
 build_time_seconds = 14.0
 produced_at = ["barracks"]
 ability_q = "suppressing_fire"
-model_file = "unit_heavy_weapons.glb#Scene0"
+model_file = "POLYGON_CyberCity_SourceFiles_v3/SourceFiles/FBX/Characters/Individual/SM_Chr_Robot_Mercenary_01.glb#Scene0"
 description = "Carries enough iron to knock a building sideways. Slow — but nothing they point at stays standing."
 [units.production_cost]
 fuel = 10.0
@@ -58,7 +58,7 @@ vision_range = 10.0
 build_time_seconds = 18.0
 produced_at = ["motor_pool"]
 ability_q = "smoke_screen"
-model_file = "unit_light_vehicle.glb#Scene0"
+model_file = "POLYGON_CyberCity_SourceFiles_v3/SourceFiles/FBX/Vehicles/SM_Veh_SUV_01.glb#Scene0"
 description = "Four legs, full tank, no orders needed. Know the terrain before Corp does."
 [units.production_cost]
 fuel = 80.0
@@ -79,7 +79,7 @@ vision_range = 4.0
 build_time_seconds = 35.0
 produced_at = ["motor_pool"]
 ability_q = "armor_overdrive"
-model_file = "unit_heavy_armor.glb#Scene0"
+model_file = "POLYGON_CyberCity_SourceFiles_v3/SourceFiles/FBX/Vehicles/SM_Veh_Truck_01.glb#Scene0"
 description = "Assembled from salvage, proof-tested in the field. The Corp didn't build better — we just built harder."
 [units.production_cost]
 fuel = 250.0
@@ -91,7 +91,7 @@ id = "command_bunker"
 display_name = "Iron Citadel"
 health = 1200.0
 build_time_seconds = 90.0
-model_file = "building_command_bunker.glb#Scene0"
+model_file = "POLYGON_Goblin_War_Camp_SourceFiles_v2/SourceFiles/FBX/Buildings/SM_Bld_HeadQuarters_01.glb#Scene0"
 description = "Heartbeat of the Ironfields. If this falls, we fall. Not once have we let that happen."
 [buildings.cost]
 fuel = 300.0
@@ -103,7 +103,7 @@ display_name = "Forge Barracks"
 health = 600.0
 build_time_seconds = 40.0
 produces = ["riflemen", "heavy_weapons"]
-model_file = "building_barracks.glb#Scene0"
+model_file = "POLYGON_Goblin_War_Camp_SourceFiles_v2/SourceFiles/FBX/Buildings/SM_Bld_Barracks_01.glb#Scene0"
 description = "Where salvagers become soldiers. The training is hard; the work is harder."
 [buildings.cost]
 fuel = 100.0
@@ -115,7 +115,7 @@ display_name = "Walker Bay"
 health = 600.0
 build_time_seconds = 40.0
 produces = ["light_vehicle", "heavy_armor"]
-model_file = "building_motor_pool.glb#Scene0"
+model_file = "POLYGON_Goblin_War_Camp_SourceFiles_v2/SourceFiles/FBX/Buildings/SM_Bld_Mess_Hall_01.glb#Scene0"
 description = "Built the first walker here out of crane parts and stubbornness. Still the same principle."
 [buildings.cost]
 fuel = 250.0
@@ -127,7 +127,7 @@ display_name = "Fuel Extractor"
 health = 500.0
 build_time_seconds = 25.0
 trickle_fuel = 5.0
-model_file = "building_refinery.glb#Scene0"
+model_file = "POLYGON_Goblin_War_Camp_SourceFiles_v2/SourceFiles/FBX/Buildings/SM_Bld_Mine_Tower_01.glb#Scene0"
 description = "Runs on will as much as engineering. Keeps the whole operation moving."
 [buildings.cost]
 fuel = 200.0
@@ -139,7 +139,7 @@ display_name = "Scrap Heap"
 health = 350.0
 build_time_seconds = 25.0
 trickle_scrap = 4.0
-model_file = "building_scrapyard.glb#Scene0"
+model_file = "POLYGON_Goblin_War_Camp_SourceFiles_v2/SourceFiles/FBX/Buildings/SM_Bld_Platform_01.glb#Scene0"
 description = "Everything has a second use. That's not philosophy — it's how we stay alive."
 [buildings.cost]
 fuel = 50.0
@@ -151,7 +151,7 @@ display_name = "Enlistment Post"
 health = 350.0
 build_time_seconds = 15.0
 trickle_manpower = 2.0
-model_file = "building_recruitment_office.glb#Scene0"
+model_file = "POLYGON_Goblin_War_Camp_SourceFiles_v2/SourceFiles/FBX/Buildings/SM_Bld_Mess_Hall_01.glb#Scene0"
 description = "Word gets out. People come. Corp never understood why anyone would volunteer."
 [buildings.cost]
 fuel = 50.0
@@ -163,7 +163,7 @@ display_name = "Great Foundry"
 health = 800.0
 build_time_seconds = 60.0
 trickle_scrap = 1.0
-model_file = "building_foundry.glb#Scene0"
+model_file = "POLYGON_Goblin_War_Camp_SourceFiles_v2/SourceFiles/FBX/Buildings/SM_Bld_Workshop_01.glb#Scene0"
 description = "Oldest structure on the field. Pre-dates Corp, pre-dates the war. Will likely outlast both."
 [buildings.cost]
 fuel = 400.0
@@ -174,7 +174,7 @@ id = "airfield"
 display_name = "Launch Pad"
 health = 800.0
 build_time_seconds = 60.0
-model_file = "building_airfield.glb#Scene0"
+model_file = "POLYGON_Goblin_War_Camp_SourceFiles_v2/SourceFiles/FBX/Buildings/SM_Bld_Tower_01.glb#Scene0"
 description = "They said we couldn't maintain it. We maintain it."
 [buildings.cost]
 fuel = 500.0
@@ -185,7 +185,7 @@ id = "workshop"
 display_name = "Iron Workshop"
 health = 500.0
 build_time_seconds = 25.0
-model_file = "building_workshop.glb#Scene0"
+model_file = "POLYGON_Goblin_War_Camp_SourceFiles_v2/SourceFiles/FBX/Buildings/SM_Bld_Workshop_01.glb#Scene0"
 description = "If it's broken we fix it. If it's beyond fixing we use it for parts."
 [buildings.cost]
 fuel = 150.0
@@ -196,7 +196,7 @@ id = "research_lab"
 display_name = "Iron Lab"
 health = 600.0
 build_time_seconds = 40.0
-model_file = "building_research_lab.glb#Scene0"
+model_file = "POLYGON_Goblin_War_Camp_SourceFiles_v2/SourceFiles/FBX/Buildings/SM_Bld_Shaman_01.glb#Scene0"
 description = "Not what Corp would call research. We'd call it figuring out why it keeps breaking."
 [buildings.cost]
 fuel = 250.0
@@ -208,7 +208,7 @@ display_name = "Iron Supply Cache"
 health = 350.0
 build_time_seconds = 15.0
 trickle_manpower = 1.0
-model_file = "building_supply_depot.glb#Scene0"
+model_file = "POLYGON_Goblin_War_Camp_SourceFiles_v2/SourceFiles/FBX/Buildings/SM_Bld_Mess_Hall_01.glb#Scene0"
 description = "Stocked, locked, and ours. Nobody touches this without a crew lead's sign-off."
 [buildings.cost]
 fuel = 100.0
@@ -220,7 +220,7 @@ display_name = "Iron Watchtower"
 health = 250.0
 build_time_seconds = 10.0
 vision_radius = 8.0
-model_file = "building_watchtower.glb#Scene0"
+model_file = "POLYGON_Goblin_War_Camp_SourceFiles_v2/SourceFiles/FBX/Buildings/SM_Bld_Mine_Tower_01.glb#Scene0"
 description = "Eyes on the Ironfields. Nobody approaches without us knowing first."
 [buildings.cost]
 fuel = 50.0
@@ -231,7 +231,7 @@ id = "repair_bay"
 display_name = "Repair Forge"
 health = 500.0
 build_time_seconds = 25.0
-model_file = "building_repair_bay.glb#Scene0"
+model_file = "POLYGON_Goblin_War_Camp_SourceFiles_v2/SourceFiles/FBX/Buildings/SM_Bld_Workshop_01.glb#Scene0"
 description = "Walk in wrecked, drive out ready. That's the standard."
 [buildings.cost]
 fuel = 100.0
@@ -242,7 +242,7 @@ id = "pillbox"
 display_name = "Iron Pillbox"
 health = 250.0
 build_time_seconds = 10.0
-model_file = "building_pillbox.glb#Scene0"
+model_file = "POLYGON_Goblin_War_Camp_SourceFiles_v2/SourceFiles/FBX/Buildings/SM_Bld_Tower_Base_01.glb#Scene0"
 description = "Old design. Poured it ourselves. It holds."
 [buildings.cost]
 fuel = 50.0
@@ -253,7 +253,7 @@ id = "aa_gun"
 display_name = "Ironborn AA Emplacement"
 health = 250.0
 build_time_seconds = 15.0
-model_file = "building_aa_gun.glb#Scene0"
+model_file = "POLYGON_Goblin_War_Camp_SourceFiles_v2/SourceFiles/FBX/Buildings/SM_Bld_Tower_02.glb#Scene0"
 description = "Ours moved first. Theirs moved last."
 [buildings.cost]
 fuel = 75.0
@@ -264,7 +264,7 @@ id = "tank_trap"
 display_name = "Iron Spike"
 health = 100.0
 build_time_seconds = 5.0
-model_file = "building_tank_trap.glb#Scene0"
+model_file = "POLYGON_Goblin_War_Camp_SourceFiles_v2/SourceFiles/FBX/Buildings/SM_Bld_Tower_Base_02.glb#Scene0"
 description = "Scrap and spite. Works every time."
 [buildings.cost]
 scrap = 50.0
