@@ -986,7 +986,7 @@ fn handle_production_enqueue(In(params): In<Option<Value>>, world: &mut World) -
     })?;
 
     // Snapshot building state.
-    let (bt, is_built) = {
+    let (bt, building_faction, is_built) = {
         let r = world.get_entity(building_entity).map_err(|_| BrpError {
             code: -32602,
             message: format!("building entity {building_id} not found"),
@@ -997,13 +997,14 @@ fn handle_production_enqueue(In(params): In<Option<Value>>, world: &mut World) -
             message: "entity is not a building".into(),
             data: None,
         })?;
+        let building_faction = r.get::<Faction>().cloned().unwrap_or_else(Faction::combine);
         let is_built = r.get::<Built>().is_some();
-        (bt, is_built)
+        (bt, building_faction, is_built)
     };
 
     // Pay from faction pool, then enqueue on building.
     let loaded = world.resource::<LoadedFactions>().clone();
-    let cost = production::unit_production_cost(&unit_type, &loaded);
+    let cost = production::unit_production_cost_for_faction(&unit_type, &building_faction, &loaded);
     {
         let mut fm = world.get_entity_mut(faction_entity).map_err(|_| BrpError {
             code: -32602,
@@ -1023,7 +1024,7 @@ fn handle_production_enqueue(In(params): In<Option<Value>>, world: &mut World) -
                 data: None,
             });
         }
-        if !building_produces(&bt, &loaded).iter().any(|s| *s == unit_type.as_str()) {
+        if !buildings::building_produces_for_faction(&bt, &building_faction, &loaded).iter().any(|s| *s == unit_type.as_str()) {
             return Err(BrpError {
                 code: -32000,
                 message: format!("{} cannot produce {}", bt.id(), unit_type),
@@ -2668,8 +2669,9 @@ fn spawn_unit_at(world: &mut World, faction: Faction, x: i32, y: i32) {
 
 fn spawn_unit_type_at(world: &mut World, faction: Faction, unit_id: &str, x: i32, y: i32) {
     let loaded = world.resource::<LoadedFactions>().clone();
-    let id = if let Some(def) = loaded.units.get(unit_id) {
-        world.spawn(UnitBundle::from_def(def, faction, x, y)).id()
+    // Prefer faction-scoped def so each faction gets their own stats/display name
+    let id = if let Some(def) = loaded.faction_unit(faction.id(), unit_id).cloned() {
+        world.spawn(UnitBundle::from_def(&def, faction, x, y)).id()
     } else {
         world.spawn(UnitBundle::default_riflemen(faction, x, y)).id()
     };

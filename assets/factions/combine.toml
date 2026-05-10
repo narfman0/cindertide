@@ -4,88 +4,94 @@ color = [0.90, 0.75, 0.10]
 ai_script = "ai/combine.lua"
 default_opponent = "ironborn"
 
+# ── Units ────────────────────────────────────────────────────────────────────
+# Combine doctrine: disciplined, high suppression, excellent vision.
+# Costs are slightly higher but every unit punches above its weight class.
+
 [[units]]
 id = "riflemen"
-display_name = "Riflemen"
+display_name = "Enforcer"
 unit_kind = "infantry"
 attack_range = 4.0
 move_speed = 2.5
 health = 80.0
 attack_damage = 12.0
-suppression_value = 15.0
+suppression_value = 18.0
 attack_speed = 1.2
-vision_range = 6.0
+vision_range = 7.0
 build_time_seconds = 8.0
 produced_at = ["barracks"]
 ability_q = "suppressing_fire"
 model_file = "unit_riflemen.glb#Scene0"
-description = "Standard all-rounder infantry"
+description = "Standard-issue Combine infantry. Disciplined and accurate with solid suppression output."
 [units.production_cost]
-scrap = 50.0
+scrap = 55.0
 manpower = 5.0
 
 [[units]]
 id = "heavy_weapons"
-display_name = "Heavy Weapons"
+display_name = "Suppressor"
 unit_kind = "infantry"
-attack_range = 6.0
-move_speed = 1.5
-health = 120.0
-attack_damage = 35.0
-suppression_value = 40.0
+attack_range = 7.0
+move_speed = 1.4
+health = 105.0
+attack_damage = 30.0
+suppression_value = 52.0
 attack_speed = 0.5
-vision_range = 5.0
+vision_range = 6.0
 build_time_seconds = 14.0
 produced_at = ["barracks"]
 ability_q = "suppressing_fire"
 model_file = "unit_heavy_weapons.glb#Scene0"
-description = "Slow heavy hitter, suppression specialist"
+description = "Heavy MG team. Exceptional suppression and long range — the backbone of Combine fire lines."
 [units.production_cost]
 fuel = 10.0
-scrap = 80.0
+scrap = 85.0
 manpower = 5.0
 
 [[units]]
 id = "light_vehicle"
-display_name = "Light Vehicle"
+display_name = "Scout Cruiser"
 unit_kind = "vehicle"
 attack_range = 5.0
-move_speed = 4.0
-health = 100.0
-attack_damage = 20.0
-suppression_value = 10.0
-attack_speed = 0.8
-vision_range = 10.0
+move_speed = 4.5
+health = 90.0
+attack_damage = 18.0
+suppression_value = 8.0
+attack_speed = 0.9
+vision_range = 12.0
 build_time_seconds = 18.0
 produced_at = ["motor_pool"]
 ability_q = "smoke_screen"
 model_file = "unit_light_vehicle.glb#Scene0"
-description = "Fast scout vehicle"
+description = "Fast armored scout. Unmatched vision radius — Combine commanders always know what's ahead."
 [units.production_cost]
-fuel = 80.0
+fuel = 85.0
 scrap = 60.0
 manpower = 3.0
 
 [[units]]
 id = "heavy_armor"
-display_name = "Heavy Armor"
+display_name = "Iron Sentinel"
 unit_kind = "vehicle"
-attack_range = 4.0
+attack_range = 5.0
 move_speed = 1.8
-health = 250.0
-attack_damage = 50.0
-suppression_value = 25.0
-attack_speed = 0.4
-vision_range = 4.0
+health = 240.0
+attack_damage = 45.0
+suppression_value = 22.0
+attack_speed = 0.45
+vision_range = 5.0
 build_time_seconds = 35.0
 produced_at = ["motor_pool"]
 ability_q = "armor_overdrive"
 model_file = "unit_heavy_armor.glb#Scene0"
-description = "Heavy front-line tank"
+description = "Main battle tank. Well-rounded and reliable — the Combine answer to every armored threat."
 [units.production_cost]
-fuel = 250.0
+fuel = 260.0
 scrap = 200.0
 manpower = 5.0
+
+# ── Buildings ────────────────────────────────────────────────────────────────
 
 [[buildings]]
 id = "command_bunker"
@@ -93,7 +99,7 @@ display_name = "Command Bunker"
 health = 1200.0
 build_time_seconds = 90.0
 model_file = "building_command_bunker.glb#Scene0"
-description = "Faction HQ; losing it ends the mission"
+description = "Combine command node. Losing it ends the engagement."
 [buildings.cost]
 fuel = 300.0
 scrap = 200.0
@@ -249,6 +255,7 @@ model_file = "building_tank_trap.glb#Scene0"
 [buildings.cost]
 scrap = 50.0
 
+# ── Starting Loadouts ────────────────────────────────────────────────────────
 [[loadouts]]
 [[loadouts.buildings]]
 building = "command_bunker"
@@ -278,3 +285,35 @@ dy = 4
 unit = "heavy_weapons"
 dx = 3
 dy = 4
+
+[[loadouts]]
+[[loadouts.buildings]]
+building = "command_bunker"
+dx = 0
+dy = 0
+[[loadouts.buildings]]
+building = "refinery"
+dx = 2
+dy = 0
+[[loadouts.units]]
+unit = "riflemen"
+dx = 0
+dy = 4
+[[loadouts.units]]
+unit = "riflemen"
+dx = 1
+dy = 4
+[[loadouts.units]]
+unit = "riflemen"
+dx = 2
+dy = 4
+
+[[loadouts]]
+[[loadouts.buildings]]
+building = "command_bunker"
+dx = 0
+dy = 0
+[[loadouts.units]]
+unit = "riflemen"
+dx = 0
+dy = 3

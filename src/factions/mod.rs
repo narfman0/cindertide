@@ -102,15 +102,46 @@ impl LoadedFactions {
                 eprintln!("Warning: failed to parse faction file {:?}", path);
                 continue;
             };
+            // Flat maps are fallbacks; faction-scoped lookup is preferred.
             for unit in &def.units {
-                result.units.insert(unit.id.clone(), unit.clone());
+                result.units.entry(unit.id.clone()).or_insert_with(|| unit.clone());
             }
             for building in &def.buildings {
-                result.buildings.insert(building.id.clone(), building.clone());
+                result.buildings.entry(building.id.clone()).or_insert_with(|| building.clone());
             }
             result.factions.insert(def.id.clone(), def);
         }
         result
+    }
+
+    /// Look up a unit by (faction, role-id). Checks the faction's own roster
+    /// first, then falls back to the global flat map.
+    pub fn faction_unit<'a>(&'a self, faction_id: &str, unit_id: &str) -> Option<&'a UnitDef> {
+        self.factions
+            .get(faction_id)
+            .and_then(|f| f.units.iter().find(|u| u.id == unit_id))
+            .or_else(|| self.units.get(unit_id))
+    }
+
+    /// Which unit IDs can a building produce, scoped to a faction's roster.
+    pub fn faction_building_produces<'a>(&'a self, faction_id: &str, building_id: &str) -> Vec<&'a str> {
+        self.factions
+            .get(faction_id)
+            .and_then(|f| f.buildings.iter().find(|b| b.id == building_id))
+            .map(|b| b.produces.iter().map(|s| s.as_str()).collect())
+            .unwrap_or_else(|| {
+                self.buildings.get(building_id)
+                    .map(|b| b.produces.iter().map(|s| s.as_str()).collect())
+                    .unwrap_or_default()
+            })
+    }
+
+    /// Look up a building definition scoped to a faction, falling back to global.
+    pub fn faction_building<'a>(&'a self, faction_id: &str, building_id: &str) -> Option<&'a BuildingDef> {
+        self.factions
+            .get(faction_id)
+            .and_then(|f| f.buildings.iter().find(|b| b.id == building_id))
+            .or_else(|| self.buildings.get(building_id))
     }
 }
 

@@ -50,10 +50,15 @@ pub fn building_construction_seconds(bt: &BuildingTypeId, loaded: &LoadedFaction
 }
 
 /// Which unit IDs does this building produce?
+/// Returns what a building can produce, scoped to a faction roster if provided.
 pub fn building_produces<'a>(bt: &BuildingTypeId, loaded: &'a LoadedFactions) -> Vec<&'a str> {
     loaded.buildings.get(bt.id())
         .map(|d| d.produces.iter().map(|s| s.as_str()).collect())
         .unwrap_or_default()
+}
+
+pub fn building_produces_for_faction<'a>(bt: &BuildingTypeId, faction: &crate::map::Faction, loaded: &'a LoadedFactions) -> Vec<&'a str> {
+    loaded.faction_building_produces(faction.id(), bt.id())
 }
 
 // --- Pure placement helpers ---

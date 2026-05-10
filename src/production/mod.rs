@@ -21,8 +21,24 @@ pub fn unit_production_seconds(unit_id: &str, loaded: &LoadedFactions) -> f32 {
     loaded.units.get(unit_id).map(|d| d.build_time_seconds).unwrap_or(10.0)
 }
 
+pub fn unit_production_seconds_for_faction(unit_id: &str, faction: &Faction, loaded: &LoadedFactions) -> f32 {
+    loaded.faction_unit(faction.id(), unit_id)
+        .map(|d| d.build_time_seconds)
+        .unwrap_or(10.0)
+}
+
 pub fn unit_production_cost(unit_id: &str, loaded: &LoadedFactions) -> ResourceCost {
     loaded.units.get(unit_id)
+        .map(|d| ResourceCost {
+            fuel: d.production_cost.fuel,
+            scrap: d.production_cost.scrap,
+            manpower: d.production_cost.manpower,
+        })
+        .unwrap_or(ResourceCost { fuel: 50.0, scrap: 50.0, manpower: 5.0 })
+}
+
+pub fn unit_production_cost_for_faction(unit_id: &str, faction: &Faction, loaded: &LoadedFactions) -> ResourceCost {
+    loaded.faction_unit(faction.id(), unit_id)
         .map(|d| ResourceCost {
             fuel: d.production_cost.fuel,
             scrap: d.production_cost.scrap,
@@ -68,11 +84,25 @@ pub fn try_enqueue(
     Ok(())
 }
 
-/// Advance one step of progress. Returns Some(unit_id) if a unit completed
-/// this step (the caller should spawn it).
+/// Advance one step of progress. Returns Some(unit_id) if a unit completed.
 pub fn step_progress(queue: &mut ProductionQueue, dt: f32, loaded: &LoadedFactions) -> Option<String> {
     let head = queue.jobs.first()?.clone();
     let total = unit_production_seconds(&head, loaded);
+    queue.progress += dt;
+    if queue.progress >= total {
+        queue.progress = 0.0;
+        queue.jobs.remove(0);
+        return Some(head);
+    }
+    None
+}
+
+/// Faction-scoped variant — uses the faction's own build time for the unit.
+pub fn step_progress_faction(queue: &mut ProductionQueue, dt: f32, faction_id: &str, loaded: &LoadedFactions) -> Option<String> {
+    let head = queue.jobs.first()?.clone();
+    let total = loaded.faction_unit(faction_id, &head)
+        .map(|d| d.build_time_seconds)
+        .unwrap_or_else(|| unit_production_seconds(&head, loaded));
     queue.progress += dt;
     if queue.progress >= total {
         queue.progress = 0.0;
@@ -92,10 +122,13 @@ pub fn production_system(
 ) {
     let dt = time.delta_secs();
     for (pos, faction, mut queue) in &mut buildings {
-        if let Some(unit_id) = step_progress(&mut queue, dt, &loaded) {
+        let faction_id = faction.id().to_string();
+        // Use faction-scoped build time for step progress
+        if let Some(unit_id) = step_progress_faction(&mut queue, dt, &faction_id, &loaded) {
             let (x, y, f) = (pos.pos.x, pos.pos.y, faction.clone());
-            if let Some(def) = loaded.units.get(&unit_id) {
-                let id = commands.spawn(UnitBundle::from_def(def, f, x, y)).id();
+            // Prefer faction-scoped unit def so stats match the faction's roster
+            if let Some(def) = loaded.faction_unit(&faction_id, &unit_id).cloned() {
+                let id = commands.spawn(UnitBundle::from_def(&def, f, x, y)).id();
                 commands.entity(id).insert(HomeBase { pos: pos.pos.clone() });
             }
         }
