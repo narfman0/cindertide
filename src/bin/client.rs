@@ -1164,6 +1164,7 @@ fn setup_scene(mut commands: Commands) {
         },
         Transform::from_rotation(Quat::from_euler(EulerRot::XYZ, -0.9, 0.4, 0.0)),
     ));
+
 }
 
 fn setup_ui(mut commands: Commands) {
@@ -4613,13 +4614,13 @@ fn terrain_type_name(t: &cindertide::map::TerrainType) -> &'static str {
 fn parse_terrain_name(s: &str) -> Option<cindertide::map::TerrainType> {
     use cindertide::map::TerrainType;
     match s {
-        "Grass" => Some(TerrainType::Grass),
-        "Road" => Some(TerrainType::Road),
-        "Forest" => Some(TerrainType::Forest),
-        "Rubble" => Some(TerrainType::Rubble),
-        "Mud" => Some(TerrainType::Mud),
-        "Corrupted" => Some(TerrainType::Corrupted),
-        "Void" => Some(TerrainType::Void),
+        "Grass" | "grass" => Some(TerrainType::Grass),
+        "Road" | "road" => Some(TerrainType::Road),
+        "Forest" | "forest" => Some(TerrainType::Forest),
+        "Rubble" | "rubble" => Some(TerrainType::Rubble),
+        "Mud" | "mud" => Some(TerrainType::Mud),
+        "Corrupted" | "corrupted" => Some(TerrainType::Corrupted),
+        "Void" | "void" => Some(TerrainType::Void),
         _ => None,
     }
 }
