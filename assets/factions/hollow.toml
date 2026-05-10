@@ -25,6 +25,7 @@ produced_at = ["barracks"]
 ability_q = "frenzy"
 model_file = "unit_riflemen.glb#Scene0"
 description = "Hollow shock infantry. Glass cannons that swarm objectives before defenders can suppress them."
+suppression_resistance = 0.70
 [units.production_cost]
 scrap = 30.0
 manpower = 8.0
@@ -45,6 +46,7 @@ produced_at = ["barracks"]
 ability_q = "siege_charge"
 model_file = "unit_heavy_weapons.glb#Scene0"
 description = "Lumbering horror platform. Suppression barely slows it. The only answer is enough firepower to stop it."
+suppression_resistance = 0.80
 [units.production_cost]
 fuel = 5.0
 scrap = 60.0
@@ -66,6 +68,7 @@ produced_at = ["motor_pool"]
 ability_q = "ram"
 model_file = "unit_light_vehicle.glb#Scene0"
 description = "The fastest unit in any faction's arsenal. Nearly impossible to hit on the move — if it reaches you, it's already too late."
+suppression_resistance = 0.50
 [units.production_cost]
 fuel = 70.0
 scrap = 40.0
@@ -87,6 +90,7 @@ produced_at = ["motor_pool"]
 ability_q = "armor_overdrive"
 model_file = "unit_heavy_armor.glb#Scene0"
 description = "An absolute wall of corrupted iron. Nearly blind and agonizingly slow — but it doesn't stop."
+suppression_resistance = 0.60
 [units.production_cost]
 fuel = 180.0
 scrap = 180.0

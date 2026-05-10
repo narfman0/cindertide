@@ -4,6 +4,7 @@ use crate::combat::{
     Health, AttackRange, AttackDamage, AttackSpeed, AttackCooldown,
     Suppression, Morale, Facing,
 };
+use crate::heroes::SuppressionResist;
 
 pub mod movement;
 
@@ -82,6 +83,7 @@ pub struct UnitBundle {
     pub move_progress: MoveProgress,
     pub suppression: Suppression,
     pub morale: Morale,
+    pub suppression_resist: SuppressionResist,
 }
 
 impl UnitBundle {
@@ -102,6 +104,7 @@ impl UnitBundle {
             move_progress: MoveProgress::new(vec![]),
             suppression: Suppression { current: 0.0, max: 100.0 },
             morale: Morale { current: 100.0, max: 100.0 },
+            suppression_resist: SuppressionResist { fraction: def.suppression_resistance.clamp(0.0, 1.0) },
         }
     }
 
@@ -130,6 +133,7 @@ impl UnitBundle {
             move_progress: MoveProgress::new(vec![]),
             suppression: Suppression { current: 0.0, max: 100.0 },
             morale: Morale { current: 100.0, max: 100.0 },
+            suppression_resist: SuppressionResist { fraction: 0.0 },
         }
     }
 }

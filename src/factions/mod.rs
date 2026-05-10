@@ -29,6 +29,8 @@ pub struct UnitDef {
     #[serde(default)] pub ability_q: String,
     #[serde(default)] pub model_file: String,
     #[serde(default)] pub description: String,
+    /// Fraction of suppression negated (0.0 = none, 1.0 = fully immune).
+    #[serde(default)] pub suppression_resistance: f32,
 }
 
 fn default_build_time() -> f32 { 10.0 }
