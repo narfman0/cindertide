@@ -37,7 +37,7 @@ pub enum Trigger {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Action {
-    Dialogue { text: String },
+    Dialogue { speaker: Option<String>, text: String },
     SpawnUnits {
         faction: String,
         unit_type: String,
@@ -66,7 +66,7 @@ pub struct ScriptState {
     /// Event ids that have already fired.
     pub fired: HashSet<String>,
     /// Pending dialogue messages — shown one at a time.
-    pub dialogue_queue: VecDeque<String>,
+    pub dialogue_queue: VecDeque<(String, String)>,
     /// Override text shown in the objectives panel when `Some`.
     pub current_objective: Option<String>,
     /// Countdown timer for the currently-displayed dialogue line (seconds).
@@ -195,9 +195,12 @@ pub fn script_tick_system(
 
         for action in &actions {
             match action {
-                Action::Dialogue { text } => {
+                Action::Dialogue { speaker, text } => {
                     let was_empty = script_state.dialogue_queue.is_empty();
-                    script_state.dialogue_queue.push_back(text.clone());
+                    script_state.dialogue_queue.push_back((
+                        speaker.clone().unwrap_or_else(|| "COMMS".to_string()),
+                        text.clone(),
+                    ));
                     if was_empty {
                         script_state.dialogue_timer = 4.0;
                     }

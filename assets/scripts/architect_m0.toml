@@ -2,7 +2,7 @@
 id = "everything_proceeds"
 trigger = { type = "time", seconds = 0.0 }
 actions = [
-  { type = "dialogue", text = "Everything proceeds as planned. The incursion is a side effect of the ritual — manageable, contained. Survive, gather data, and do not interfere with the process." },
+  { type = "dialogue", speaker = "Architect", text = "Everything proceeds as planned. The incursion is a side effect of the ritual — manageable, contained. Survive, gather data, and do not interfere with the process." },
   { type = "objective", text = "Survive the ritual's side effects" },
 ]
 
@@ -11,7 +11,7 @@ id = "first_scouts"
 trigger = { type = "time", seconds = 30.0 }
 actions = [
   { type = "spawn_units", faction = "Hollow", unit_type = "Riflemen", count = 2, x = 50, y = 26 },
-  { type = "dialogue", text = "Hollow scouts at the perimeter. Expected. Engage as needed." },
+  { type = "dialogue", speaker = "Architect", text = "Hollow scouts at the perimeter. Expected. Engage as needed." },
 ]
 
 [[events]]
@@ -19,14 +19,14 @@ id = "hollow_wave"
 trigger = { type = "time", seconds = 120.0 }
 actions = [
   { type = "spawn_units", faction = "Hollow", unit_type = "Riflemen", count = 4, x = 55, y = 24 },
-  { type = "dialogue", text = "The ritual is drawing them in larger numbers. Fascinating. Hold the perimeter." },
+  { type = "dialogue", speaker = "Architect", text = "The ritual is drawing them in larger numbers. Fascinating. Hold the perimeter." },
 ]
 
 [[events]]
 id = "data_gathering"
 trigger = { type = "time", seconds = 300.0 }
 actions = [
-  { type = "dialogue", text = "Fascinating... the ritual is working. The resonance is building exactly as modeled. A few minutes more." },
+  { type = "dialogue", speaker = "Architect", text = "Fascinating... the ritual is working. The resonance is building exactly as modeled. A few minutes more." },
 ]
 
 [[events]]
@@ -35,6 +35,6 @@ trigger = { type = "time", seconds = 500.0 }
 actions = [
   { type = "spawn_units", faction = "Hollow", unit_type = "Riflemen", count = 5, x = 52, y = 22 },
   { type = "spawn_units", faction = "Hollow", unit_type = "HeavyWeapons", count = 1, x = 55, y = 18 },
-  { type = "dialogue", text = "Surge pattern exceeds projections. Adjust defensive positioning — do not let them reach the ritual site." },
+  { type = "dialogue", speaker = "Architect", text = "Surge pattern exceeds projections. Adjust defensive positioning — do not let them reach the ritual site." },
   { type = "change_objective", text = "Hold the perimeter until the ritual completes" },
 ]

@@ -2,7 +2,7 @@
 id = "forge_master_dialogue"
 trigger = { type = "time", seconds = 0.0 }
 actions = [
-  { type = "dialogue", text = "Corp thinks paperwork makes it theirs. We're going to remind them who actually built this place. Hold the foundry." },
+  { type = "dialogue", speaker = "Foreman", text = "Corp thinks paperwork makes it theirs. We're going to remind them who actually built this place. Hold the foundry." },
   { type = "objective", text = "Hold the Foundry against the Combine assault" },
 ]
 
@@ -11,7 +11,7 @@ id = "combine_probe"
 trigger = { type = "time", seconds = 45.0 }
 actions = [
   { type = "spawn_units", faction = "Combine", unit_type = "Riflemen", count = 3, x = 55, y = 26 },
-  { type = "dialogue", text = "Corp infantry probing the perimeter. Show them the cost of trespass." },
+  { type = "dialogue", speaker = "Foreman", text = "Corp infantry probing the perimeter. Show them the cost of trespass." },
 ]
 
 [[events]]
@@ -20,14 +20,14 @@ trigger = { type = "time", seconds = 150.0 }
 actions = [
   { type = "spawn_units", faction = "Combine", unit_type = "HeavyArmor", count = 1, x = 60, y = 22 },
   { type = "spawn_units", faction = "Combine", unit_type = "Riflemen", count = 2, x = 58, y = 26 },
-  { type = "dialogue", text = "They brought armor. Get the welders on that hull — we've cracked tougher shells than that." },
+  { type = "dialogue", speaker = "Foreman", text = "They brought armor. Get the welders on that hull — we've cracked tougher shells than that." },
 ]
 
 [[events]]
 id = "emergency_repair"
 trigger = { type = "condition", condition = "beat", beat_id = "LastStand" }
 actions = [
-  { type = "dialogue", text = "Emergency Repair Protocol activated — all crews to the foundry walls! We hold or we lose everything we built!" },
+  { type = "dialogue", speaker = "Foreman", text = "Emergency Repair Protocol activated — all crews to the foundry walls! We hold or we lose everything we built!" },
   { type = "change_objective", text = "Emergency: hold the foundry perimeter" },
 ]
 
@@ -37,5 +37,5 @@ trigger = { type = "time", seconds = 240.0 }
 actions = [
   { type = "spawn_units", faction = "Combine", unit_type = "Riflemen", count = 5, x = 62, y = 24 },
   { type = "spawn_units", faction = "Combine", unit_type = "HeavyArmor", count = 1, x = 60, y = 18 },
-  { type = "dialogue", text = "Full Corp assault on the foundry! This is their big push — if we break them here, they don't come back." },
+  { type = "dialogue", speaker = "Foreman", text = "Full Corp assault on the foundry! This is their big push — if we break them here, they don't come back." },
 ]

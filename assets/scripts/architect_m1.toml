@@ -2,7 +2,7 @@
 id = "sacrifices_necessary"
 trigger = { type = "time", seconds = 0.0 }
 actions = [
-  { type = "dialogue", text = "The sacrifices were necessary. Hold the ritual sites — every minute of combat above the ravine feeds the second site's activation." },
+  { type = "dialogue", speaker = "Architect", text = "The sacrifices were necessary. Hold the ritual sites — every minute of combat above the ravine feeds the second site's activation." },
   { type = "objective", text = "Hold the ritual sites" },
 ]
 
@@ -11,14 +11,14 @@ id = "first_emergence"
 trigger = { type = "time", seconds = 90.0 }
 actions = [
   { type = "spawn_units", faction = "Hollow", unit_type = "Riflemen", count = 3, x = 95, y = 40 },
-  { type = "dialogue", text = "First Hollow emergence from the eastern approach. Engage — their fear feeds the process." },
+  { type = "dialogue", speaker = "Architect", text = "First Hollow emergence from the eastern approach. Engage — their fear feeds the process." },
 ]
 
 [[events]]
 id = "data_point"
 trigger = { type = "time", seconds = 240.0 }
 actions = [
-  { type = "dialogue", text = "Another data point collected. The site's resonance has increased by a measurable factor. Maintain combat pressure." },
+  { type = "dialogue", speaker = "Architect", text = "Another data point collected. The site's resonance has increased by a measurable factor. Maintain combat pressure." },
 ]
 
 [[events]]
@@ -28,6 +28,6 @@ actions = [
   { type = "spawn_units", faction = "Hollow", unit_type = "Riflemen", count = 5, x = 100, y = 35 },
   { type = "spawn_units", faction = "Hollow", unit_type = "HeavyWeapons", count = 1, x = 103, y = 30 },
   { type = "spawn_units", faction = "Hollow", unit_type = "HeavyArmor", count = 1, x = 105, y = 25 },
-  { type = "dialogue", text = "Full convergence on the ritual site. They can sense what's happening here. Hold them back — the reading is almost complete." },
+  { type = "dialogue", speaker = "Architect", text = "Full convergence on the ritual site. They can sense what's happening here. Hold them back — the reading is almost complete." },
   { type = "change_objective", text = "Defend the ritual sites through the Hollow convergence" },
 ]

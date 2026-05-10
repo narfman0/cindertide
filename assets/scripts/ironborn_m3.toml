@@ -2,7 +2,7 @@
 id = "get_the_vehicles_across"
 trigger = { type = "time", seconds = 0.0 }
 actions = [
-  { type = "dialogue", text = "Get those vehicles across the territory to the northern extraction point. Don't lose a single one." },
+  { type = "dialogue", speaker = "Foreman", text = "Those three vehicles are the reason we're here. Get them to the northern extraction point. Don't lose a single one." },
   { type = "objective", text = "Extract 3 vehicles to the northern extraction zone" },
 ]
 
@@ -11,7 +11,7 @@ id = "patrol_spotted"
 trigger = { type = "time", seconds = 120.0 }
 actions = [
   { type = "spawn_units", faction = "Combine", unit_type = "Riflemen", count = 2, x = 80, y = 50 },
-  { type = "dialogue", text = "Corp patrol spotted in the mid-territory. They haven't seen us yet — keep the vehicles moving." },
+  { type = "dialogue", speaker = "Foreman", text = "Corp patrol mid-territory. They haven't made us yet — keep the vehicles moving, keep it quiet." },
 ]
 
 [[events]]
@@ -20,13 +20,13 @@ trigger = { type = "time", seconds = 300.0 }
 actions = [
   { type = "spawn_units", faction = "Combine", unit_type = "Riflemen", count = 4, x = 100, y = 40 },
   { type = "spawn_units", faction = "Combine", unit_type = "LightVehicle", count = 2, x = 105, y = 35 },
-  { type = "dialogue", text = "Corp intercept force deploying ahead — they know what we're moving. Break through fast!" },
+  { type = "dialogue", speaker = "Foreman", text = "Corp knows what we're moving. Intercept force ahead — four infantry, two vehicles. Break through fast." },
 ]
 
 [[events]]
 id = "extraction_zone_clear"
 trigger = { type = "time", seconds = 600.0 }
 actions = [
-  { type = "dialogue", text = "Extraction zone ahead — get the vehicles through! Don't stop for anything!" },
+  { type = "dialogue", speaker = "Foreman", text = "Extraction zone is clear ahead. Get the vehicles through. Don't stop." },
   { type = "change_objective", text = "Move all vehicles into the northern extraction zone" },
 ]

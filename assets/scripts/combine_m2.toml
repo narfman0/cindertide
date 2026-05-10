@@ -2,7 +2,7 @@
 id = "setup_dialogue"
 trigger = { type = "time", seconds = 0.0 }
 actions = [
-  { type = "dialogue", text = "Hold this crossing. The Ironborn cannot be allowed to advance any further. Fifteen minutes — that's all we need." },
+  { type = "dialogue", speaker = "Field Comms", text = "Hold this crossing. Northern supply integrity requires it. Fifteen minutes — reinforcements are in transit." },
   { type = "objective", text = "Hold the crossing for 15 minutes" },
 ]
 
@@ -11,7 +11,7 @@ id = "first_crossing"
 trigger = { type = "time", seconds = 30.0 }
 actions = [
   { type = "spawn_units", faction = "Ironborn", unit_type = "Riflemen", count = 3, x = 65, y = 20 },
-  { type = "dialogue", text = "Ironborn infantry at the crossing — open fire!" },
+  { type = "dialogue", speaker = "Field Comms", text = "Ironborn infantry at the crossing. Engage." },
 ]
 
 [[events]]
@@ -20,7 +20,7 @@ trigger = { type = "time", seconds = 120.0 }
 actions = [
   { type = "spawn_units", faction = "Ironborn", unit_type = "HeavyArmor", count = 1, x = 67, y = 18 },
   { type = "spawn_units", faction = "Ironborn", unit_type = "Riflemen", count = 2, x = 65, y = 22 },
-  { type = "dialogue", text = "Armor at the crossing! Get something heavy on that tank before it clears the bridge!" },
+  { type = "dialogue", speaker = "Field Comms", text = "Ironborn armor at the crossing. Prioritize — armor through the bridge will compromise the defensive position." },
 ]
 
 [[events]]
@@ -30,6 +30,6 @@ actions = [
   { type = "spawn_units", faction = "Ironborn", unit_type = "HeavyArmor", count = 2, x = 66, y = 16 },
   { type = "spawn_units", faction = "Ironborn", unit_type = "Riflemen", count = 4, x = 68, y = 20 },
   { type = "spawn_units", faction = "Ironborn", unit_type = "HeavyWeapons", count = 1, x = 64, y = 22 },
-  { type = "dialogue", text = "Full assault on the crossing! Hold your ground — reinforcements are ten minutes out!" },
+  { type = "dialogue", speaker = "Field Comms", text = "Full Ironborn commitment at the crossing. Armor, infantry, heavy weapons. Reinforcements are ten minutes out. Hold." },
   { type = "change_objective", text = "Hold the crossing under full Ironborn assault" },
 ]

@@ -2,7 +2,7 @@
 id = "miscalculation"
 trigger = { type = "time", seconds = 0.0 }
 actions = [
-  { type = "dialogue", text = "I have miscalculated. It is awake but it is not contained — not grateful — not cooperative. Destroy the Ancient One's core before it fully manifests. Everything depends on this." },
+  { type = "dialogue", speaker = "Architect", text = "I have miscalculated. It is awake but it is not contained — not grateful — not cooperative. Destroy the Ancient One's core before it fully manifests. Everything depends on this." },
   { type = "objective", text = "Destroy the Ancient One's core" },
 ]
 
@@ -12,14 +12,14 @@ trigger = { type = "time", seconds = 120.0 }
 actions = [
   { type = "spawn_units", faction = "Hollow", unit_type = "Riflemen", count = 4, x = 95, y = 40 },
   { type = "spawn_units", faction = "Hollow", unit_type = "HeavyArmor", count = 1, x = 100, y = 33 },
-  { type = "dialogue", text = "The Hollow surge in its defense — it is directing them. I didn't account for tactical intelligence at this scale." },
+  { type = "dialogue", speaker = "Architect", text = "The Hollow surge in its defense — it is directing them. I didn't account for tactical intelligence at this scale." },
 ]
 
 [[events]]
 id = "this_is_what_i_wanted"
 trigger = { type = "time", seconds = 300.0 }
 actions = [
-  { type = "dialogue", text = "This is what I wanted... wasn't it? I spent nineteen years building toward this moment. I should feel triumph. I don't feel triumph." },
+  { type = "dialogue", speaker = "Architect", text = "This is what I wanted... wasn't it? I spent nineteen years building toward this moment. I should feel triumph. I don't feel triumph." },
 ]
 
 [[events]]
@@ -28,7 +28,7 @@ trigger = { type = "condition", condition = "beat", beat_id = "LastStand" }
 actions = [
   { type = "spawn_units", faction = "Covenant", unit_type = "HeavyWeapons", count = 3, x = 8, y = 65 },
   { type = "spawn_units", faction = "Covenant", unit_type = "Riflemen", count = 3, x = 10, y = 68 },
-  { type = "dialogue", text = "I won't let it end like this. Not after nineteen years. Every remaining asset — deploy everything. We finish this now." },
+  { type = "dialogue", speaker = "Architect", text = "I won't let it end like this. Not after nineteen years. Every remaining asset — deploy everything. We finish this now." },
 ]
 
 [[events]]
@@ -38,13 +38,13 @@ actions = [
   { type = "spawn_units", faction = "Hollow", unit_type = "Riflemen", count = 8, x = 110, y = 20 },
   { type = "spawn_units", faction = "Hollow", unit_type = "HeavyArmor", count = 3, x = 112, y = 15 },
   { type = "spawn_units", faction = "Hollow", unit_type = "HeavyWeapons", count = 2, x = 108, y = 25 },
-  { type = "dialogue", text = "It planned further ahead than I did. Every site, every engagement, every death — it was already composing something from what it found. And I was the last piece it needed." },
+  { type = "dialogue", speaker = "Architect", text = "It planned further ahead than I did. Every site, every engagement, every death — it was already composing something from what it found. And I was the last piece it needed." },
 ]
 
 [[events]]
 id = "last_entry"
 trigger = { type = "time", seconds = 2400.0 }
 actions = [
-  { type = "dialogue", text = "This is the last entry I will make as myself." },
+  { type = "dialogue", speaker = "Architect", text = "This is the last entry I will make as myself." },
   { type = "change_objective", text = "End this — whatever the cost" },
 ]

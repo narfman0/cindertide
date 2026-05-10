@@ -263,6 +263,7 @@ struct ScriptEventDef {
 struct ActionDef {
     action_type: String,  // "dialogue", "spawn_units", "objective", "win_mission", "lose_mission"
     text: String,         // for dialogue / objective
+    speaker: String,      // for dialogue (optional speaker tag)
     faction: String,      // for spawn_units
     unit_type: String,    // for spawn_units
     count: u32,
@@ -4339,7 +4340,11 @@ fn script_events_to_toml(events: &[ScriptEventDef]) -> String {
         for action in &ev.actions {
             match action.action_type.as_str() {
                 "dialogue" => {
-                    out.push_str(&format!("  {{ type = \"dialogue\", text = {:?} }},\n", action.text));
+                    if action.speaker.is_empty() {
+                        out.push_str(&format!("  {{ type = \"dialogue\", text = {:?} }},\n", action.text));
+                    } else {
+                        out.push_str(&format!("  {{ type = \"dialogue\", speaker = {:?}, text = {:?} }},\n", action.speaker, action.text));
+                    }
                 }
                 "spawn_units" => {
                     out.push_str(&format!(
@@ -5438,8 +5443,8 @@ fn update_dialogue_bar(
     match script_state {
         Some(ref ss) if !ss.dialogue_queue.is_empty() => {
             *vis = Visibility::Visible;
-            if let Some(msg) = ss.dialogue_queue.front() {
-                **text = msg.clone();
+            if let Some((speaker, msg)) = ss.dialogue_queue.front() {
+                **text = format!("[{}]  {}", speaker, msg);
             }
         }
         _ => {

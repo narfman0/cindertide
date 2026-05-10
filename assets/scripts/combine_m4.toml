@@ -2,7 +2,7 @@
 id = "this_is_it"
 trigger = { type = "time", seconds = 0.0 }
 actions = [
-  { type = "dialogue", text = "This is it. The Ironborn citadel — their last stronghold. Destroy every structure they have and this war ends today." },
+  { type = "dialogue", speaker = "Field Comms", text = "This is the Ironborn primary installation. Full demolition authorized. Destroy every structure and this engagement ends." },
   { type = "objective", text = "Destroy all Ironborn structures" },
 ]
 
@@ -11,7 +11,7 @@ id = "probing_attack"
 trigger = { type = "time", seconds = 120.0 }
 actions = [
   { type = "spawn_units", faction = "Ironborn", unit_type = "Riflemen", count = 3, x = 90, y = 40 },
-  { type = "dialogue", text = "Ironborn probe force testing our perimeter — push them back!" },
+  { type = "dialogue", speaker = "Field Comms", text = "Ironborn probe force — three units. Defensive engagement." },
 ]
 
 [[events]]
@@ -19,7 +19,7 @@ id = "airdrop_reinforcements"
 trigger = { type = "condition", condition = "beat", beat_id = "LastStand" }
 actions = [
   { type = "spawn_units", faction = "Combine", unit_type = "HeavyWeapons", count = 3, x = 8, y = 65 },
-  { type = "dialogue", text = "Command hasn't abandoned us — heavy weapons teams inbound by air! Hold the line until they land!" },
+  { type = "dialogue", speaker = "Field Comms", text = "Heavy weapons teams inbound by air. Command has not forgotten this position. Hold until they land." },
 ]
 
 [[events]]
@@ -29,6 +29,6 @@ actions = [
   { type = "spawn_units", faction = "Ironborn", unit_type = "HeavyArmor", count = 3, x = 110, y = 18 },
   { type = "spawn_units", faction = "Ironborn", unit_type = "Riflemen", count = 8, x = 112, y = 22 },
   { type = "spawn_units", faction = "Ironborn", unit_type = "HeavyWeapons", count = 2, x = 108, y = 12 },
-  { type = "dialogue", text = "Everything they have — all of it incoming! They know they're finished and they're throwing everything at us!" },
+  { type = "dialogue", speaker = "Field Comms", text = "Ironborn committing full remaining strength. Three armor units, eight infantry, two heavy weapons. This is their last engagement. Neutralize it." },
   { type = "change_objective", text = "Survive the Ironborn last stand — then destroy all remaining structures" },
 ]

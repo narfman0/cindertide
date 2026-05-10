@@ -2,7 +2,7 @@
 id = "intro"
 trigger = { type = "time", seconds = 0.0 }
 actions = [
-  { type = "dialogue", text = "Commander, the perimeter is breached. Ironborn are pressing from the east — they don't intend to negotiate." },
+  { type = "dialogue", speaker = "Field Comms", text = "Ironborn are contesting Refinery Seven perimeter. They do not have legal standing. Engage and remove them." },
   { type = "objective", text = "Secure Refinery Seven — hold the facility" },
 ]
 
@@ -11,7 +11,7 @@ id = "first_wave"
 trigger = { type = "time", seconds = 60.0 }
 actions = [
   { type = "spawn_units", faction = "Ironborn", unit_type = "Riflemen", count = 4, x = 110, y = 20 },
-  { type = "dialogue", text = "Ironborn infantry advancing from the east! Engage at range!" },
+  { type = "dialogue", speaker = "Field Comms", text = "Ironborn infantry — four units, eastern approach. Engage at range. Minimize facility damage." },
 ]
 
 [[events]]
@@ -20,7 +20,7 @@ trigger = { type = "time", seconds = 180.0 }
 actions = [
   { type = "spawn_units", faction = "Ironborn", unit_type = "HeavyArmor", count = 1, x = 112, y = 15 },
   { type = "spawn_units", faction = "Ironborn", unit_type = "Riflemen", count = 3, x = 115, y = 18 },
-  { type = "dialogue", text = "Armor on the field! We need heavy weapons on that tank, now!" },
+  { type = "dialogue", speaker = "Field Comms", text = "Ironborn armor on field. Armored unit, three infantry. Prioritize armor elimination." },
   { type = "objective", text = "Destroy the Ironborn armor" },
 ]
 
@@ -29,7 +29,7 @@ id = "last_stand_reinforcements"
 trigger = { type = "condition", condition = "beat", beat_id = "LastStand" }
 actions = [
   { type = "spawn_units", faction = "Combine", unit_type = "Riflemen", count = 2, x = 5, y = 68 },
-  { type = "dialogue", text = "Reinforcements inbound! Two squads deploying to your position — hold the line!" },
+  { type = "dialogue", speaker = "Field Comms", text = "Command has authorized two reinforcement squads. They are en route. Hold position." },
 ]
 
 [[events]]
@@ -38,6 +38,6 @@ trigger = { type = "time", seconds = 300.0 }
 actions = [
   { type = "spawn_units", faction = "Ironborn", unit_type = "HeavyArmor", count = 2, x = 110, y = 10 },
   { type = "spawn_units", faction = "Ironborn", unit_type = "Riflemen", count = 6, x = 113, y = 22 },
-  { type = "dialogue", text = "All units — full assault incoming. This is their final push. Destroy them here." },
+  { type = "dialogue", speaker = "Field Comms", text = "Full Ironborn commitment to this position. Engage and neutralize. Refinery Seven is not expendable." },
   { type = "change_objective", text = "Repel the final Ironborn assault — hold Refinery Seven" },
 ]

@@ -6,7 +6,7 @@ default_opponent = "ironborn"
 
 [[units]]
 id = "riflemen"
-display_name = "Riflemen"
+display_name = "Enforcer"
 unit_kind = "infantry"
 attack_range = 4.0
 move_speed = 2.5
@@ -19,14 +19,14 @@ build_time_seconds = 8.0
 produced_at = ["barracks"]
 ability_q = "suppressing_fire"
 model_file = "unit_riflemen.glb#Scene0"
-description = "Standard all-rounder infantry"
+description = "Contract security, field-certified. Issued standard kit. Expenditure tracked."
 [units.production_cost]
 scrap = 50.0
 manpower = 5.0
 
 [[units]]
 id = "heavy_weapons"
-display_name = "Heavy Weapons"
+display_name = "Suppressor"
 unit_kind = "infantry"
 attack_range = 6.0
 move_speed = 1.5
@@ -39,7 +39,7 @@ build_time_seconds = 14.0
 produced_at = ["barracks"]
 ability_q = "suppressing_fire"
 model_file = "unit_heavy_weapons.glb#Scene0"
-description = "Slow heavy hitter, suppression specialist"
+description = "Designated for area denial. Operates within approved suppression parameters."
 [units.production_cost]
 fuel = 10.0
 scrap = 80.0
@@ -47,7 +47,7 @@ manpower = 5.0
 
 [[units]]
 id = "light_vehicle"
-display_name = "Light Vehicle"
+display_name = "Scout Cruiser"
 unit_kind = "vehicle"
 attack_range = 5.0
 move_speed = 4.0
@@ -60,7 +60,7 @@ build_time_seconds = 18.0
 produced_at = ["motor_pool"]
 ability_q = "smoke_screen"
 model_file = "unit_light_vehicle.glb#Scene0"
-description = "Fast scout vehicle"
+description = "Armored reconnaissance platform. Approved for forward deployment without Command sign-off."
 [units.production_cost]
 fuel = 80.0
 scrap = 60.0
@@ -68,7 +68,7 @@ manpower = 3.0
 
 [[units]]
 id = "heavy_armor"
-display_name = "Heavy Armor"
+display_name = "Iron Sentinel"
 unit_kind = "vehicle"
 attack_range = 4.0
 move_speed = 1.8
@@ -81,7 +81,7 @@ build_time_seconds = 35.0
 produced_at = ["motor_pool"]
 ability_q = "armor_overdrive"
 model_file = "unit_heavy_armor.glb#Scene0"
-description = "Heavy front-line tank"
+description = "Heavy armor unit. Operational cost per engagement is high; deploy accordingly."
 [units.production_cost]
 fuel = 250.0
 scrap = 200.0
@@ -93,7 +93,7 @@ display_name = "Command Bunker"
 health = 1200.0
 build_time_seconds = 90.0
 model_file = "building_command_bunker.glb#Scene0"
-description = "Faction HQ; losing it ends the mission"
+description = "Operational command node. Its destruction ends the engagement — on record."
 [buildings.cost]
 fuel = 300.0
 scrap = 200.0
@@ -105,6 +105,7 @@ health = 600.0
 build_time_seconds = 40.0
 produces = ["riflemen", "heavy_weapons"]
 model_file = "building_barracks.glb#Scene0"
+description = "Personnel staging facility. Staffed per contract."
 [buildings.cost]
 fuel = 100.0
 scrap = 150.0
@@ -116,6 +117,7 @@ health = 600.0
 build_time_seconds = 40.0
 produces = ["light_vehicle", "heavy_armor"]
 model_file = "building_motor_pool.glb#Scene0"
+description = "Vehicle marshaling yard. Fuel consumption logged per deployment."
 [buildings.cost]
 fuel = 250.0
 scrap = 200.0
@@ -127,6 +129,7 @@ health = 500.0
 build_time_seconds = 25.0
 trickle_fuel = 5.0
 model_file = "building_refinery.glb#Scene0"
+description = "Fuel extraction installation. Output credited to the operating account."
 [buildings.cost]
 fuel = 200.0
 scrap = 50.0
@@ -138,6 +141,7 @@ health = 350.0
 build_time_seconds = 25.0
 trickle_scrap = 4.0
 model_file = "building_scrapyard.glb#Scene0"
+description = "Material reclamation site. Scrap yield assessed quarterly."
 [buildings.cost]
 fuel = 50.0
 scrap = 200.0
@@ -149,6 +153,7 @@ health = 350.0
 build_time_seconds = 15.0
 trickle_manpower = 2.0
 model_file = "building_recruitment_office.glb#Scene0"
+description = "Manpower intake hub. Processing time: standard."
 [buildings.cost]
 fuel = 50.0
 scrap = 50.0
@@ -160,6 +165,7 @@ health = 800.0
 build_time_seconds = 60.0
 trickle_scrap = 1.0
 model_file = "building_foundry.glb#Scene0"
+description = "Heavy fabrication plant. Scrap-to-output ratio monitored."
 [buildings.cost]
 fuel = 400.0
 scrap = 350.0
@@ -170,6 +176,7 @@ display_name = "Airfield"
 health = 800.0
 build_time_seconds = 60.0
 model_file = "building_airfield.glb#Scene0"
+description = "Air operations platform. Cleared for authorized assets only."
 [buildings.cost]
 fuel = 500.0
 scrap = 400.0
@@ -180,6 +187,7 @@ display_name = "Workshop"
 health = 500.0
 build_time_seconds = 25.0
 model_file = "building_workshop.glb#Scene0"
+description = "Field maintenance depot. Downtime minimized per operational mandate."
 [buildings.cost]
 fuel = 150.0
 scrap = 100.0
@@ -190,6 +198,7 @@ display_name = "Research Lab"
 health = 600.0
 build_time_seconds = 40.0
 model_file = "building_research_lab.glb#Scene0"
+description = "Applied research installation. Findings classified by default."
 [buildings.cost]
 fuel = 250.0
 scrap = 200.0
@@ -201,6 +210,7 @@ health = 350.0
 build_time_seconds = 15.0
 trickle_manpower = 1.0
 model_file = "building_supply_depot.glb#Scene0"
+description = "Logistics node. Contents inventoried on transfer."
 [buildings.cost]
 fuel = 100.0
 scrap = 100.0
@@ -212,6 +222,7 @@ health = 250.0
 build_time_seconds = 10.0
 vision_radius = 8.0
 model_file = "building_watchtower.glb#Scene0"
+description = "Sensor elevation post. Feeds to Command grid."
 [buildings.cost]
 fuel = 50.0
 scrap = 75.0
@@ -222,6 +233,7 @@ display_name = "Repair Bay"
 health = 500.0
 build_time_seconds = 25.0
 model_file = "building_repair_bay.glb#Scene0"
+description = "Vehicle repair station. Turnaround within operational tolerances."
 [buildings.cost]
 fuel = 100.0
 scrap = 200.0
@@ -232,6 +244,7 @@ display_name = "Pillbox"
 health = 250.0
 build_time_seconds = 10.0
 model_file = "building_pillbox.glb#Scene0"
+description = "Hardened firing position. Pre-approved defensive emplacement."
 [buildings.cost]
 fuel = 50.0
 scrap = 100.0
@@ -242,6 +255,7 @@ display_name = "AA Gun"
 health = 250.0
 build_time_seconds = 15.0
 model_file = "building_aa_gun.glb#Scene0"
+description = "Anti-air emplacement. Threat response automated where possible."
 [buildings.cost]
 fuel = 75.0
 scrap = 150.0
@@ -252,6 +266,7 @@ display_name = "Tank Trap"
 health = 100.0
 build_time_seconds = 5.0
 model_file = "building_tank_trap.glb#Scene0"
+description = "Terrain denial obstruction. Placed per perimeter protocol."
 [buildings.cost]
 scrap = 50.0
 

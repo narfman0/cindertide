@@ -2,7 +2,7 @@
 id = "briefing"
 trigger = { type = "time", seconds = 0.0 }
 actions = [
-  { type = "dialogue", text = "Commander. The Ironborn Foundry is their staging point for this entire operation. Destroy it and their offensive collapses." },
+  { type = "dialogue", speaker = "Field Comms", text = "Ironborn Foundry is their primary staging installation. Its destruction ends their offensive capability in this sector." },
   { type = "objective", text = "Destroy the Ironborn Foundry" },
 ]
 
@@ -11,7 +11,7 @@ id = "foundry_patrol"
 trigger = { type = "time", seconds = 120.0 }
 actions = [
   { type = "spawn_units", faction = "Ironborn", unit_type = "Riflemen", count = 2, x = 100, y = 30 },
-  { type = "dialogue", text = "Scouts report a patrol sweeping near the foundry. Watch your flanks as you advance." },
+  { type = "dialogue", speaker = "Field Comms", text = "Ironborn patrol, foundry perimeter. Two units. Engage before they spot the advance." },
 ]
 
 [[events]]
@@ -20,13 +20,13 @@ trigger = { type = "time", seconds = 300.0 }
 actions = [
   { type = "spawn_units", faction = "Ironborn", unit_type = "Riflemen", count = 4, x = 110, y = 20 },
   { type = "spawn_units", faction = "Ironborn", unit_type = "HeavyArmor", count = 1, x = 108, y = 15 },
-  { type = "dialogue", text = "They've spotted our advance — counterattack incoming! Maintain pressure on the foundry!" },
+  { type = "dialogue", speaker = "Field Comms", text = "Ironborn are aware of the advance. Counterattack incoming — armor and infantry. Maintain pressure on the foundry." },
 ]
 
 [[events]]
 id = "hero_goes_down"
 trigger = { type = "condition", condition = "beat", beat_id = "HeroGoesDown" }
 actions = [
-  { type = "dialogue", text = "Hold the line! Fall back to defensive positions — we regroup and push again!" },
+  { type = "dialogue", speaker = "Field Comms", text = "Defensive reposition authorized. Consolidate and resume the assault. The foundry is the objective." },
   { type = "change_objective", text = "Regroup and resume the assault on the Ironborn Foundry" },
 ]
