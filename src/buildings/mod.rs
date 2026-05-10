@@ -2,6 +2,7 @@
 
 use bevy::prelude::*;
 use crate::map::{GridPos, Faction, NavMesh};
+use crate::units::UnitPos;
 use crate::resources::{ResourceCost, ResourcePool, spend, can_afford};
 use crate::factions::LoadedFactions;
 use std::collections::HashSet;
@@ -81,6 +82,7 @@ pub struct BuildingBundle {
     pub building_type: BuildingTypeId,
     pub faction: Faction,
     pub pos: BuildingPos,
+    pub unit_pos: UnitPos,
     pub health: crate::combat::Health,
     pub construction: ConstructionProgress,
     pub under_construction: UnderConstruction,
@@ -94,6 +96,7 @@ impl BuildingBundle {
             building_type,
             faction,
             pos: BuildingPos { pos: GridPos { x, y } },
+            unit_pos: UnitPos { pos: GridPos { x, y } },
             health: crate::combat::Health { current: max_hp, max: max_hp },
             construction: ConstructionProgress { elapsed: 0.0, total },
             under_construction: UnderConstruction,
@@ -107,6 +110,7 @@ impl BuildingBundle {
             building_type,
             faction,
             pos: BuildingPos { pos: GridPos { x, y } },
+            unit_pos: UnitPos { pos: GridPos { x, y } },
             health: crate::combat::Health { current: 500.0, max: 500.0 },
             construction: ConstructionProgress { elapsed: 0.0, total: 30.0 },
             under_construction: UnderConstruction,

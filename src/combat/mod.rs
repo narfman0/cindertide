@@ -479,7 +479,7 @@ pub fn death_system(
 /// Update the InCover component on each unit based on the tile they occupy.
 pub fn update_cover_system(
     mut commands: Commands,
-    units: Query<(Entity, &UnitPos)>,
+    units: Query<(Entity, &UnitPos), With<crate::units::UnitTypeId>>,
     tiles: Query<&Tile>,
 ) {
     // Build a lookup map from GridPos -> CoverDensity
@@ -507,7 +507,7 @@ pub fn update_cover_system(
 /// their destination. Units without a MoveTarget keep their current facing (defaulting to North).
 pub fn update_facing_system(
     mut commands: Commands,
-    mut units: Query<(Entity, &UnitPos, Option<&MoveTarget>, Option<&mut Facing>)>,
+    mut units: Query<(Entity, &UnitPos, Option<&MoveTarget>, Option<&mut Facing>), With<crate::units::UnitTypeId>>,
 ) {
     for (entity, unit_pos, move_target, facing) in &mut units {
         if let Some(target) = move_target {

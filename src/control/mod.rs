@@ -3,7 +3,7 @@
 use bevy::prelude::*;
 use crate::map::{ControlPoint, ControlPointType, Faction, GridPos};
 use crate::resources::{ResourceTrickle, FactionEntity};
-use crate::units::UnitPos;
+use crate::units::{UnitPos, UnitTypeId};
 use std::collections::HashSet;
 
 pub const DEFAULT_CAPTURE_RATE: f32 = 0.2; // progress per second
@@ -89,7 +89,7 @@ pub fn point_trickle_bonus(point_type: &ControlPointType, owner: &Faction) -> (f
 pub fn capture_system(
     time: Res<Time>,
     mut points: Query<&mut ControlPoint>,
-    units: Query<(&UnitPos, &Faction)>,
+    units: Query<(&UnitPos, &Faction), With<UnitTypeId>>,
 ) {
     let dt = time.delta_secs();
     for mut cp in &mut points {

@@ -3,7 +3,7 @@
 use bevy::prelude::*;
 use crate::map::{Faction, GridPos};
 use crate::combat::{Health, Suppression, AttackRange, AttackDamage, AttackSpeed, AttackCooldown, Morale, Facing};
-use crate::units::{UnitPos, UnitKind, MovementSpeed, MoveProgress};
+use crate::units::{UnitPos, UnitTypeId, UnitKind, MovementSpeed, MoveProgress};
 
 #[derive(Component, Debug, Clone)]
 pub struct Hero {
@@ -121,7 +121,7 @@ pub fn charge_system(time: Res<Time>, mut q: Query<&mut SignatureAbility, Withou
 pub fn aura_system(
     mut commands: Commands,
     heroes: Query<(&UnitPos, &Faction, &Aura), (With<Hero>, Without<HeroDowned>)>,
-    units: Query<(Entity, &UnitPos, &Faction), Without<Hero>>,
+    units: Query<(Entity, &UnitPos, &Faction), (With<UnitTypeId>, Without<Hero>)>,
     existing: Query<&SuppressionResist>,
 ) {
     use std::collections::HashMap;
