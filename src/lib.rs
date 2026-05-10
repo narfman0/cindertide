@@ -37,7 +37,7 @@ use resources::{ResourcesPlugin, FactionBundle, ResourcePool, ResourceTrickle, R
 use control::ControlPlugin;
 use buildings::{BuildingsPlugin, BuildingTypeId, BuildingBundle, BuildingPos, ConstructionProgress, building_cost, building_produces, try_pay, can_place, Built, UnderConstruction};
 use production::{ProductionPlugin, ProductionQueue, try_enqueue, EnqueueError};
-use factions::{LoadedFactions, FactionsPlugin};
+use factions::LoadedFactions;
 use heroes::{HeroPlugin, HeroBundle, Hero, AbilityKind, SignatureAbility, Aura, HeroDowned, is_charge_full, within_aura};
 use tech::{TechPlugin, Tech, Tier, Doctrine, ResearchTarget, ResearchInProgress, start_research};
 use unit_ai::UnitAiPlugin;
@@ -1011,7 +1011,7 @@ fn handle_production_enqueue(In(params): In<Option<Value>>, world: &mut World) -
             message: format!("faction entity {faction_id} not found"),
             data: None,
         })?;
-        let mut pool = fm.get_mut::<resources::ResourcePool>().ok_or_else(|| BrpError {
+        let pool = fm.get_mut::<resources::ResourcePool>().ok_or_else(|| BrpError {
             code: -32602,
             message: "faction has no ResourcePool".into(),
             data: None,
@@ -1148,7 +1148,7 @@ fn handle_production_queue_status(In(params): In<Option<Value>>, world: &mut Wor
     let jobs: Vec<String> = q.jobs.iter().cloned().collect();
     let progress = q.progress;
     let head_unit = q.jobs.first().cloned();
-    drop(r);
+    let _ = r;
 
     let loaded = world.resource::<LoadedFactions>().clone();
     let head_total = head_unit.as_deref().map(|u| production::unit_production_seconds(u, &loaded));
@@ -2661,10 +2661,6 @@ fn spawn_built_building(
             em.insert(ProductionQueue::default());
         }
     }
-}
-
-fn spawn_unit_at(world: &mut World, faction: Faction, x: i32, y: i32) {
-    spawn_unit_type_at(world, faction, "riflemen", x, y);
 }
 
 fn spawn_unit_type_at(world: &mut World, faction: Faction, unit_id: &str, x: i32, y: i32) {

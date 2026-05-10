@@ -9,7 +9,7 @@ use std::collections::{HashSet, VecDeque};
 
 use crate::beats::{BeatId, FiredBeats};
 use crate::map::{Faction, GridPos};
-use crate::mission::{Mission, MissionStatus};
+use crate::mission::Mission;
 use crate::units::{UnitBundle, HomeBase};
 use crate::factions::LoadedFactions;
 
@@ -128,7 +128,6 @@ pub fn script_tick_system(
     mut script_state: ResMut<ScriptState>,
     time: Res<Time>,
     fired_beats: Res<FiredBeats>,
-    missions: Query<&Mission>,
     mut mission_q: Query<&mut Mission>,
     loaded: Res<LoadedFactions>,
 ) {
@@ -148,7 +147,7 @@ pub fn script_tick_system(
     }
 
     // Get the elapsed time from the first active mission.
-    let elapsed = missions.iter().next().map(|m| m.elapsed).unwrap_or(0.0);
+    let elapsed = mission_q.iter().next().map(|m| m.elapsed).unwrap_or(0.0);
 
     // Collect events to fire (can't mutate while iterating the resource).
     let events_to_fire: Vec<usize> = {

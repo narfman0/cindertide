@@ -107,15 +107,6 @@ fn in_base_zone(x: i32, y: i32, base: &GridPos) -> bool {
     (x - base.x).abs() <= 2 && (y - base.y).abs() <= 2
 }
 
-/// Distance from the map centre (Manhattan-ish, normalised to 0-1).
-fn centre_dist_norm(x: i32, y: i32, width: i32, height: i32) -> f32 {
-    let cx = width as f32 / 2.0;
-    let cy = height as f32 / 2.0;
-    let dx = (x as f32 - cx).abs() / cx;
-    let dy = (y as f32 - cy).abs() / cy;
-    (dx * dx + dy * dy).sqrt() / 2_f32.sqrt()
-}
-
 // ---------------------------------------------------------------------------
 // Core generation
 // ---------------------------------------------------------------------------
@@ -142,7 +133,7 @@ fn gen_left_half_tile(
 
     // ---- Noise layers ----
     let n0 = hash_noise(x, y, seed) as f32 / 255.0;              // primary
-    let n1 = hash_noise(x * 3 + 7, y * 5 + 13, seed ^ 0xdeadbeef) as f32 / 255.0; // secondary
+    let _n1 = hash_noise(x * 3 + 7, y * 5 + 13, seed ^ 0xdeadbeef) as f32 / 255.0;
     let n2 = hash_noise(x * 7 + 3, y * 2 + 17, seed ^ 0xabcdef01) as f32 / 255.0; // tertiary
 
     // Normalised coordinates (0-1)

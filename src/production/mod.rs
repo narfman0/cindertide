@@ -4,7 +4,7 @@ use bevy::prelude::*;
 use crate::map::{Faction, GridPos};
 use crate::units::{UnitBundle, HomeBase};
 use crate::buildings::{BuildingPos, BuildingTypeId, Built};
-use crate::resources::{ResourcePool, ResourceCost, FactionEntity, can_afford, spend, refund};
+use crate::resources::{ResourcePool, ResourceCost, FactionEntity, can_afford, spend};
 use crate::factions::LoadedFactions;
 
 pub const QUEUE_CAP: usize = 5;

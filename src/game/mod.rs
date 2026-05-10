@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use bevy::app::AppExit;
-use crate::campaign::{CampaignRun, GlobalProgress, PlayableFaction, apply_mission_outcome};
+use crate::campaign::{CampaignRun, GlobalProgress, apply_mission_outcome};
 use crate::mission::{Mission, MissionStatus};
 
 #[derive(Resource, Debug, Clone, PartialEq)]

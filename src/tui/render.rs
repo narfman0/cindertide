@@ -6,7 +6,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use ratatui::Frame;
 
-use super::state::{Screen, TuiApp, UnitSummary, BuildingSummary, TileSummary, InputMode, BUILD_MENU_OPTIONS};
+use super::state::{Screen, TuiApp, UnitSummary, BuildingSummary, InputMode, BUILD_MENU_OPTIONS};
 
 pub fn draw(f: &mut Frame, app: &TuiApp) {
     match &app.screen {
