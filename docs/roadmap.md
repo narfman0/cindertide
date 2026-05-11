@@ -7,7 +7,8 @@ Current status: the game is feature-complete for a playable single-player campai
 ## What Is Built
 
 ### Engine & Scaffolding
-- Bevy 0.15 with `DefaultPlugins`, isometric orthographic 3D camera
+- Bevy 0.16 with `DefaultPlugins`, isometric orthographic 3D camera
+- `bevy_web_asset` registered before `DefaultPlugins` for `http://` asset URLs
 - WASD + edge-scroll camera pan; scroll wheel zoom; proper isometric angle
 - Feature-gated render module; `MinimalPlugins` path retained for headless tests
 - BRP (Bevy Remote Protocol) scaffold on port 15703 for headless test access
@@ -73,9 +74,10 @@ Current status: the game is feature-complete for a playable single-player campai
 - Unit facing (smooth rotation), death flash effects, building rubble on destruction
 - HUD: resource bar, unit info panel, production queue, minimap, mission objectives
 - Unit ability (Q key), tech tree panel (T key)
-- Audio event infrastructure ready (no .ogg assets yet)
+- Audio: 7 `AudioEvent` variants wired to kenney_aio OGGs via `process_audio_events`
 - LAN multiplayer MVP: host (H) or join (J) from title, TCP state sync at 10 Hz
-- `CINDERTIDE_MODEL_PATH` loads GLB models; falls back to colored cubes
+- 3D models: per-faction Synty GLBs (`model_file` in faction TOMLs), streamed from
+  `http://srv:49200/assets` by default; falls back to colored cubes if asset source unreachable
 
 ### Map Editor
 - Access via E (title) or Space→E (in-game pause); Escape returns to paused game
@@ -94,16 +96,16 @@ Priority order — highest first.
 
 | Item | Notes |
 |---|---|
-| Real audio assets | Infrastructure exists; needs `.ogg` files in `assets/audio/` |
 | Unit animations | Walk and attack cycles; units are currently static cubes/models |
 | Balance pass | Unit stats exist but are not tuned for fun |
+| Expand audio coverage | Tier-1 events wired; per-faction unit acknowledgement voices + music loops still unmapped |
 
 ### Medium Priority
 
 | Item | Notes |
 |---|---|
 | Multiplayer lobby hardening | TCP MVP works; needs slot-based team assignment and reconnect handling |
-| Real 3D model assets | Pipeline exists via `CINDERTIDE_MODEL_PATH`; no models converted yet |
+| HTTP asset cache on disk | `bevy_web_asset` fetches on every cold start; future ETag-aware on-disk cache to mitigate |
 | Architect finale text adaptation | Unlock logic exists; finale text branching on which faction was beaten first is stubbed, not authored |
 | Save/load mid-mission resume | In-memory slots work; mid-mission resume not fully tested |
 
@@ -122,12 +124,20 @@ Priority order — highest first.
 ## How to Run
 
 ```sh
-# Default: 3D client, colored cube placeholder mode
+# Default: 3D client. Streams GLBs/OGGs from http://srv:49200/assets
 cargo run --bin cindertide
 
-# With GLB models
-CINDERTIDE_MODEL_PATH=/path/to/models cargo run --bin cindertide
+# Point at a different HTTP asset server or a local mirror directory:
+CINDERTIDE_ASSET_BASE=http://my-server:8080/assets cargo run --bin cindertide
+CINDERTIDE_ASSET_BASE=/path/to/local/assets cargo run --bin cindertide
+
+# Legacy: filesystem-only override (kept for offline dev)
+CINDERTIDE_MODEL_PATH=/path/to/converted cargo run --bin cindertide
 ```
+
+Asset resolution order: `CINDERTIDE_ASSET_BASE` → `CINDERTIDE_MODEL_PATH` →
+`http://srv:49200/assets` (default). If none reach a valid source, the client
+falls back to colored cuboids + silent audio.
 
 Headless tests use `MinimalPlugins` and remain independent of the render path:
 
