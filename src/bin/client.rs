@@ -75,6 +75,7 @@ fn main() {
         .init_resource::<TechPanelVisible>()
         .init_resource::<FogOfWar>()
         .init_resource::<AudioEventQueue>()
+        .init_resource::<AudioAssets>()
         .init_resource::<MultiplayerRole>()
         .init_resource::<NetIdCounter>()
         .init_resource::<RemoteGameState>()
@@ -94,6 +95,8 @@ fn main() {
         .add_systems(Startup, load_narrative)
         .add_systems(Startup, startup_load_progress)
         .add_systems(Startup, load_model_assets)
+        // load_audio_assets must run after load_model_assets — it reads ModelAssets.source.
+        .add_systems(Startup, load_audio_assets.after(load_model_assets))
         .add_systems(Startup, startup_load_campaigns)
         .add_systems(Update, render_tiles)
         .add_systems(Update, sync_rendered_tile_colors)
@@ -635,12 +638,12 @@ struct DeathFlash {
 }
 
 // ── Audio event infrastructure ────────────────────────────────────────────────
-// Load .ogg files into `assets/audio/` and add `asset_server.load(...)` calls
-// here once real audio files are available. Wire each AudioEvent variant to a
-// corresponding Handle<AudioSource> stored in a resource, then play it from
-// `process_audio_events`.
+// Sounds map to kenney_aio packs hosted on the asset server. Paths are relative
+// to the `AssetSource` base resolved at startup. Each AudioEvent gets a single
+// pre-loaded Handle<AudioSource>; `process_audio_events` spawns short-lived
+// AudioPlayer entities (PlaybackSettings::DESPAWN) for each queued event.
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 enum AudioEvent {
     UnitSelected,
     UnitMoved,
@@ -653,6 +656,33 @@ enum AudioEvent {
 
 #[derive(Resource, Default)]
 struct AudioEventQueue(Vec<AudioEvent>);
+
+/// Pre-loaded handles for each `AudioEvent`. Populated by `load_audio_assets` at startup.
+/// Stays empty when `AssetSource::Placeholder` — `process_audio_events` no-ops gracefully.
+#[derive(Resource, Default)]
+struct AudioAssets {
+    unit_selected: Option<Handle<AudioSource>>,
+    unit_moved: Option<Handle<AudioSource>>,
+    combat: Option<Handle<AudioSource>>,
+    building_complete: Option<Handle<AudioSource>>,
+    ui_click: Option<Handle<AudioSource>>,
+    mission_start: Option<Handle<AudioSource>>,
+    mission_end: Option<Handle<AudioSource>>,
+}
+
+impl AudioAssets {
+    fn for_event(&self, event: AudioEvent) -> Option<&Handle<AudioSource>> {
+        match event {
+            AudioEvent::UnitSelected => self.unit_selected.as_ref(),
+            AudioEvent::UnitMoved => self.unit_moved.as_ref(),
+            AudioEvent::Combat => self.combat.as_ref(),
+            AudioEvent::BuildingComplete => self.building_complete.as_ref(),
+            AudioEvent::UiClick => self.ui_click.as_ref(),
+            AudioEvent::MissionStart => self.mission_start.as_ref(),
+            AudioEvent::MissionEnd => self.mission_end.as_ref(),
+        }
+    }
+}
 
 // ── Resources ────────────────────────────────────────────────────────────────
 
@@ -6544,15 +6574,58 @@ fn tick_death_flashes(
 }
 
 // ── Audio event processing ────────────────────────────────────────────────────
-// Load .ogg files into `assets/audio/` and add `asset_server.load(...)` calls
-// here once real audio files are available. For each AudioEvent variant, store
-// a Handle<AudioSource> in a resource and call `commands.spawn(AudioPlayer(handle))`
-// (or equivalent Bevy audio API) in the match below.
 
-fn process_audio_events(mut queue: ResMut<AudioEventQueue>) {
+/// Per-variant kenney_aio path (relative to the asset source root).
+const AUDIO_PATHS: &[(AudioEvent, &str)] = &[
+    (AudioEvent::UnitSelected, "kenney_aio/Audio/Interface Sounds/Audio/pluck_001.ogg"),
+    (AudioEvent::UnitMoved, "kenney_aio/Audio/Voiceover Pack/Audio (Male)/go.ogg"),
+    (AudioEvent::Combat, "kenney_aio/Audio/Impact Sounds/Audio/impactPlate_heavy_000.ogg"),
+    (AudioEvent::BuildingComplete, "kenney_aio/Audio/Music Jingles/Audio (Steeldrum)/jingles-steel_03.ogg"),
+    (AudioEvent::UiClick, "kenney_aio/Audio/UI Audio/Audio/mouseclick1.ogg"),
+    (AudioEvent::MissionStart, "kenney_aio/Audio/Synth Voice 1/Audio/begin.ogg"),
+    (AudioEvent::MissionEnd, "kenney_aio/Audio/Synth Voice 1/Audio/objective complete.ogg"),
+];
+
+/// Startup system: pre-load one `Handle<AudioSource>` per AudioEvent using the
+/// resolved asset source. No-ops when the source is `Placeholder`.
+fn load_audio_assets(
+    asset_server: Res<AssetServer>,
+    model_assets: Res<ModelAssets>,
+    mut audio: ResMut<AudioAssets>,
+) {
+    if matches!(model_assets.source, AssetSource::Placeholder) {
+        info!("No asset source configured — audio disabled");
+        return;
+    }
+    for (event, rel) in AUDIO_PATHS {
+        let Some(url) = model_assets.source.asset_path(rel) else { continue };
+        let handle: Handle<AudioSource> = asset_server.load(&url);
+        match event {
+            AudioEvent::UnitSelected => audio.unit_selected = Some(handle),
+            AudioEvent::UnitMoved => audio.unit_moved = Some(handle),
+            AudioEvent::Combat => audio.combat = Some(handle),
+            AudioEvent::BuildingComplete => audio.building_complete = Some(handle),
+            AudioEvent::UiClick => audio.ui_click = Some(handle),
+            AudioEvent::MissionStart => audio.mission_start = Some(handle),
+            AudioEvent::MissionEnd => audio.mission_end = Some(handle),
+        }
+    }
+    info!("Loaded {} audio handles", AUDIO_PATHS.len());
+}
+
+fn process_audio_events(
+    mut commands: Commands,
+    mut queue: ResMut<AudioEventQueue>,
+    audio: Res<AudioAssets>,
+) {
     for event in queue.0.drain(..) {
         trace!("audio event: {:?}", event);
-        // TODO: match event { AudioEvent::Combat => play combat_sfx, ... }
+        if let Some(handle) = audio.for_event(event) {
+            commands.spawn((
+                AudioPlayer::<AudioSource>(handle.clone()),
+                PlaybackSettings::DESPAWN,
+            ));
+        }
     }
 }
 
