@@ -48,6 +48,10 @@ path = "src/main.rs"
 name = "cindertide-play"
 path = "src/bin/play.rs"
 
+[[bin]]
+name = "seed_maps"
+path = "src/bin/seed_maps.rs"
+
 [features]
 default = []
 # Enables 3D rendering (DefaultPlugins, camera, mesh-per-unit). Off by

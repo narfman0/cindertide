@@ -381,7 +381,103 @@ struct SavedSpawnZone {
     suggested_team: Option<usize>,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+struct MapGrid {
+    /// One string per row (y). Each char maps to a terrain via the fixed
+    /// legend: `.`→grass, `M`→mud, `R`→road, `F`→forest, `U`→rubble,
+    /// `C`→corrupted, `V`→void. Unknown chars are skipped.
+    rows: Vec<String>,
+}
+
+fn grid_char_to_terrain(c: char) -> Option<&'static str> {
+    match c {
+        '.' => Some("grass"),
+        'M' => Some("mud"),
+        'R' => Some("road"),
+        'F' => Some("forest"),
+        'U' => Some("rubble"),
+        'C' => Some("corrupted"),
+        'V' => Some("void"),
+        _ => None,
+    }
+}
+
+impl MapGrid {
+    fn to_tiles(&self) -> Vec<SavedTile> {
+        let mut out = Vec::new();
+        for (y, row) in self.rows.iter().enumerate() {
+            for (x, ch) in row.chars().enumerate() {
+                if let Some(name) = grid_char_to_terrain(ch) {
+                    out.push(SavedTile {
+                        x: x as i32,
+                        y: y as i32,
+                        terrain: name.to_string(),
+                    });
+                }
+            }
+        }
+        out
+    }
+}
+
+#[derive(Deserialize)]
+struct RawSavedMap {
+    #[serde(default)]
+    tiles: Vec<SavedTile>,
+    #[serde(default)]
+    grid: Option<MapGrid>,
+    #[serde(default)]
+    units: Vec<SavedUnit>,
+    #[serde(default)]
+    buildings: Vec<SavedBuilding>,
+    #[serde(default)]
+    mission_type: Option<String>,
+    #[serde(default)]
+    player_faction: Option<String>,
+    #[serde(default)]
+    opponent_faction: Option<String>,
+    #[serde(default)]
+    deadline_seconds: Option<f32>,
+    #[serde(default)]
+    briefing_override: Option<String>,
+    #[serde(default)]
+    win_override: Option<String>,
+    #[serde(default)]
+    loss_override: Option<String>,
+    #[serde(default)]
+    mission_index_override: Option<usize>,
+    #[serde(default)]
+    script_events: Vec<ScriptEventDef>,
+    #[serde(default)]
+    spawn_zones: Vec<SavedSpawnZone>,
+}
+
+impl From<RawSavedMap> for SavedMap {
+    fn from(raw: RawSavedMap) -> Self {
+        let mut tiles = raw.tiles;
+        if let Some(grid) = raw.grid {
+            tiles.extend(grid.to_tiles());
+        }
+        SavedMap {
+            tiles,
+            units: raw.units,
+            buildings: raw.buildings,
+            mission_type: raw.mission_type,
+            player_faction: raw.player_faction,
+            opponent_faction: raw.opponent_faction,
+            deadline_seconds: raw.deadline_seconds,
+            briefing_override: raw.briefing_override,
+            win_override: raw.win_override,
+            loss_override: raw.loss_override,
+            mission_index_override: raw.mission_index_override,
+            script_events: raw.script_events,
+            spawn_zones: raw.spawn_zones,
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(from = "RawSavedMap")]
 struct SavedMap {
     tiles: Vec<SavedTile>,
     units: Vec<SavedUnit>,
