@@ -49,6 +49,9 @@ use serde::{Serialize, Deserialize};
 
 fn main() {
     App::new()
+        // WebAssetPlugin must be registered *before* DefaultPlugins so it can hook
+        // `http://` / `https://` asset sources before the `AssetPlugin` builds its registry.
+        .add_plugins(bevy_web_asset::WebAssetPlugin::default())
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: "Cindertide".into(),
@@ -974,15 +977,77 @@ struct NetBroadcastTimer(f32);
 
 // ── 3D model asset loading ────────────────────────────────────────────────────
 
-/// Holds the resolved directory path for GLB model files.
-/// `path` is `Some` only when `CINDERTIDE_MODEL_PATH` is set and the directory exists.
-/// When `None`, all visuals fall back to colored placeholder cuboids.
-#[derive(Resource, Default)]
-struct ModelAssets {
-    path: Option<PathBuf>,
+/// Where to look for GLB/OGG game assets.
+///
+/// Resolution order at startup (`load_model_assets`):
+///   1. `CINDERTIDE_ASSET_BASE` env — used verbatim if set. Accepts an http(s) URL
+///      or a local directory. (URLs require `bevy_web_asset::WebAssetPlugin` —
+///      installed in `main` before `DefaultPlugins`.)
+///   2. `CINDERTIDE_MODEL_PATH` env — legacy; treated as a local directory.
+///   3. Default: the shared asset server at `http://srv:49200/assets`.
+///
+/// `Placeholder` is only chosen when the resolved local directory is missing —
+/// HTTP bases are not validated at startup (the request is lazy).
+#[derive(Resource, Default, Clone)]
+enum AssetSource {
+    /// HTTP(S) base URL — no trailing slash, e.g. `http://srv:49200/assets`.
+    Http(String),
+    /// Local filesystem root containing pack subdirectories.
+    Local(PathBuf),
+    /// No source resolved — fall back to colored cuboids and silent audio.
+    #[default]
+    Placeholder,
 }
 
-/// Map a unit type id to its expected GLB scene filename (relative to the model directory).
+impl AssetSource {
+    /// Build the path/URL Bevy's `AssetServer::load` will resolve.
+    /// `relative` must be the `model_file` value (slash-separated, optionally with `#Scene0`).
+    fn asset_path(&self, relative: &str) -> Option<String> {
+        match self {
+            AssetSource::Http(base) => Some(format!("{}/{}", base, url_encode_path(relative))),
+            AssetSource::Local(dir) => Some(format!("{}/{}", dir.display(), relative)),
+            AssetSource::Placeholder => None,
+        }
+    }
+
+    /// For local sources, the on-disk path used to check existence before issuing
+    /// `AssetServer::load`. Returns `None` for HTTP sources (which are loaded eagerly).
+    fn local_file(&self, relative: &str) -> Option<PathBuf> {
+        match self {
+            AssetSource::Local(dir) => {
+                let bare = relative.split('#').next().unwrap_or(relative);
+                Some(dir.join(bare))
+            }
+            _ => None,
+        }
+    }
+}
+
+/// Holds the resolved asset source for the running session.
+#[derive(Resource, Default)]
+struct ModelAssets {
+    source: AssetSource,
+}
+
+/// Percent-encode the chars that are common in Synty asset paths but illegal in raw URLs.
+/// Keeps `/` and `#` (used for Bevy's GLTF scene fragment) literal. Targeted instead of full
+/// urlencoding because the kenney/Synty path set only contains ` `, `(`, `)`, and `,`.
+fn url_encode_path(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            ' ' => out.push_str("%20"),
+            '(' => out.push_str("%28"),
+            ')' => out.push_str("%29"),
+            ',' => out.push_str("%2C"),
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
+/// Map a unit type id to its expected GLB scene filename (used when faction TOML
+/// lacks an explicit `model_file`).
 fn unit_model_name(unit_type: &UnitTypeId) -> String {
     format!("unit_{}.glb#Scene0", unit_type.id())
 }
@@ -992,22 +1057,42 @@ fn building_model_name(building_type: &BuildingTypeId) -> String {
     format!("building_{}.glb#Scene0", building_type.id())
 }
 
-/// Startup system: resolve `CINDERTIDE_MODEL_PATH` and populate `ModelAssets`.
+/// Default asset server: nginx instance hosting Synty GLB packs + kenney_aio audio.
+const DEFAULT_ASSET_BASE: &str = "http://srv:49200/assets";
+
+/// Startup system: resolve env vars and populate `ModelAssets.source`.
 fn load_model_assets(mut model_assets: ResMut<ModelAssets>) {
-    match std::env::var("CINDERTIDE_MODEL_PATH") {
-        Ok(val) => {
-            let path = PathBuf::from(&val);
-            if path.is_dir() {
-                info!("3D models loaded from: {}", val);
-                model_assets.path = Some(path);
-            } else {
-                info!("CINDERTIDE_MODEL_PATH set but directory not found — using placeholder geometry");
-            }
+    // Highest priority: explicit override (URL or directory).
+    if let Ok(val) = std::env::var("CINDERTIDE_ASSET_BASE") {
+        let trimmed = val.trim_end_matches('/').to_string();
+        if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+            info!("Assets streamed from: {}", trimmed);
+            model_assets.source = AssetSource::Http(trimmed);
+            return;
         }
-        Err(_) => {
-            info!("CINDERTIDE_MODEL_PATH not set — using placeholder geometry");
+        let path = PathBuf::from(&val);
+        if path.is_dir() {
+            info!("Assets loaded from local dir: {}", val);
+            model_assets.source = AssetSource::Local(path);
+            return;
         }
+        warn!("CINDERTIDE_ASSET_BASE='{}' is neither a URL nor an existing directory — falling back", val);
     }
+
+    // Legacy: filesystem path only.
+    if let Ok(val) = std::env::var("CINDERTIDE_MODEL_PATH") {
+        let path = PathBuf::from(&val);
+        if path.is_dir() {
+            info!("Assets loaded from local dir (legacy CINDERTIDE_MODEL_PATH): {}", val);
+            model_assets.source = AssetSource::Local(path);
+            return;
+        }
+        warn!("CINDERTIDE_MODEL_PATH='{}' not a directory — falling back", val);
+    }
+
+    // Default: shared asset server.
+    info!("Assets streamed from default: {}", DEFAULT_ASSET_BASE);
+    model_assets.source = AssetSource::Http(DEFAULT_ASSET_BASE.to_string());
 }
 
 /// Latest game state received from host (client only).
@@ -2811,32 +2896,28 @@ fn spawn_unit_visuals(
     for (entity, pos, faction, unit_type) in &units {
         let world_pos = grid_to_world(pos.pos.x, pos.pos.y) + Vec3::Y * 0.75;
 
-        // Attempt to load a GLB model if CINDERTIDE_MODEL_PATH is set.
-        // Scale factor 0.01 assumes Synty-style centimetre-unit exports — tune per asset pack.
-        let visual = if let Some(ref dir) = model_assets.path {
-            let glb_name = loaded.faction_unit(faction.id(), unit_type.id())
-                .map(|def| def.model_file.clone())
-                .filter(|s| !s.is_empty())
-                .unwrap_or_else(|| unit_model_name(unit_type));
-            // Strip the "#Scene0" fragment to get the bare file name for existence check.
-            let file_name = glb_name.split('#').next().unwrap_or(&glb_name);
-            let full_path = dir.join(file_name);
-            if full_path.exists() {
-                commands.spawn((
-                    SceneRoot(asset_server.load(format!("{}/{}", dir.display(), glb_name))),
-                    Transform::from_translation(world_pos).with_scale(Vec3::splat(0.01)),
-                )).id()
-            } else {
-                // File missing — fall back to cuboid placeholder.
-                let color = faction_color(faction);
-                commands.spawn((
-                    Mesh3d(meshes.add(Cuboid::new(0.6, 1.5, 0.6))),
-                    MeshMaterial3d(materials.add(StandardMaterial { base_color: color, ..default() })),
-                    Transform::from_translation(world_pos),
-                )).id()
-            }
+        let glb_name = loaded.faction_unit(faction.id(), unit_type.id())
+            .map(|def| def.model_file.clone())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| unit_model_name(unit_type));
+
+        // Local sources do an existence check first to avoid an asset-load error on
+        // a missing file. HTTP sources skip the check (lazy fetch). Scale 0.01
+        // assumes Synty-style centimetre-unit exports — tune per asset pack.
+        let local_missing = model_assets
+            .source
+            .local_file(&glb_name)
+            .map(|p| !p.exists())
+            .unwrap_or(false);
+
+        let visual = if let (false, Some(asset_path)) =
+            (local_missing, model_assets.source.asset_path(&glb_name))
+        {
+            commands.spawn((
+                SceneRoot(asset_server.load(&asset_path)),
+                Transform::from_translation(world_pos).with_scale(Vec3::splat(0.01)),
+            )).id()
         } else {
-            // No model path configured — use colored cuboid.
             let color = faction_color(faction);
             commands.spawn((
                 Mesh3d(meshes.add(Cuboid::new(0.6, 1.5, 0.6))),
@@ -2910,31 +2991,27 @@ fn spawn_building_visuals(
         }
         let world_pos = grid_to_world(pos.pos.x, pos.pos.y) + Vec3::Y * 0.5;
 
-        // Attempt to load a GLB model if CINDERTIDE_MODEL_PATH is set.
-        // Scale factor 0.015 assumes Synty-style centimetre-unit exports — tune per asset pack.
-        let visual = if let Some(ref dir) = model_assets.path {
-            let glb_name = loaded.faction_building(faction.id(), building_type.id())
-                .map(|def| def.model_file.clone())
-                .filter(|s| !s.is_empty())
-                .unwrap_or_else(|| building_model_name(building_type));
-            let file_name = glb_name.split('#').next().unwrap_or(&glb_name);
-            let full_path = dir.join(file_name);
-            if full_path.exists() {
-                commands.spawn((
-                    SceneRoot(asset_server.load(format!("{}/{}", dir.display(), glb_name))),
-                    Transform::from_translation(world_pos).with_scale(Vec3::splat(0.015)),
-                )).id()
-            } else {
-                // File missing — fall back to cuboid placeholder.
-                let color = faction_color(faction).mix(&Color::WHITE, 0.25);
-                commands.spawn((
-                    Mesh3d(meshes.add(Cuboid::new(0.9, 1.0, 0.9))),
-                    MeshMaterial3d(materials.add(StandardMaterial { base_color: color, ..default() })),
-                    Transform::from_translation(world_pos),
-                )).id()
-            }
+        let glb_name = loaded.faction_building(faction.id(), building_type.id())
+            .map(|def| def.model_file.clone())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| building_model_name(building_type));
+
+        // See `spawn_unit_visuals` for the local/HTTP resolution pattern.
+        // Scale 0.015 assumes Synty-style centimetre-unit exports.
+        let local_missing = model_assets
+            .source
+            .local_file(&glb_name)
+            .map(|p| !p.exists())
+            .unwrap_or(false);
+
+        let visual = if let (false, Some(asset_path)) =
+            (local_missing, model_assets.source.asset_path(&glb_name))
+        {
+            commands.spawn((
+                SceneRoot(asset_server.load(&asset_path)),
+                Transform::from_translation(world_pos).with_scale(Vec3::splat(0.015)),
+            )).id()
         } else {
-            // No model path configured — use colored cuboid.
             let color = faction_color(faction).mix(&Color::WHITE, 0.25);
             commands.spawn((
                 Mesh3d(meshes.add(Cuboid::new(0.9, 1.0, 0.9))),

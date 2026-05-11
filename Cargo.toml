@@ -20,9 +20,12 @@ bevy = { version = "0.16", default-features = false, features = [
     "bevy_mesh_picking_backend",
     "bevy_ui",
     "bevy_text",
+    "bevy_audio",
+    "vorbis",
     "x11",
     "default_font",
 ] }
+bevy_web_asset = "0.11"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"
