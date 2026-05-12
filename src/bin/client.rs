@@ -3682,6 +3682,7 @@ fn edge_scroll(
     windows: Query<&Window>,
     time: Res<Time>,
     screen: Res<ClientScreen>,
+    mut camera_target: ResMut<CameraTarget>,
 ) {
     if !matches!(*screen, ClientScreen::InMission | ClientScreen::TestMission { .. } | ClientScreen::MapEditor) {
         return;
@@ -3698,7 +3699,13 @@ fn edge_scroll(
     if cursor.x > w - margin { pan += Vec3::new(1.0, 0.0, -1.0).normalize(); }
     if cursor.y < margin { pan += Vec3::new(-1.0, 0.0, -1.0).normalize(); }
     if cursor.y > h - margin { pan += Vec3::new(1.0, 0.0, 1.0).normalize(); }
-    transform.translation += pan * cam.pan_speed * dt;
+    if pan != Vec3::ZERO {
+        // Edge-scroll cancels scripted focus the same way WASD does.
+        if !matches!(*camera_target, CameraTarget::Free) {
+            *camera_target = CameraTarget::Free;
+        }
+        transform.translation += pan * cam.pan_speed * dt;
+    }
 }
 
 fn camera_pan_zoom(
