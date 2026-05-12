@@ -20,6 +20,7 @@ use cindertide::units::{MoveTarget, MoveProgress, UnitKind};
 use cindertide::buildings::Built;
 use cindertide::production::{ProductionQueue, unit_production_seconds};
 use cindertide::mission_script::{MissionScriptPlugin, ScriptState};
+use cindertide::camera::CameraTarget;
 use cindertide::{
     map::MapPlugin,
     units::UnitPlugin,
@@ -88,6 +89,7 @@ fn main() {
         .init_resource::<FogOfWar>()
         .init_resource::<AudioEventQueue>()
         .init_resource::<AudioAssets>()
+        .init_resource::<CameraSnapped>()
         .init_resource::<MultiplayerRole>()
         .init_resource::<NetIdCounter>()
         .init_resource::<RemoteGameState>()
@@ -116,6 +118,10 @@ fn main() {
         .add_systems(Update, sync_unit_positions)
         .add_systems(Update, spawn_building_visuals)
         .add_systems(Update, camera_pan_zoom)
+        // snap_camera_on_mission_start must run before camera_follow_target so the
+        // initial CameraTarget is honored on the same frame the home base spawns.
+        .add_systems(Update, snap_camera_on_mission_start)
+        .add_systems(Update, camera_follow_target.after(snap_camera_on_mission_start).after(camera_pan_zoom))
         .add_systems(Update, edge_scroll)
         .add_systems(Update, handle_mouse_input)
         .add_systems(Update, handle_editor_mouse_input)
@@ -3701,6 +3707,7 @@ fn camera_pan_zoom(
     mut scroll: EventReader<MouseWheel>,
     time: Res<Time>,
     screen: Res<ClientScreen>,
+    mut camera_target: ResMut<CameraTarget>,
 ) {
     if *screen != ClientScreen::InMission && *screen != ClientScreen::MapEditor {
         // Still consume scroll events to avoid buildup
@@ -3716,13 +3723,91 @@ fn camera_pan_zoom(
     if keys.pressed(KeyCode::KeyS) { pan += Vec3::new(1.0, 0.0, 1.0).normalize(); }
     if keys.pressed(KeyCode::KeyA) { pan += Vec3::new(-1.0, 0.0, 1.0).normalize(); }
     if keys.pressed(KeyCode::KeyD) { pan += Vec3::new(1.0, 0.0, -1.0).normalize(); }
-    transform.translation += pan * cam.pan_speed * dt;
+    if pan != Vec3::ZERO {
+        // User-driven pan cancels any scripted camera focus.
+        if !matches!(*camera_target, CameraTarget::Free) {
+            *camera_target = CameraTarget::Free;
+        }
+        transform.translation += pan * cam.pan_speed * dt;
+    }
 
     if let Projection::Orthographic(ref mut ortho) = *projection {
         for ev in scroll.read() {
             ortho.scale = (ortho.scale - ev.y * cam.zoom_speed).clamp(4.0, 120.0);
         }
     }
+}
+
+/// Tracks whether the camera has been snapped to the player home base for the
+/// current mission run. Reset when leaving the in-mission screen so the next
+/// mission gets its own snap.
+#[derive(Resource, Default)]
+struct CameraSnapped(bool);
+
+/// Offset preserved from `setup_scene`: camera sits at look-at + (10, 10, 10).
+/// Keeping this consistent across snap and follow keeps the isometric framing.
+const CAMERA_OFFSET: Vec3 = Vec3::new(10.0, 10.0, 10.0);
+
+/// One-shot system: on first frame of `ClientScreen::InMission` with a player
+/// `command_bunker` present, set `CameraTarget::LookAt(avg base position)`.
+/// Reset the latch when the screen leaves InMission so the next mission re-snaps.
+fn snap_camera_on_mission_start(
+    screen: Res<ClientScreen>,
+    mut snapped: ResMut<CameraSnapped>,
+    mut camera_target: ResMut<CameraTarget>,
+    player_faction: Option<Res<PlayerFaction>>,
+    buildings: Query<(&BuildingPos, &Faction, &BuildingTypeId)>,
+) {
+    let in_mission = matches!(*screen, ClientScreen::InMission | ClientScreen::TestMission { .. });
+    if !in_mission {
+        if snapped.0 { snapped.0 = false; }
+        return;
+    }
+    if snapped.0 { return; }
+    let Some(pf) = player_faction.as_deref() else { return };
+
+    let mut sum_x = 0i64;
+    let mut sum_y = 0i64;
+    let mut count = 0i64;
+    for (pos, faction, bt) in &buildings {
+        if *faction == pf.0 && bt.id() == "command_bunker" {
+            sum_x += pos.pos.x as i64;
+            sum_y += pos.pos.y as i64;
+            count += 1;
+        }
+    }
+    if count == 0 { return; }
+    let cx = (sum_x as f32) / (count as f32);
+    let cy = (sum_y as f32) / (count as f32);
+    *camera_target = CameraTarget::LookAt(Vec3::new(cx, 0.0, cy));
+    snapped.0 = true;
+}
+
+/// Tween the camera toward `CameraTarget` each frame. `Free` is a no-op
+/// (user-driven panning lives in `camera_pan_zoom`). For `LookAt` / `Follow`,
+/// we target `subject + CAMERA_OFFSET` and lerp the transform; user input in
+/// `camera_pan_zoom` resets the target to `Free`.
+fn camera_follow_target(
+    target: Res<CameraTarget>,
+    mut cam_q: Query<&mut Transform, With<IsometricCamera>>,
+    transforms_q: Query<&Transform, Without<IsometricCamera>>,
+    time: Res<Time>,
+) {
+    let look_at_world = match &*target {
+        CameraTarget::Free => return,
+        CameraTarget::LookAt(p) => *p,
+        CameraTarget::Follow(e) => {
+            let Ok(t) = transforms_q.get(*e) else { return };
+            t.translation
+        }
+    };
+
+    let Ok(mut cam_xf) = cam_q.single_mut() else { return };
+    let desired = look_at_world + CAMERA_OFFSET;
+    // Frame-rate-independent exponential lerp: ~4 second time-to-half by tau.
+    let alpha = 1.0 - (-time.delta_secs() * 6.0).exp();
+    cam_xf.translation = cam_xf.translation.lerp(desired, alpha.clamp(0.0, 1.0));
+    cam_xf.look_at(look_at_world, Vec3::Y);
 }
 
 // ── Editor systems ─────────────────────────────────────────────────────────────

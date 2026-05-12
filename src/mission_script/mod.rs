@@ -8,9 +8,11 @@ use serde::Deserialize;
 use std::collections::{HashSet, VecDeque};
 
 use crate::beats::{BeatId, FiredBeats};
+use crate::buildings::{BuildingPos, BuildingTypeId};
+use crate::camera::{CameraFocusTarget, CameraTarget};
 use crate::map::{Faction, GridPos};
 use crate::mission::Mission;
-use crate::units::{UnitBundle, HomeBase};
+use crate::units::{UnitBundle, UnitPos, UnitTypeId, HomeBase};
 use crate::factions::LoadedFactions;
 
 // ── Data types ────────────────────────────────────────────────────────────────
@@ -49,6 +51,11 @@ pub enum Action {
     ChangeObjective { text: String },
     WinMission,
     LoseMission,
+    /// Direct camera at a focus target. The camera tweens smoothly; user WASD input
+    /// will override the focus and return to free-look.
+    CameraFocus { target: CameraFocusTarget },
+    /// Release scripted focus — camera returns to free-look (preserving its current pose).
+    CameraRelease,
 }
 
 impl MissionScript {
@@ -130,6 +137,9 @@ pub fn script_tick_system(
     fired_beats: Res<FiredBeats>,
     mut mission_q: Query<&mut Mission>,
     loaded: Res<LoadedFactions>,
+    mut camera_target: ResMut<CameraTarget>,
+    units_q: Query<(Entity, &Faction, &UnitTypeId, &UnitPos)>,
+    buildings_q: Query<(&Faction, &BuildingTypeId, &BuildingPos)>,
 ) {
     let dt = time.delta_secs();
 
@@ -239,10 +249,60 @@ pub fn script_tick_system(
                         }
                     }
                 }
+                Action::CameraFocus { target } => {
+                    if let Some(new_target) = resolve_camera_target(
+                        target, mission_q.iter().next(), &units_q, &buildings_q,
+                    ) {
+                        *camera_target = new_target;
+                    }
+                }
+                Action::CameraRelease => {
+                    *camera_target = CameraTarget::Free;
+                }
             }
         }
 
         script_state.fired.insert(event_id);
+    }
+}
+
+// ── Camera focus resolution ───────────────────────────────────────────────────
+
+fn resolve_camera_target(
+    focus: &CameraFocusTarget,
+    mission: Option<&Mission>,
+    units_q: &Query<(Entity, &Faction, &UnitTypeId, &UnitPos)>,
+    buildings_q: &Query<(&Faction, &BuildingTypeId, &BuildingPos)>,
+) -> Option<CameraTarget> {
+    match focus {
+        CameraFocusTarget::HomeBase => {
+            let player_faction = mission.map(|m| m.player_faction.clone())?;
+            // Average grid position of the player's command_bunker buildings.
+            let mut sum = (0i64, 0i64);
+            let mut count = 0i64;
+            for (f, bt, pos) in buildings_q.iter() {
+                if *f == player_faction && bt.id() == "command_bunker" {
+                    sum.0 += pos.pos.x as i64;
+                    sum.1 += pos.pos.y as i64;
+                    count += 1;
+                }
+            }
+            if count == 0 { return None; }
+            let cx = (sum.0 / count) as f32;
+            let cy = (sum.1 / count) as f32;
+            Some(CameraTarget::LookAt(Vec3::new(cx, 0.0, cy)))
+        }
+        CameraFocusTarget::Position { x, y } => {
+            Some(CameraTarget::LookAt(Vec3::new(*x as f32, 0.0, *y as f32)))
+        }
+        CameraFocusTarget::Unit { faction, unit_type } => {
+            let target_faction = parse_faction(faction);
+            let target_id = parse_unit_type_id(unit_type);
+            units_q
+                .iter()
+                .find(|(_, f, t, _)| **f == target_faction && t.id() == target_id)
+                .map(|(e, _, _, _)| CameraTarget::Follow(e))
+        }
     }
 }
 
@@ -253,6 +313,7 @@ pub struct MissionScriptPlugin;
 impl Plugin for MissionScriptPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ScriptState>();
+        app.init_resource::<CameraTarget>();
         app.add_systems(Update, script_tick_system);
     }
 }

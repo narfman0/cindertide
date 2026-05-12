@@ -28,6 +28,7 @@ pub mod ai;
 pub mod tui;
 pub mod narrative;
 pub mod mission_script;
+pub mod camera;
 
 use map::{MapPlugin, GridPos, Faction, ControlPoint, ControlPointType};
 use units::{UnitPlugin, MoveTarget, MoveProgress, UnitPos, UnitKind, UnitBundle};
