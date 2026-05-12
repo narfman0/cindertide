@@ -73,6 +73,36 @@ pub enum CameraTarget {
 #[derive(Component, Clone, Debug)]
 pub struct CinematicFraming(pub String);
 
+/// Active camera-shake state. Decays toward zero over `duration` seconds.
+/// `intensity` is the world-space amplitude of the per-frame jitter.
+///
+/// Typical values: 0.05 for a heavy footstep, 0.2 for an explosion, 0.5 for
+/// a Hollow corruption-zone reveal. Above ~1.0 the camera feels broken.
+#[derive(Resource, Default, Clone, Debug)]
+pub struct CameraShake {
+    pub intensity: f32,
+    pub remaining: f32,
+    pub total: f32,
+}
+
+impl CameraShake {
+    pub fn trigger(&mut self, intensity: f32, duration: f32) {
+        // Take the max so a stronger shake overrides a weaker one in progress
+        // rather than fading mid-event.
+        if intensity > self.intensity {
+            self.intensity = intensity;
+        }
+        self.remaining = self.remaining.max(duration);
+        self.total = self.total.max(duration);
+    }
+
+    /// Linear decay multiplier 0..1 based on remaining/total.
+    pub fn amplitude(&self) -> f32 {
+        if self.total <= 0.0 || self.remaining <= 0.0 { return 0.0; }
+        self.intensity * (self.remaining / self.total)
+    }
+}
+
 /// Script-level camera focus target. Resolved against the live ECS in
 /// `script_tick_system` and written into the global `CameraTarget` resource.
 #[derive(Debug, Clone, Deserialize)]

@@ -9,7 +9,7 @@ use std::collections::{HashSet, VecDeque};
 
 use crate::beats::{BeatId, FiredBeats};
 use crate::buildings::{BuildingPos, BuildingTypeId};
-use crate::camera::{framing_for, CameraFocusTarget, CameraTarget, CinematicFraming, FramingPreset};
+use crate::camera::{framing_for, CameraFocusTarget, CameraShake, CameraTarget, CinematicFraming, FramingPreset};
 use crate::map::{Faction, GridPos};
 use crate::mission::Mission;
 use crate::units::{UnitBundle, UnitPos, UnitTypeId, HomeBase};
@@ -65,6 +65,10 @@ pub enum Action {
     },
     /// Release scripted focus — camera returns to free-look (preserving its current pose).
     CameraRelease,
+    /// Shake the camera with the given world-space amplitude over `duration` seconds.
+    /// Intensities of ~0.05 read as small jolts; ~0.2 reads as an explosion;
+    /// ~0.5 is heavy/uncanny (good for Hollow events).
+    CameraShake { intensity: f32, duration: f32 },
 }
 
 impl MissionScript {
@@ -147,6 +151,7 @@ pub fn script_tick_system(
     mut mission_q: Query<&mut Mission>,
     loaded: Res<LoadedFactions>,
     mut camera_target: ResMut<CameraTarget>,
+    mut camera_shake: ResMut<CameraShake>,
     units_q: Query<(Entity, &Faction, &UnitTypeId, &UnitPos)>,
     buildings_q: Query<(&Faction, &BuildingTypeId, &BuildingPos)>,
     cinematic_q: Query<&CinematicFraming>,
@@ -275,6 +280,9 @@ pub fn script_tick_system(
                 Action::CameraRelease => {
                     *camera_target = CameraTarget::Free;
                 }
+                Action::CameraShake { intensity, duration } => {
+                    camera_shake.trigger(*intensity, *duration);
+                }
             }
         }
 
@@ -387,6 +395,7 @@ impl Plugin for MissionScriptPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ScriptState>();
         app.init_resource::<CameraTarget>();
+        app.init_resource::<CameraShake>();
         app.add_systems(Update, script_tick_system);
     }
 }

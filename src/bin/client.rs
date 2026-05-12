@@ -20,7 +20,7 @@ use cindertide::units::{MoveTarget, MoveProgress, UnitKind};
 use cindertide::buildings::Built;
 use cindertide::production::{ProductionQueue, unit_production_seconds};
 use cindertide::mission_script::{MissionScriptPlugin, ScriptState};
-use cindertide::camera::{framing_for, CameraTarget};
+use cindertide::camera::{framing_for, CameraShake, CameraTarget, CinematicFraming};
 use cindertide::{
     map::MapPlugin,
     units::UnitPlugin,
@@ -118,10 +118,15 @@ fn main() {
         .add_systems(Update, sync_unit_positions)
         .add_systems(Update, spawn_building_visuals)
         .add_systems(Update, camera_pan_zoom)
+        // attach_cinematic_framing must run before any camera resolver consults the component,
+        // and before script_tick_system (which is in MissionScriptPlugin's Update set).
+        .add_systems(Update, attach_cinematic_framing)
         // snap_camera_on_mission_start must run before camera_follow_target so the
         // initial CameraTarget is honored on the same frame the home base spawns.
         .add_systems(Update, snap_camera_on_mission_start)
         .add_systems(Update, camera_follow_target.after(snap_camera_on_mission_start).after(camera_pan_zoom))
+        // apply_camera_shake jitters the camera AFTER follow_target writes the smoothed pose.
+        .add_systems(Update, apply_camera_shake.after(camera_follow_target))
         .add_systems(Update, edge_scroll)
         .add_systems(Update, handle_mouse_input)
         .add_systems(Update, handle_editor_mouse_input)
@@ -3793,6 +3798,59 @@ fn snap_camera_on_mission_start(
         framing: framing_for("isometric"),
     };
     snapped.0 = true;
+}
+
+/// Auto-attach `CinematicFraming` to newly-spawned units/buildings whose def
+/// declares a `cinematic_framing` value. Lets per-entity camera presets flow
+/// from TOML → ECS without touching every spawn site in lib.rs / client.rs.
+fn attach_cinematic_framing(
+    mut commands: Commands,
+    loaded: Res<LoadedFactions>,
+    units: Query<(Entity, &Faction, &UnitTypeId), Added<UnitTypeId>>,
+    buildings: Query<(Entity, &Faction, &BuildingTypeId), Added<BuildingTypeId>>,
+) {
+    for (e, faction, ut) in &units {
+        if let Some(def) = loaded.faction_unit(&faction.0, ut.id()) {
+            if !def.cinematic_framing.is_empty() {
+                commands.entity(e).insert(CinematicFraming(def.cinematic_framing.clone()));
+            }
+        }
+    }
+    for (e, faction, bt) in &buildings {
+        if let Some(def) = loaded.faction_building(&faction.0, bt.id()) {
+            if !def.cinematic_framing.is_empty() {
+                commands.entity(e).insert(CinematicFraming(def.cinematic_framing.clone()));
+            }
+        }
+    }
+}
+
+/// Apply `CameraShake` as a per-frame world-space jitter added to the camera
+/// transform AFTER `camera_follow_target` writes the smoothed position.
+/// Intensity decays linearly toward zero over `total` seconds.
+fn apply_camera_shake(
+    mut shake: ResMut<CameraShake>,
+    mut cam_q: Query<&mut Transform, With<IsometricCamera>>,
+    time: Res<Time>,
+) {
+    if shake.remaining <= 0.0 {
+        if shake.intensity != 0.0 {
+            shake.intensity = 0.0;
+            shake.total = 0.0;
+        }
+        return;
+    }
+    let amp = shake.amplitude();
+    let dt = time.delta_secs();
+    shake.remaining = (shake.remaining - dt).max(0.0);
+    let Ok(mut cam_xf) = cam_q.single_mut() else { return };
+    // Cheap deterministic noise from elapsed time. Not seeded — fine for
+    // a brief visual shake. Each axis decorrelates via different multipliers.
+    let t = time.elapsed_secs() * 30.0;
+    let jx = (t.sin() * 1.7 + (t * 1.3).cos() * 0.5) * amp;
+    let jy = ((t * 1.1).sin() * 0.6 + (t * 0.7).cos()) * amp * 0.5;
+    let jz = ((t * 0.9).cos() * 1.5 + (t * 1.5).sin() * 0.4) * amp;
+    cam_xf.translation += Vec3::new(jx, jy, jz);
 }
 
 /// Tween the camera toward `CameraTarget` each frame. `Free` is a no-op
