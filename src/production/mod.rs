@@ -146,6 +146,7 @@ mod tests {
             build_time_seconds: 8.0,
             ability_q: String::new(),
             model_file: String::new(),
+            cinematic_framing: String::new(),
             description: String::new(),
         });
         loaded.buildings.insert("barracks".to_string(), crate::factions::BuildingDef {
@@ -158,6 +159,7 @@ mod tests {
             model_file: String::new(),
             description: String::new(),
             trickle_fuel: 0.0, trickle_scrap: 0.0, trickle_manpower: 0.0, vision_radius: 0.0,
+            cinematic_framing: String::new(),
         });
         loaded.buildings.insert("refinery".to_string(), crate::factions::BuildingDef {
             id: "refinery".to_string(),
@@ -169,6 +171,7 @@ mod tests {
             model_file: String::new(),
             description: String::new(),
             trickle_fuel: 0.0, trickle_scrap: 0.0, trickle_manpower: 0.0, vision_radius: 0.0,
+            cinematic_framing: String::new(),
         });
         loaded
     }

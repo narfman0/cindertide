@@ -30,6 +30,9 @@ pub struct UnitDef {
     #[serde(default)] pub ability_q: String,
     #[serde(default)] pub model_file: String,
     #[serde(default)] pub description: String,
+    /// Named camera framing preset used when a script focuses on this unit
+    /// without an explicit override (see `crate::camera::framing_for`).
+    #[serde(default)] pub cinematic_framing: String,
 }
 
 fn default_build_time() -> f32 { 10.0 }
@@ -49,6 +52,8 @@ pub struct BuildingDef {
     #[serde(default)] pub trickle_scrap: f32,
     #[serde(default)] pub trickle_manpower: f32,
     #[serde(default)] pub vision_radius: f32,
+    /// Per-building framing override (e.g., a Command Bunker might use "wide_establishing").
+    #[serde(default)] pub cinematic_framing: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -84,6 +89,10 @@ pub struct FactionDef {
     #[serde(default)] pub units: Vec<UnitDef>,
     #[serde(default)] pub buildings: Vec<BuildingDef>,
     #[serde(default)] pub loadouts: Vec<FactionLoadoutDef>,
+    /// Default camera framing preset for cinematic shots involving this faction
+    /// (used when a `CameraFocus` script action doesn't specify one explicitly).
+    /// Falls back to "isometric" when empty.
+    #[serde(default)] pub cinematic_framing: String,
 }
 
 #[derive(Resource, Default, Clone)]

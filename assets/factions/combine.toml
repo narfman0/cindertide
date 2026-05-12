@@ -3,6 +3,8 @@ display_name = "The Combine"
 color = [0.98, 0.82, 0.05]
 ai_script = "ai/combine.lua"
 default_opponent = "ironborn"
+# Corporate, surveillance-tower POV — looking down at the field of operations.
+cinematic_framing = "over_shoulder"
 
 [[units]]
 id = "riflemen"

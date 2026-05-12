@@ -9,7 +9,7 @@ use std::collections::{HashSet, VecDeque};
 
 use crate::beats::{BeatId, FiredBeats};
 use crate::buildings::{BuildingPos, BuildingTypeId};
-use crate::camera::{CameraFocusTarget, CameraTarget};
+use crate::camera::{framing_for, CameraFocusTarget, CameraTarget, CinematicFraming, FramingPreset};
 use crate::map::{Faction, GridPos};
 use crate::mission::Mission;
 use crate::units::{UnitBundle, UnitPos, UnitTypeId, HomeBase};
@@ -53,7 +53,16 @@ pub enum Action {
     LoseMission,
     /// Direct camera at a focus target. The camera tweens smoothly; user WASD input
     /// will override the focus and return to free-look.
-    CameraFocus { target: CameraFocusTarget },
+    ///
+    /// `framing` resolution chain when omitted:
+    ///   1. `CinematicFraming` component on the target entity (Unit / building)
+    ///   2. The relevant unit/building def's `cinematic_framing` field
+    ///   3. The relevant faction's `cinematic_framing` default
+    ///   4. `"isometric"` fallback
+    CameraFocus {
+        target: CameraFocusTarget,
+        #[serde(default)] framing: Option<String>,
+    },
     /// Release scripted focus — camera returns to free-look (preserving its current pose).
     CameraRelease,
 }
@@ -140,6 +149,7 @@ pub fn script_tick_system(
     mut camera_target: ResMut<CameraTarget>,
     units_q: Query<(Entity, &Faction, &UnitTypeId, &UnitPos)>,
     buildings_q: Query<(&Faction, &BuildingTypeId, &BuildingPos)>,
+    cinematic_q: Query<&CinematicFraming>,
 ) {
     let dt = time.delta_secs();
 
@@ -249,9 +259,15 @@ pub fn script_tick_system(
                         }
                     }
                 }
-                Action::CameraFocus { target } => {
+                Action::CameraFocus { target, framing } => {
                     if let Some(new_target) = resolve_camera_target(
-                        target, mission_q.iter().next(), &units_q, &buildings_q,
+                        target,
+                        framing.as_deref(),
+                        mission_q.iter().next(),
+                        &loaded,
+                        &units_q,
+                        &buildings_q,
+                        &cinematic_q,
                     ) {
                         *camera_target = new_target;
                     }
@@ -268,11 +284,49 @@ pub fn script_tick_system(
 
 // ── Camera focus resolution ───────────────────────────────────────────────────
 
+/// Pick the framing preset for a focus target. Resolution chain:
+///   1. Explicit `script_framing` from the `CameraFocus` action
+///   2. `CinematicFraming` component on the followed entity
+///   3. The followed unit/building's `cinematic_framing` field in its TOML def
+///   4. The faction's `cinematic_framing` default
+///   5. `"isometric"` (the gameplay default)
+fn pick_framing(
+    script_framing: Option<&str>,
+    entity: Option<Entity>,
+    def_framing: Option<&str>,
+    faction: Option<&Faction>,
+    loaded: &LoadedFactions,
+    cinematic_q: &Query<&CinematicFraming>,
+) -> FramingPreset {
+    if let Some(name) = script_framing {
+        return framing_for(name);
+    }
+    if let Some(e) = entity {
+        if let Ok(c) = cinematic_q.get(e) {
+            return framing_for(&c.0);
+        }
+    }
+    if let Some(name) = def_framing {
+        if !name.is_empty() { return framing_for(name); }
+    }
+    if let Some(f) = faction {
+        if let Some(fd) = loaded.factions.get(&f.0) {
+            if !fd.cinematic_framing.is_empty() {
+                return framing_for(&fd.cinematic_framing);
+            }
+        }
+    }
+    framing_for("isometric")
+}
+
 fn resolve_camera_target(
     focus: &CameraFocusTarget,
+    script_framing: Option<&str>,
     mission: Option<&Mission>,
+    loaded: &LoadedFactions,
     units_q: &Query<(Entity, &Faction, &UnitTypeId, &UnitPos)>,
     buildings_q: &Query<(&Faction, &BuildingTypeId, &BuildingPos)>,
+    cinematic_q: &Query<&CinematicFraming>,
 ) -> Option<CameraTarget> {
     match focus {
         CameraFocusTarget::HomeBase => {
@@ -288,20 +342,39 @@ fn resolve_camera_target(
                 }
             }
             if count == 0 { return None; }
-            let cx = (sum.0 / count) as f32;
-            let cy = (sum.1 / count) as f32;
-            Some(CameraTarget::LookAt(Vec3::new(cx, 0.0, cy)))
+            let cx = (sum.0 as f32) / (count as f32);
+            let cy = (sum.1 as f32) / (count as f32);
+            // For HomeBase: per-building override from command_bunker def, then faction default.
+            let def_fr = loaded.buildings.get("command_bunker")
+                .map(|b| b.cinematic_framing.as_str());
+            let framing = pick_framing(
+                script_framing, None, def_fr, Some(&player_faction), loaded, cinematic_q,
+            );
+            Some(CameraTarget::LookAt { point: Vec3::new(cx, 0.0, cy), framing })
         }
         CameraFocusTarget::Position { x, y } => {
-            Some(CameraTarget::LookAt(Vec3::new(*x as f32, 0.0, *y as f32)))
+            let player_faction = mission.map(|m| m.player_faction.clone());
+            let framing = pick_framing(
+                script_framing, None, None, player_faction.as_ref(), loaded, cinematic_q,
+            );
+            Some(CameraTarget::LookAt {
+                point: Vec3::new(*x as f32, 0.0, *y as f32),
+                framing,
+            })
         }
         CameraFocusTarget::Unit { faction, unit_type } => {
             let target_faction = parse_faction(faction);
             let target_id = parse_unit_type_id(unit_type);
-            units_q
+            let (entity, _, _, _) = units_q
                 .iter()
-                .find(|(_, f, t, _)| **f == target_faction && t.id() == target_id)
-                .map(|(e, _, _, _)| CameraTarget::Follow(e))
+                .find(|(_, f, t, _)| **f == target_faction && t.id() == target_id)?;
+            let def_fr = loaded
+                .faction_unit(&target_faction.0, &target_id)
+                .map(|u| u.cinematic_framing.as_str());
+            let framing = pick_framing(
+                script_framing, Some(entity), def_fr, Some(&target_faction), loaded, cinematic_q,
+            );
+            Some(CameraTarget::Follow { entity, framing })
         }
     }
 }

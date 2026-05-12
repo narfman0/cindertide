@@ -2,6 +2,8 @@ id = "hollow"
 display_name = "The Hollow"
 color = [0.75, 0.05, 0.90]
 default_opponent = "combine"
+# Things are wrong in specific ways — skewed, asymmetric, off-kilter.
+cinematic_framing = "off_kilter"
 
 [[units]]
 id = "riflemen"

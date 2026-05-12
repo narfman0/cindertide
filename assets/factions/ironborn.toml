@@ -2,6 +2,8 @@ id = "ironborn"
 display_name = "Ironborn"
 color = [0.95, 0.38, 0.05]
 default_opponent = "combine"
+# First-person plural "we" — physical, low to the ground, subject looms.
+cinematic_framing = "low_angle_hero"
 
 [[units]]
 id = "riflemen"

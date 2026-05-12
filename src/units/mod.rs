@@ -193,6 +193,7 @@ mod tests {
             build_time_seconds: 8.0,
             ability_q: String::new(),
             model_file: String::new(),
+            cinematic_framing: String::new(),
             description: "Standard all-rounder infantry".to_string(),
         }
     }
@@ -215,6 +216,7 @@ mod tests {
             build_time_seconds: 18.0,
             ability_q: String::new(),
             model_file: String::new(),
+            cinematic_framing: String::new(),
             description: "Fast scout vehicle".to_string(),
         }
     }
@@ -237,6 +239,7 @@ mod tests {
             build_time_seconds: 35.0,
             ability_q: String::new(),
             model_file: String::new(),
+            cinematic_framing: String::new(),
             description: "Heavy front-line tank".to_string(),
         }
     }

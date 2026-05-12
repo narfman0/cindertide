@@ -208,6 +208,7 @@ mod tests {
             model_file: String::new(),
             description: String::new(),
             trickle_fuel: 0.0, trickle_scrap: 0.0, trickle_manpower: 0.0, vision_radius: 0.0,
+            cinematic_framing: String::new(),
         });
         loaded.buildings.insert("command_bunker".to_string(), crate::factions::BuildingDef {
             id: "command_bunker".to_string(),
@@ -219,6 +220,7 @@ mod tests {
             model_file: String::new(),
             description: String::new(),
             trickle_fuel: 0.0, trickle_scrap: 0.0, trickle_manpower: 0.0, vision_radius: 0.0,
+            cinematic_framing: String::new(),
         });
         loaded.buildings.insert("pillbox".to_string(), crate::factions::BuildingDef {
             id: "pillbox".to_string(),
@@ -230,6 +232,7 @@ mod tests {
             model_file: String::new(),
             description: String::new(),
             trickle_fuel: 0.0, trickle_scrap: 0.0, trickle_manpower: 0.0, vision_radius: 0.0,
+            cinematic_framing: String::new(),
         });
         loaded.buildings.insert("tank_trap".to_string(), crate::factions::BuildingDef {
             id: "tank_trap".to_string(),
@@ -241,6 +244,7 @@ mod tests {
             model_file: String::new(),
             description: String::new(),
             trickle_fuel: 0.0, trickle_scrap: 0.0, trickle_manpower: 0.0, vision_radius: 0.0,
+            cinematic_framing: String::new(),
         });
         loaded
     }

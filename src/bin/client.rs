@@ -20,7 +20,7 @@ use cindertide::units::{MoveTarget, MoveProgress, UnitKind};
 use cindertide::buildings::Built;
 use cindertide::production::{ProductionQueue, unit_production_seconds};
 use cindertide::mission_script::{MissionScriptPlugin, ScriptState};
-use cindertide::camera::CameraTarget;
+use cindertide::camera::{framing_for, CameraTarget};
 use cindertide::{
     map::MapPlugin,
     units::UnitPlugin,
@@ -3751,18 +3751,16 @@ fn camera_pan_zoom(
 #[derive(Resource, Default)]
 struct CameraSnapped(bool);
 
-/// Offset preserved from `setup_scene`: camera sits at look-at + (10, 10, 10).
-/// Keeping this consistent across snap and follow keeps the isometric framing.
-const CAMERA_OFFSET: Vec3 = Vec3::new(10.0, 10.0, 10.0);
-
 /// One-shot system: on first frame of `ClientScreen::InMission` with a player
 /// `command_bunker` present, set `CameraTarget::LookAt(avg base position)`.
+/// Uses the player faction's `cinematic_framing` default for the initial framing.
 /// Reset the latch when the screen leaves InMission so the next mission re-snaps.
 fn snap_camera_on_mission_start(
     screen: Res<ClientScreen>,
     mut snapped: ResMut<CameraSnapped>,
     mut camera_target: ResMut<CameraTarget>,
     player_faction: Option<Res<PlayerFaction>>,
+    loaded: Res<LoadedFactions>,
     buildings: Query<(&BuildingPos, &Faction, &BuildingTypeId)>,
 ) {
     let in_mission = matches!(*screen, ClientScreen::InMission | ClientScreen::TestMission { .. });
@@ -3786,35 +3784,46 @@ fn snap_camera_on_mission_start(
     if count == 0 { return; }
     let cx = (sum_x as f32) / (count as f32);
     let cy = (sum_y as f32) / (count as f32);
-    *camera_target = CameraTarget::LookAt(Vec3::new(cx, 0.0, cy));
+    // Use the gameplay isometric framing for the initial mission view — never
+    // start the player in a dramatic cutscene angle. Cutscenes apply their own
+    // framing via script CameraFocus actions.
+    let _ = loaded; // reserved for future per-mission framing
+    *camera_target = CameraTarget::LookAt {
+        point: Vec3::new(cx, 0.0, cy),
+        framing: framing_for("isometric"),
+    };
     snapped.0 = true;
 }
 
 /// Tween the camera toward `CameraTarget` each frame. `Free` is a no-op
 /// (user-driven panning lives in `camera_pan_zoom`). For `LookAt` / `Follow`,
-/// we target `subject + CAMERA_OFFSET` and lerp the transform; user input in
-/// `camera_pan_zoom` resets the target to `Free`.
+/// we target `subject + framing.offset` for translation and `framing.scale`
+/// for orthographic zoom; both lerp exponentially.
 fn camera_follow_target(
     target: Res<CameraTarget>,
-    mut cam_q: Query<&mut Transform, With<IsometricCamera>>,
+    mut cam_q: Query<(&mut Transform, &mut Projection), With<IsometricCamera>>,
     transforms_q: Query<&Transform, Without<IsometricCamera>>,
     time: Res<Time>,
 ) {
-    let look_at_world = match &*target {
+    let (look_at_world, framing) = match &*target {
         CameraTarget::Free => return,
-        CameraTarget::LookAt(p) => *p,
-        CameraTarget::Follow(e) => {
-            let Ok(t) = transforms_q.get(*e) else { return };
-            t.translation
+        CameraTarget::LookAt { point, framing } => (*point, *framing),
+        CameraTarget::Follow { entity, framing } => {
+            let Ok(t) = transforms_q.get(*entity) else { return };
+            (t.translation, *framing)
         }
     };
 
-    let Ok(mut cam_xf) = cam_q.single_mut() else { return };
-    let desired = look_at_world + CAMERA_OFFSET;
-    // Frame-rate-independent exponential lerp: ~4 second time-to-half by tau.
-    let alpha = 1.0 - (-time.delta_secs() * 6.0).exp();
-    cam_xf.translation = cam_xf.translation.lerp(desired, alpha.clamp(0.0, 1.0));
+    let Ok((mut cam_xf, mut projection)) = cam_q.single_mut() else { return };
+    let desired = look_at_world + framing.offset;
+    // Frame-rate-independent exponential lerp.
+    let alpha = (1.0 - (-time.delta_secs() * 6.0).exp()).clamp(0.0, 1.0);
+    cam_xf.translation = cam_xf.translation.lerp(desired, alpha);
     cam_xf.look_at(look_at_world, Vec3::Y);
+
+    if let Projection::Orthographic(ref mut ortho) = *projection {
+        ortho.scale = ortho.scale + (framing.scale - ortho.scale) * alpha;
+    }
 }
 
 // ── Editor systems ─────────────────────────────────────────────────────────────
