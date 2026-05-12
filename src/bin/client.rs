@@ -1,3 +1,4 @@
+use bevy::asset::io::{AssetSource as BevyAssetSource, file::FileAssetReader};
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::input::mouse::MouseWheel;
 use bevy::prelude::*;
@@ -48,29 +49,29 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use serde::{Serialize, Deserialize};
 
 fn main() {
+    // Resolve asset roots from env BEFORE App build — register_asset_source must
+    // run before DefaultPlugins so AssetPlugin sees the "cache" source in its registry.
+    let (local_root, http_base) = resolve_asset_config();
+    let _ = std::fs::create_dir_all(&local_root);
+    let reader_root = local_root.clone();
+
     App::new()
-        // WebAssetPlugin must be registered *before* DefaultPlugins so it can hook
-        // `http://` / `https://` asset sources before the `AssetPlugin` builds its registry.
+        // WebAssetPlugin is kept for ad-hoc `http://` loads (e.g., debug tools).
+        // Game assets flow through the "cache" source instead — see ModelAssets::asset_path.
         .add_plugins(bevy_web_asset::WebAssetPlugin::default())
-        .add_plugins(
-            DefaultPlugins
-                .set(WindowPlugin {
-                    primary_window: Some(Window {
-                        title: "Cindertide".into(),
-                        resolution: (1280.0, 720.0).into(),
-                        ..default()
-                    }),
-                    ..default()
-                })
-                // Allow absolute paths to asset_server.load() — required because
-                // prefetch_http_assets writes to ~/.cache/cindertide and hands Bevy
-                // the absolute path. Default (Forbid) blocks any path outside the
-                // AssetPlugin's file_path root.
-                .set(AssetPlugin {
-                    unapproved_path_mode: bevy::asset::UnapprovedPathMode::Allow,
-                    ..default()
-                }),
+        .register_asset_source(
+            CACHE_SOURCE,
+            BevyAssetSource::build()
+                .with_reader(move || Box::new(FileAssetReader::new(&reader_root))),
         )
+        .add_plugins(DefaultPlugins.set(WindowPlugin {
+            primary_window: Some(Window {
+                title: "Cindertide".into(),
+                resolution: (1280.0, 720.0).into(),
+                ..default()
+            }),
+            ..default()
+        }))
         .add_plugins((MapPlugin, UnitPlugin, CombatPlugin, ResourcesPlugin, ControlPlugin))
         .add_plugins((BuildingsPlugin, ProductionPlugin, HeroPlugin, TechPlugin, UnitAiPlugin))
         .add_plugins((RepairPlugin, AiPlugin, MissionPlugin, CampaignPlugin, BeatsPlugin))
@@ -90,7 +91,7 @@ fn main() {
         .init_resource::<MultiplayerRole>()
         .init_resource::<NetIdCounter>()
         .init_resource::<RemoteGameState>()
-        .init_resource::<ModelAssets>()
+        .insert_resource(ModelAssets { local_root, http_base })
         .init_resource::<EditorEnteredFromGame>()
         .init_resource::<LoadedCampaigns>()
         .init_resource::<CampaignEditorState>()
@@ -105,10 +106,8 @@ fn main() {
         .add_systems(Startup, setup_ui)
         .add_systems(Startup, load_narrative)
         .add_systems(Startup, startup_load_progress)
-        .add_systems(Startup, load_model_assets)
-        // prefetch fills the disk cache and swaps Http → Local before any downstream system reads the source.
-        .add_systems(Startup, prefetch_http_assets.after(load_model_assets))
-        // load_audio_assets must see the post-prefetch (Local) source.
+        // Prefetch fills the cache dir before any downstream system tries to load a model/audio.
+        .add_systems(Startup, prefetch_http_assets)
         .add_systems(Startup, load_audio_assets.after(prefetch_http_assets))
         .add_systems(Startup, startup_load_campaigns)
         .add_systems(Update, render_tiles)
@@ -1020,61 +1019,103 @@ struct NetBroadcastTimer(f32);
 
 // ── 3D model asset loading ────────────────────────────────────────────────────
 
-/// Where to look for GLB/OGG game assets.
+/// Default upstream: nginx instance hosting Synty GLB packs + kenney_aio audio.
+const DEFAULT_ASSET_BASE: &str = "http://srv:49200/assets";
+
+/// Bevy AssetSource name registered for the on-disk asset root. Asset references
+/// flow through `cache://<relative_path>` so Bevy's FileAssetReader resolves
+/// against `ModelAssets.local_root` instead of the default `assets/` directory.
+const CACHE_SOURCE: &str = "cache";
+
+/// Holds the resolved asset roots for the running session.
 ///
-/// Resolution order at startup (`load_model_assets`):
-///   1. `CINDERTIDE_ASSET_BASE` env — used verbatim if set. Accepts an http(s) URL
-///      or a local directory. (URLs require `bevy_web_asset::WebAssetPlugin` —
-///      installed in `main` before `DefaultPlugins`.)
-///   2. `CINDERTIDE_MODEL_PATH` env — legacy; treated as a local directory.
-///   3. Default: the shared asset server at `http://srv:49200/assets`.
-///
-/// `Placeholder` is only chosen when the resolved local directory is missing —
-/// HTTP bases are not validated at startup (the request is lazy).
-#[derive(Resource, Default, Clone)]
-enum AssetSource {
-    /// HTTP(S) base URL — no trailing slash, e.g. `http://srv:49200/assets`.
-    Http(String),
-    /// Local filesystem root containing pack subdirectories.
-    Local(PathBuf),
-    /// No source resolved — fall back to colored cuboids and silent audio.
-    #[default]
-    Placeholder,
-}
-
-impl AssetSource {
-    /// Build the path/URL Bevy's `AssetServer::load` will resolve.
-    /// `relative` must be the `model_file` value (slash-separated, optionally with `#Scene0`).
-    fn asset_path(&self, relative: &str) -> Option<String> {
-        match self {
-            AssetSource::Http(base) => Some(format!("{}/{}", base, url_encode_path(relative))),
-            AssetSource::Local(dir) => Some(format!("{}/{}", dir.display(), relative)),
-            AssetSource::Placeholder => None,
-        }
-    }
-
-    /// For local sources, the on-disk path used to check existence before issuing
-    /// `AssetServer::load`. Returns `None` for HTTP sources (which are loaded eagerly).
-    fn local_file(&self, relative: &str) -> Option<PathBuf> {
-        match self {
-            AssetSource::Local(dir) => {
-                let bare = relative.split('#').next().unwrap_or(relative);
-                Some(dir.join(bare))
-            }
-            _ => None,
-        }
-    }
-}
-
-/// Holds the resolved asset source for the running session.
-#[derive(Resource, Default)]
+/// `local_root` is the on-disk directory that backs the `"cache"` AssetSource,
+/// registered at App build via `register_asset_source`. Every GLB/OGG load goes
+/// through this source — either populated by `prefetch_http_assets` (when
+/// `http_base` is `Some`) or pre-populated by the user (when an env var points
+/// at a directory).
+#[derive(Resource, Clone)]
 struct ModelAssets {
-    source: AssetSource,
+    local_root: PathBuf,
+    http_base: Option<String>,
 }
 
-/// Percent-encode the chars that are common in Synty asset paths but illegal in raw URLs.
-/// Keeps `/` and `#` (used for Bevy's GLTF scene fragment) literal. Targeted instead of full
-/// urlencoding because the kenney/Synty path set only contains ` `, `(`, `)`, and `,`.
+impl Default for ModelAssets {
+    fn default() -> Self {
+        Self { local_root: cache_dir(), http_base: None }
+    }
+}
+
+impl ModelAssets {
+    /// Bevy asset path for a relative file (e.g., `POLYGON_*/foo.glb#Scene0`).
+    /// `relative` may carry a `#Scene0` label fragment — Bevy parses it correctly
+    /// once routed through the named source.
+    fn asset_path(&self, relative: &str) -> String {
+        format!("{}://{}", CACHE_SOURCE, relative)
+    }
+
+    /// On-disk path to the bare file (without `#Scene0`), used to check existence
+    /// before issuing `AssetServer::load` for paths that fall back to non-existent
+    /// `unit_<id>.glb` names.
+    fn local_file(&self, relative: &str) -> PathBuf {
+        let bare = relative.split('#').next().unwrap_or(relative);
+        self.local_root.join(bare)
+    }
+}
+
+/// Map a unit type id to its expected GLB scene filename (used when faction TOML
+/// lacks an explicit `model_file`).
+fn unit_model_name(unit_type: &UnitTypeId) -> String {
+    format!("unit_{}.glb#Scene0", unit_type.id())
+}
+
+/// Map a building type id to its expected GLB scene filename.
+fn building_model_name(building_type: &BuildingTypeId) -> String {
+    format!("building_{}.glb#Scene0", building_type.id())
+}
+
+/// On-disk prefetch cache for HTTP-sourced assets. Lives under $XDG_CACHE_HOME (or ~/.cache).
+fn cache_dir() -> PathBuf {
+    let base = std::env::var("XDG_CACHE_HOME")
+        .map(PathBuf::from)
+        .ok()
+        .or_else(|| std::env::var("HOME").ok().map(|h| PathBuf::from(h).join(".cache")))
+        .unwrap_or_else(|| PathBuf::from("/tmp"));
+    base.join("cindertide/assets")
+}
+
+/// Resolve the asset configuration from env vars before App startup.
+/// Returns `(local_root, optional_http_base_for_prefetch)`.
+///
+/// Resolution order:
+///   1. `CINDERTIDE_ASSET_BASE` — accepts http(s) URL (cache_dir backs it; prefetch runs)
+///      or a local directory (used directly; no prefetch).
+///   2. `CINDERTIDE_MODEL_PATH` — legacy filesystem-only override.
+///   3. Default: `cache_dir()` + prefetch from `DEFAULT_ASSET_BASE`.
+fn resolve_asset_config() -> (PathBuf, Option<String>) {
+    if let Ok(val) = std::env::var("CINDERTIDE_ASSET_BASE") {
+        let trimmed = val.trim_end_matches('/').to_string();
+        if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+            return (cache_dir(), Some(trimmed));
+        }
+        let path = PathBuf::from(&val);
+        if path.is_dir() {
+            return (path, None);
+        }
+        eprintln!("CINDERTIDE_ASSET_BASE='{}' is neither URL nor directory — falling back", val);
+    }
+    if let Ok(val) = std::env::var("CINDERTIDE_MODEL_PATH") {
+        let path = PathBuf::from(&val);
+        if path.is_dir() {
+            return (path, None);
+        }
+        eprintln!("CINDERTIDE_MODEL_PATH='{}' is not a directory — falling back", val);
+    }
+    (cache_dir(), Some(DEFAULT_ASSET_BASE.to_string()))
+}
+
+/// Percent-encode chars that appear in Synty/kenney paths but are illegal in raw URLs.
+/// Used only when building prefetch HTTP URLs — Bevy's `cache://` paths take the raw form.
 fn url_encode_path(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
@@ -1089,87 +1130,27 @@ fn url_encode_path(s: &str) -> String {
     out
 }
 
-/// Map a unit type id to its expected GLB scene filename (used when faction TOML
-/// lacks an explicit `model_file`).
-fn unit_model_name(unit_type: &UnitTypeId) -> String {
-    format!("unit_{}.glb#Scene0", unit_type.id())
-}
-
-/// Map a building type id to its expected GLB scene filename.
-fn building_model_name(building_type: &BuildingTypeId) -> String {
-    format!("building_{}.glb#Scene0", building_type.id())
-}
-
-/// Default asset server: nginx instance hosting Synty GLB packs + kenney_aio audio.
-const DEFAULT_ASSET_BASE: &str = "http://srv:49200/assets";
-
-/// On-disk prefetch cache for HTTP-sourced assets. Lives under $XDG_CACHE_HOME (or ~/.cache).
-fn cache_dir() -> PathBuf {
-    let base = std::env::var("XDG_CACHE_HOME")
-        .map(PathBuf::from)
-        .ok()
-        .or_else(|| std::env::var("HOME").ok().map(|h| PathBuf::from(h).join(".cache")))
-        .unwrap_or_else(|| PathBuf::from("/tmp"));
-    base.join("cindertide/assets")
-}
-
-/// Startup system: resolve env vars and populate `ModelAssets.source`.
-fn load_model_assets(mut model_assets: ResMut<ModelAssets>) {
-    // Highest priority: explicit override (URL or directory).
-    if let Ok(val) = std::env::var("CINDERTIDE_ASSET_BASE") {
-        let trimmed = val.trim_end_matches('/').to_string();
-        if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
-            info!("Assets streamed from: {}", trimmed);
-            model_assets.source = AssetSource::Http(trimmed);
-            return;
-        }
-        let path = PathBuf::from(&val);
-        if path.is_dir() {
-            info!("Assets loaded from local dir: {}", val);
-            model_assets.source = AssetSource::Local(path);
-            return;
-        }
-        warn!("CINDERTIDE_ASSET_BASE='{}' is neither a URL nor an existing directory — falling back", val);
-    }
-
-    // Legacy: filesystem path only.
-    if let Ok(val) = std::env::var("CINDERTIDE_MODEL_PATH") {
-        let path = PathBuf::from(&val);
-        if path.is_dir() {
-            info!("Assets loaded from local dir (legacy CINDERTIDE_MODEL_PATH): {}", val);
-            model_assets.source = AssetSource::Local(path);
-            return;
-        }
-        warn!("CINDERTIDE_MODEL_PATH='{}' not a directory — falling back", val);
-    }
-
-    // Default: shared asset server.
-    info!("Assets streamed from default: {}", DEFAULT_ASSET_BASE);
-    model_assets.source = AssetSource::Http(DEFAULT_ASSET_BASE.to_string());
-}
-
-/// Startup system: when source is HTTP, prefetch every referenced GLB + OGG to a
-/// local cache via reqwest, then swap the source to `Local(cache_dir)` so Bevy
-/// loads via the filesystem reader. This is a workaround for `bevy_web_asset`'s
-/// surf-based reader, which produces spurious HTTP 500s ("Head byte length...",
-/// "invalid HTTP version") under burst load and trips Bevy's asset-path label
-/// parser on `#Scene0` fragments. No-op for `Local` and `Placeholder` sources.
+/// Startup system: when `http_base` is set, prefetch every referenced GLB + OGG to
+/// `local_root` via reqwest. Subsequent `cache://<rel>` loads then hit the filesystem.
+/// Workaround for `bevy_web_asset`/surf's burst-load flakiness.
 fn prefetch_http_assets(
-    mut model_assets: ResMut<ModelAssets>,
+    model_assets: Res<ModelAssets>,
     loaded: Res<LoadedFactions>,
 ) {
-    let AssetSource::Http(base) = &model_assets.source else { return };
-    let base = base.clone();
-    let cache_root = cache_dir();
-    if let Err(e) = std::fs::create_dir_all(&cache_root) {
-        warn!("Cache dir create failed ({}); HTTP source kept as-is", e);
+    let Some(base) = &model_assets.http_base else {
+        info!("Assets loaded from local dir: {}", model_assets.local_root.display());
+        return;
+    };
+
+    let cache_root = &model_assets.local_root;
+    if let Err(e) = std::fs::create_dir_all(cache_root) {
+        warn!("Cache dir create failed ({}) — visuals will fall back to placeholders", e);
         return;
     }
 
-    // Collect unique relative paths to fetch. `loaded.units` / `loaded.buildings` are
-    // keyed by id (deduped across factions), so iterate the per-faction Vecs instead —
-    // the same unit id can have different model_file values across factions. Strip the
-    // `#Scene0` fragment for the download URL; it's re-attached at load time.
+    // Collect unique relative paths. `loaded.units`/`buildings` are HashMap<id, Def>
+    // and dedupe across factions, so iterate per-faction Vecs instead. Strip `#Scene0`
+    // for the download URL; the label is re-attached at load time.
     let mut paths: std::collections::HashSet<String> = std::collections::HashSet::new();
     for faction in loaded.factions.values() {
         for unit in &faction.units {
@@ -1195,7 +1176,7 @@ fn prefetch_http_assets(
     {
         Ok(c) => c,
         Err(e) => {
-            warn!("reqwest client build failed ({}); HTTP source kept as-is", e);
+            warn!("reqwest client build failed ({})", e);
             return;
         }
     };
@@ -1233,7 +1214,6 @@ fn prefetch_http_assets(
         "Asset prefetch: {} downloaded, {} cached, {} failed ({} total) → {}",
         fetched, cached, failed, paths.len(), cache_root.display()
     );
-    model_assets.source = AssetSource::Local(cache_root);
 }
 
 /// Latest game state received from host (client only).
@@ -3042,20 +3022,11 @@ fn spawn_unit_visuals(
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| unit_model_name(unit_type));
 
-        // Local sources do an existence check first to avoid an asset-load error on
-        // a missing file. HTTP sources skip the check (lazy fetch). Scale 0.01
-        // assumes Synty-style centimetre-unit exports — tune per asset pack.
-        let local_missing = model_assets
-            .source
-            .local_file(&glb_name)
-            .map(|p| !p.exists())
-            .unwrap_or(false);
-
-        let visual = if let (false, Some(asset_path)) =
-            (local_missing, model_assets.source.asset_path(&glb_name))
-        {
+        // Existence check guards against the `unit_<id>.glb` fallback path, which has
+        // no corresponding file. Scale 0.01 assumes Synty-style centimetre-unit exports.
+        let visual = if model_assets.local_file(&glb_name).exists() {
             commands.spawn((
-                SceneRoot(asset_server.load(&asset_path)),
+                SceneRoot(asset_server.load(model_assets.asset_path(&glb_name))),
                 Transform::from_translation(world_pos).with_scale(Vec3::splat(0.01)),
             )).id()
         } else {
@@ -3137,19 +3108,11 @@ fn spawn_building_visuals(
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| building_model_name(building_type));
 
-        // See `spawn_unit_visuals` for the local/HTTP resolution pattern.
+        // Existence check guards against the `building_<id>.glb` fallback path.
         // Scale 0.015 assumes Synty-style centimetre-unit exports.
-        let local_missing = model_assets
-            .source
-            .local_file(&glb_name)
-            .map(|p| !p.exists())
-            .unwrap_or(false);
-
-        let visual = if let (false, Some(asset_path)) =
-            (local_missing, model_assets.source.asset_path(&glb_name))
-        {
+        let visual = if model_assets.local_file(&glb_name).exists() {
             commands.spawn((
-                SceneRoot(asset_server.load(&asset_path)),
+                SceneRoot(asset_server.load(model_assets.asset_path(&glb_name))),
                 Transform::from_translation(world_pos).with_scale(Vec3::splat(0.015)),
             )).id()
         } else {
@@ -6697,20 +6660,19 @@ const AUDIO_PATHS: &[(AudioEvent, &str)] = &[
     (AudioEvent::MissionEnd, "kenney_aio/Audio/Synth Voice 1/Audio/objective complete.ogg"),
 ];
 
-/// Startup system: pre-load one `Handle<AudioSource>` per AudioEvent using the
-/// resolved asset source. No-ops when the source is `Placeholder`.
+/// Startup system: pre-load one `Handle<AudioSource>` per AudioEvent. Skips entries
+/// whose underlying OGG isn't on disk (e.g., prefetch failed for that file).
 fn load_audio_assets(
     asset_server: Res<AssetServer>,
     model_assets: Res<ModelAssets>,
     mut audio: ResMut<AudioAssets>,
 ) {
-    if matches!(model_assets.source, AssetSource::Placeholder) {
-        info!("No asset source configured — audio disabled");
-        return;
-    }
     for (event, rel) in AUDIO_PATHS {
-        let Some(url) = model_assets.source.asset_path(rel) else { continue };
-        let handle: Handle<AudioSource> = asset_server.load(&url);
+        if !model_assets.local_file(rel).exists() {
+            warn!("Audio asset missing on disk: {}", rel);
+            continue;
+        }
+        let handle: Handle<AudioSource> = asset_server.load(model_assets.asset_path(rel));
         match event {
             AudioEvent::UnitSelected => audio.unit_selected = Some(handle),
             AudioEvent::UnitMoved => audio.unit_moved = Some(handle),
