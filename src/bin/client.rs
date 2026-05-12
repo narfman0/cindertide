@@ -95,8 +95,10 @@ fn main() {
         .add_systems(Startup, load_narrative)
         .add_systems(Startup, startup_load_progress)
         .add_systems(Startup, load_model_assets)
-        // load_audio_assets must run after load_model_assets — it reads ModelAssets.source.
-        .add_systems(Startup, load_audio_assets.after(load_model_assets))
+        // prefetch fills the disk cache and swaps Http → Local before any downstream system reads the source.
+        .add_systems(Startup, prefetch_http_assets.after(load_model_assets))
+        // load_audio_assets must see the post-prefetch (Local) source.
+        .add_systems(Startup, load_audio_assets.after(prefetch_http_assets))
         .add_systems(Startup, startup_load_campaigns)
         .add_systems(Update, render_tiles)
         .add_systems(Update, sync_rendered_tile_colors)
@@ -1090,6 +1092,16 @@ fn building_model_name(building_type: &BuildingTypeId) -> String {
 /// Default asset server: nginx instance hosting Synty GLB packs + kenney_aio audio.
 const DEFAULT_ASSET_BASE: &str = "http://srv:49200/assets";
 
+/// On-disk prefetch cache for HTTP-sourced assets. Lives under $XDG_CACHE_HOME (or ~/.cache).
+fn cache_dir() -> PathBuf {
+    let base = std::env::var("XDG_CACHE_HOME")
+        .map(PathBuf::from)
+        .ok()
+        .or_else(|| std::env::var("HOME").ok().map(|h| PathBuf::from(h).join(".cache")))
+        .unwrap_or_else(|| PathBuf::from("/tmp"));
+    base.join("cindertide/assets")
+}
+
 /// Startup system: resolve env vars and populate `ModelAssets.source`.
 fn load_model_assets(mut model_assets: ResMut<ModelAssets>) {
     // Highest priority: explicit override (URL or directory).
@@ -1123,6 +1135,90 @@ fn load_model_assets(mut model_assets: ResMut<ModelAssets>) {
     // Default: shared asset server.
     info!("Assets streamed from default: {}", DEFAULT_ASSET_BASE);
     model_assets.source = AssetSource::Http(DEFAULT_ASSET_BASE.to_string());
+}
+
+/// Startup system: when source is HTTP, prefetch every referenced GLB + OGG to a
+/// local cache via reqwest, then swap the source to `Local(cache_dir)` so Bevy
+/// loads via the filesystem reader. This is a workaround for `bevy_web_asset`'s
+/// surf-based reader, which produces spurious HTTP 500s ("Head byte length...",
+/// "invalid HTTP version") under burst load and trips Bevy's asset-path label
+/// parser on `#Scene0` fragments. No-op for `Local` and `Placeholder` sources.
+fn prefetch_http_assets(
+    mut model_assets: ResMut<ModelAssets>,
+    loaded: Res<LoadedFactions>,
+) {
+    let AssetSource::Http(base) = &model_assets.source else { return };
+    let base = base.clone();
+    let cache_root = cache_dir();
+    if let Err(e) = std::fs::create_dir_all(&cache_root) {
+        warn!("Cache dir create failed ({}); HTTP source kept as-is", e);
+        return;
+    }
+
+    // Collect unique relative paths to fetch. `model_file` strings may carry a
+    // `#Scene0` fragment — strip it before download but keep for any later asset_path call.
+    let mut paths: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for unit in loaded.units.values() {
+        if !unit.model_file.is_empty() {
+            let bare = unit.model_file.split('#').next().unwrap_or(&unit.model_file);
+            paths.insert(bare.to_string());
+        }
+    }
+    for building in loaded.buildings.values() {
+        if !building.model_file.is_empty() {
+            let bare = building.model_file.split('#').next().unwrap_or(&building.model_file);
+            paths.insert(bare.to_string());
+        }
+    }
+    for (_, rel) in AUDIO_PATHS {
+        paths.insert((*rel).to_string());
+    }
+
+    let client = match reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(20))
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            warn!("reqwest client build failed ({}); HTTP source kept as-is", e);
+            return;
+        }
+    };
+
+    let mut fetched = 0usize;
+    let mut cached = 0usize;
+    let mut failed = 0usize;
+    for rel in &paths {
+        let dest = cache_root.join(rel);
+        if dest.exists() {
+            cached += 1;
+            continue;
+        }
+        if let Some(parent) = dest.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let url = format!("{}/{}", base, url_encode_path(rel));
+        let bytes = match client.get(&url).send().and_then(|r| r.error_for_status()).and_then(|r| r.bytes()) {
+            Ok(b) => b,
+            Err(e) => {
+                warn!("Prefetch failed for {}: {}", rel, e);
+                failed += 1;
+                continue;
+            }
+        };
+        if let Err(e) = std::fs::write(&dest, &bytes) {
+            warn!("Cache write failed for {}: {}", rel, e);
+            failed += 1;
+            continue;
+        }
+        fetched += 1;
+    }
+
+    info!(
+        "Asset prefetch: {} downloaded, {} cached, {} failed ({} total) → {}",
+        fetched, cached, failed, paths.len(), cache_root.display()
+    );
+    model_assets.source = AssetSource::Local(cache_root);
 }
 
 /// Latest game state received from host (client only).
