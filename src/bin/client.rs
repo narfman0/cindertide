@@ -21,6 +21,7 @@ use cindertide::buildings::Built;
 use cindertide::production::{ProductionQueue, unit_production_seconds};
 use cindertide::mission_script::{MissionScriptPlugin, ScriptState};
 use cindertide::camera::{framing_for, CameraShake, CameraTarget, CinematicFraming};
+use cindertide::cutscene_editor::CutsceneEditorPlugin;
 use cindertide::{
     map::MapPlugin,
     units::UnitPlugin,
@@ -78,6 +79,7 @@ fn main() {
         .add_plugins((RepairPlugin, AiPlugin, MissionPlugin, CampaignPlugin, BeatsPlugin))
         .add_plugins((HollowPlugin, SavePlugin, GamePlugin))
         .add_plugins(MissionScriptPlugin)
+        .add_plugins(CutsceneEditorPlugin)
         .init_resource::<VisualEntities>()
         .init_resource::<SelectedUnits>()
         .init_resource::<DragState>()
