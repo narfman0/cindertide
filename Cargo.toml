@@ -21,6 +21,7 @@ bevy = { version = "0.16", default-features = false, features = [
     "bevy_ui",
     "bevy_text",
     "bevy_audio",
+    "bevy_gltf",
     "vorbis",
     "x11",
     "default_font",
