@@ -5010,9 +5010,42 @@ fn building_type_name(t: &BuildingTypeId) -> &str {
     t.id()
 }
 
+/// Normalize a TOML/editor building/unit type string into the canonical snake_case id.
+///
+/// Handles all three input shapes that show up in the wild:
+///   - "CommandBunker" (CamelCase from hand-authored map TOMLs) → "command_bunker"
+///   - "command_bunker" (snake_case from editor exports)          → "command_bunker"
+///   - "Tank Trap"     (space-separated display name)             → "tank_trap"
+///
+/// Earlier code used `to_lowercase().replace(' ', "_")` which silently produced
+/// invalid ids like "commandbunker" (no underscore) for CamelCase inputs, causing
+/// `bt.id() == "command_bunker"` checks across mission/beats/camera to never match.
+fn normalize_type_id(s: &str) -> String {
+    let mut out = String::new();
+    let mut prev_was_break = true;
+    for c in s.chars() {
+        if c == ' ' || c == '-' || c == '_' {
+            if !out.is_empty() && !out.ends_with('_') {
+                out.push('_');
+            }
+            prev_was_break = true;
+        } else if c.is_uppercase() {
+            if !out.is_empty() && !prev_was_break && !out.ends_with('_') {
+                out.push('_');
+            }
+            out.push(c.to_ascii_lowercase());
+            prev_was_break = false;
+        } else {
+            out.push(c);
+            prev_was_break = false;
+        }
+    }
+    out
+}
+
 /// Spawn a unit directly into the World (used for map loading during mission start).
 fn spawn_unit_world(world: &mut World, x: i32, y: i32, faction: Faction, type_name: &str) {
-    let unit_id = type_name.to_lowercase().replace(' ', "_");
+    let unit_id = normalize_type_id(type_name);
     let loaded = world.resource::<LoadedFactions>().clone();
     if let Some(def) = loaded.units.get(&unit_id) {
         world.spawn(UnitBundle::from_def(def, faction, x, y));
@@ -5023,22 +5056,33 @@ fn spawn_unit_world(world: &mut World, x: i32, y: i32, faction: Faction, type_na
 
 /// Spawn a building directly into the World (used for map loading during mission start).
 fn spawn_building_world(world: &mut World, x: i32, y: i32, faction: Faction, type_name: &str) {
-    let bt_id = type_name.to_lowercase().replace(' ', "_");
+    let bt_id = normalize_type_id(type_name);
     let bt = BuildingTypeId::new(&bt_id);
     let loaded = world.resource::<LoadedFactions>().clone();
     world.spawn(BuildingBundle::new(bt, faction, x, y, &loaded));
 }
 
 fn spawn_editor_unit(commands: &mut Commands, x: i32, y: i32, faction: Faction, type_name: &str) {
-    let unit_id = type_name.to_lowercase().replace(' ', "_");
+    let unit_id = normalize_type_id(type_name);
     commands.spawn(UnitBundle::default_riflemen_id(&unit_id, faction, x, y));
 }
 
 fn spawn_editor_building(commands: &mut Commands, x: i32, y: i32, faction: Faction, type_name: &str) {
-    let bt_id = type_name.to_lowercase().replace(' ', "_");
+    let bt_id = normalize_type_id(type_name);
     let bt = BuildingTypeId::new(&bt_id);
     // No LoadedFactions access from Commands — use default health
     commands.spawn(BuildingBundle::new_default(bt, faction, x, y));
+}
+
+#[cfg(test)]
+mod normalize_tests {
+    use super::normalize_type_id;
+    #[test] fn camel() { assert_eq!(normalize_type_id("CommandBunker"), "command_bunker"); }
+    #[test] fn snake() { assert_eq!(normalize_type_id("command_bunker"), "command_bunker"); }
+    #[test] fn spaced() { assert_eq!(normalize_type_id("Tank Trap"), "tank_trap"); }
+    #[test] fn lower() { assert_eq!(normalize_type_id("barracks"), "barracks"); }
+    #[test] fn hyphen() { assert_eq!(normalize_type_id("motor-pool"), "motor_pool"); }
+    #[test] fn camel_3parts() { assert_eq!(normalize_type_id("HeavyWeapons"), "heavy_weapons"); }
 }
 
 /// Handle mouse clicks in the map editor.
