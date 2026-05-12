@@ -52,14 +52,25 @@ fn main() {
         // WebAssetPlugin must be registered *before* DefaultPlugins so it can hook
         // `http://` / `https://` asset sources before the `AssetPlugin` builds its registry.
         .add_plugins(bevy_web_asset::WebAssetPlugin::default())
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                title: "Cindertide".into(),
-                resolution: (1280.0, 720.0).into(),
-                ..default()
-            }),
-            ..default()
-        }))
+        .add_plugins(
+            DefaultPlugins
+                .set(WindowPlugin {
+                    primary_window: Some(Window {
+                        title: "Cindertide".into(),
+                        resolution: (1280.0, 720.0).into(),
+                        ..default()
+                    }),
+                    ..default()
+                })
+                // Allow absolute paths to asset_server.load() — required because
+                // prefetch_http_assets writes to ~/.cache/cindertide and hands Bevy
+                // the absolute path. Default (Forbid) blocks any path outside the
+                // AssetPlugin's file_path root.
+                .set(AssetPlugin {
+                    unapproved_path_mode: bevy::asset::UnapprovedPathMode::Allow,
+                    ..default()
+                }),
+        )
         .add_plugins((MapPlugin, UnitPlugin, CombatPlugin, ResourcesPlugin, ControlPlugin))
         .add_plugins((BuildingsPlugin, ProductionPlugin, HeroPlugin, TechPlugin, UnitAiPlugin))
         .add_plugins((RepairPlugin, AiPlugin, MissionPlugin, CampaignPlugin, BeatsPlugin))
@@ -1155,19 +1166,23 @@ fn prefetch_http_assets(
         return;
     }
 
-    // Collect unique relative paths to fetch. `model_file` strings may carry a
-    // `#Scene0` fragment — strip it before download but keep for any later asset_path call.
+    // Collect unique relative paths to fetch. `loaded.units` / `loaded.buildings` are
+    // keyed by id (deduped across factions), so iterate the per-faction Vecs instead —
+    // the same unit id can have different model_file values across factions. Strip the
+    // `#Scene0` fragment for the download URL; it's re-attached at load time.
     let mut paths: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for unit in loaded.units.values() {
-        if !unit.model_file.is_empty() {
-            let bare = unit.model_file.split('#').next().unwrap_or(&unit.model_file);
-            paths.insert(bare.to_string());
+    for faction in loaded.factions.values() {
+        for unit in &faction.units {
+            if !unit.model_file.is_empty() {
+                let bare = unit.model_file.split('#').next().unwrap_or(&unit.model_file);
+                paths.insert(bare.to_string());
+            }
         }
-    }
-    for building in loaded.buildings.values() {
-        if !building.model_file.is_empty() {
-            let bare = building.model_file.split('#').next().unwrap_or(&building.model_file);
-            paths.insert(bare.to_string());
+        for building in &faction.buildings {
+            if !building.model_file.is_empty() {
+                let bare = building.model_file.split('#').next().unwrap_or(&building.model_file);
+                paths.insert(bare.to_string());
+            }
         }
     }
     for (_, rel) in AUDIO_PATHS {
