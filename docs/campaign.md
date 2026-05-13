@@ -60,6 +60,27 @@ teams going silent, soldiers feeling watched. The Architect's missions reveal
 the through-line; the other factions' missions show the same events from inside
 the manipulation, without knowing they are being read.
 
+### Campaign divergence principle
+
+The three campaigns start aligned to the same five world events but **their
+experiences of each event are allowed to diverge as time progresses, including
+outright contradiction by mission 5**. The divergence IS the story — each
+faction's view is partial, shaped by the Architect's manipulation, and the
+player discovers the through-line by playing all three.
+
+| Mission | Divergence | Examples |
+|---|---|---|
+| m0 | Strict mirror | Same refinery, same morning. Architect filed both packets. |
+| m1 | Slight divergence | Combine classifies a "geology team reading"; Ironborn loses a scout and refuses to investigate; Architect names the ravine as the second ritual site. |
+| m2 | Larger divergence | Combine attributes unease to "low-oxygen exposure"; Ironborn names the wrongness flatly ("body-shaped. wrong-shaped."); Architect is unaffected by the site at all. |
+| m3 | Outcomes diverge | Combine contains 7-G; Ironborn walks with 7-G. Both are canon within their own campaign. |
+| m4 | Maximally divergent | Combine: "command is coming back online." Ironborn: "start salvaging." Architect: "this is the last entry I will make as myself." **All three are simultaneously true.** |
+
+Do not flatten the divergence by trying to reconcile the campaigns into one
+"correct" story. The Architect's POV reveals the manipulation that connects
+them, but each faction's experience remains valid — including the outcomes
+the player achieves there.
+
 ---
 
 ## Campaign: Combine — The Iron Pact

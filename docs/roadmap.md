@@ -58,7 +58,25 @@ Current status: the game is feature-complete for a playable single-player campai
 ### Mission Script System
 - TOML scripts in `assets/scripts/`; loaded by faction + mission name
 - Triggers: `time` (elapsed seconds), `beat` (HeroGoesDown, LastStand, AncientUnification)
-- Actions: dialogue (bottom bar, 4s display with queue), spawn_units, objective/change_objective, win_mission, lose_mission
+- Actions: dialogue (bottom bar, 4s display with queue), spawn_units, objective/change_objective, win_mission, lose_mission, **camera_focus** (target home_base / position / unit + optional framing preset), **camera_release**, **camera_shake** (intensity + duration)
+
+### Cinematic Camera System
+- `FramingPreset` library with 6 named presets: isometric, low_angle_hero, close_up, over_shoulder, off_kilter, wide_establishing
+- Per-faction defaults in `assets/factions/*.toml` (`cinematic_framing` field) — Combine over_shoulder, Ironborn low_angle_hero, Covenant close_up, Hollow off_kilter
+- Per-unit/building override via `cinematic_framing` field on UnitDef / BuildingDef
+- Resolver chain when script omits framing: explicit → CinematicFraming component → def field → faction default → "isometric"
+- `CameraTarget` resource (Free / LookAt / Follow) tweens camera translation + orthographic scale exponentially
+- Snap to player home base on mission start; user pan (WASD or edge-scroll) cancels scripted focus
+- `attach_cinematic_framing` observer auto-inserts CinematicFraming component on unit/building spawn
+
+### In-Mission Cutscene Editor
+- F9 toggles right-side egui panel while in-mission
+- Replay controls: Restart (clears Mission.elapsed + ScriptState.fired), Pause/Play (Time<Virtual>::pause), Speed (0.25x–4x via Time<Virtual>::relative_speed)
+- Event list with fired/selected markers; per-event Jump-to-event resets elapsed and the fired set
+- Inline editors per Action variant (dialogue speaker + multiline, spawn_units faction/type/count/coords, camera_focus target+framing dropdowns, camera_shake sliders)
+- Add/remove/reorder events and actions via `+ Event` / `+ Add action` / `^` / `v` / `DEL` buttons
+- Save / Save-as-edited / Reload — `Save` writes back via `toml::to_string_pretty`; `Save as edited` writes `<name>.edited.toml` to preserve hand-authored comments
+- Kenney Mini Square Mono + Future Narrow fonts loaded into egui at startup from the prefetched asset cache
 
 ### Authored Beats
 - `HeroGoesDown`, `LastStand`, `AncientUnification` beat IDs

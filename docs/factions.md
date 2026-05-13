@@ -1,5 +1,15 @@
 # Cindertide — Factions
 
+> **Canon note:** The active narrative canon lives in `docs/campaign.md` and the
+> `assets/scripts/` + `assets/factions/` TOMLs. The "Faction Voices" table in
+> `CLAUDE.md` is authoritative for speaker tags and tone. Some character details
+> in the sections below (notably the Ironborn-as-robots framing in the Acts
+> section) reflect an earlier design pass and have been **superseded** —
+> current canon: Ironborn are human salvagers/workers, Covenant is the
+> Architect's faction label, the Hollow is what emerges from the Architect's
+> ritual sites. Faction Asymmetry / Hero recruitment / Visual Language sections
+> are mechanical design notes and remain current.
+
 ---
 
 ## Human Factions (Act 1–2)
