@@ -21,7 +21,7 @@ use cindertide::buildings::Built;
 use cindertide::production::{ProductionQueue, unit_production_seconds};
 use cindertide::mission_script::{MissionScriptPlugin, ScriptState};
 use cindertide::camera::{framing_for, CameraShake, CameraTarget, CinematicFraming};
-use cindertide::cutscene_editor::CutsceneEditorPlugin;
+use cindertide::cutscene_editor::{AssetCacheRoot, CutsceneEditorPlugin};
 use cindertide::{
     map::MapPlugin,
     units::UnitPlugin,
@@ -95,6 +95,7 @@ fn main() {
         .init_resource::<MultiplayerRole>()
         .init_resource::<NetIdCounter>()
         .init_resource::<RemoteGameState>()
+        .insert_resource(AssetCacheRoot(local_root.clone()))
         .insert_resource(ModelAssets { local_root, http_base })
         .init_resource::<EditorEnteredFromGame>()
         .init_resource::<LoadedCampaigns>()
@@ -1180,6 +1181,9 @@ fn prefetch_http_assets(
         }
     }
     for (_, rel) in AUDIO_PATHS {
+        paths.insert((*rel).to_string());
+    }
+    for rel in cindertide::cutscene_editor::FONT_PATHS {
         paths.insert((*rel).to_string());
     }
 

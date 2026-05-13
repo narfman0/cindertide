@@ -16,10 +16,24 @@
 
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContextPass, EguiContexts, EguiPlugin};
+use std::path::PathBuf;
 
 use crate::camera::{CameraShake, CameraTarget};
 use crate::mission::{Mission, MissionStatus};
 use crate::mission_script::{Action, ScriptState, Trigger};
+
+/// Font files prefetched from the asset server. Loaded by `load_egui_fonts`
+/// at startup and registered with bevy_egui for use throughout the editor UI.
+pub const FONT_PATHS: &[&str] = &[
+    "kenney_aio/Other/Fonts/Kenney Mini Square Mono.ttf",
+    "kenney_aio/Other/Fonts/Kenney Future Narrow.ttf",
+];
+
+/// Resource holding the on-disk root where prefetched assets live.
+/// Populated at startup by the client's main fn; needed by `load_egui_fonts`
+/// to locate the cached TTF files.
+#[derive(Resource, Clone)]
+pub struct AssetCacheRoot(pub PathBuf);
 
 /// Resource holding the editor's transient UI state.
 #[derive(Resource, Default)]
@@ -36,9 +50,60 @@ impl Plugin for CutsceneEditorPlugin {
             enable_multipass_for_primary_context: true,
         });
         app.init_resource::<CutsceneEditorState>();
+        // Startup-only: install Kenney Mini Square Mono once egui's primary context
+        // is alive (first frame of EguiContextPass).
+        app.add_systems(EguiContextPass, load_egui_fonts);
         app.add_systems(Update, toggle_cutscene_editor);
-        app.add_systems(EguiContextPass, cutscene_editor_panel);
+        app.add_systems(EguiContextPass, cutscene_editor_panel.after(load_egui_fonts));
     }
+}
+
+/// Latch: only configure egui fonts once.
+#[derive(Resource, Default)]
+struct EguiFontsLoaded(bool);
+
+/// On the first frame after egui is up, load Kenney Mini Square Mono from the
+/// asset cache and install it as the default Monospace + Proportional family.
+/// No-op if AssetCacheRoot isn't set or the font file is missing.
+fn load_egui_fonts(
+    mut contexts: EguiContexts,
+    cache: Option<Res<AssetCacheRoot>>,
+    mut loaded: Local<bool>,
+) {
+    if *loaded { return; }
+    let Some(cache) = cache else { return };
+    let mono_path = cache.0.join(FONT_PATHS[0]);
+    let display_path = cache.0.join(FONT_PATHS[1]);
+    let Ok(mono_bytes) = std::fs::read(&mono_path) else {
+        warn!("Egui font missing: {} (falling back to default)", mono_path.display());
+        *loaded = true;
+        return;
+    };
+    let display_bytes = std::fs::read(&display_path).ok();
+
+    let mut fonts = egui::FontDefinitions::default();
+    fonts.font_data.insert(
+        "kenney_mono".to_string(),
+        std::sync::Arc::new(egui::FontData::from_owned(mono_bytes)),
+    );
+    if let Some(b) = display_bytes {
+        fonts.font_data.insert(
+            "kenney_future".to_string(),
+            std::sync::Arc::new(egui::FontData::from_owned(b)),
+        );
+        fonts.families.entry(egui::FontFamily::Proportional).or_default()
+            .insert(0, "kenney_future".to_string());
+    } else {
+        fonts.families.entry(egui::FontFamily::Proportional).or_default()
+            .insert(0, "kenney_mono".to_string());
+    }
+    fonts.families.entry(egui::FontFamily::Monospace).or_default()
+        .insert(0, "kenney_mono".to_string());
+
+    let ctx = contexts.ctx_mut();
+    ctx.set_fonts(fonts);
+    info!("[cutscene-editor] installed Kenney fonts into egui");
+    *loaded = true;
 }
 
 /// F9 toggles the editor while a mission is active.
@@ -85,7 +150,7 @@ fn cutscene_editor_panel(
 
             // ── Playback controls ────────────────────────────────────────────
             ui.horizontal(|ui| {
-                if ui.button("⏮ Restart").on_hover_text("Reset elapsed=0, clear fired set, return camera to Free").clicked() {
+                if ui.button("[<<] Restart").on_hover_text("Reset elapsed=0, clear fired set, return camera to Free").clicked() {
                     restart_script(
                         &mut script_state,
                         mission_q.iter_mut().next(),
@@ -94,7 +159,7 @@ fn cutscene_editor_panel(
                     );
                 }
                 let is_paused = virtual_time.is_paused();
-                let pause_label = if is_paused { "▶" } else { "⏸" };
+                let pause_label = if is_paused { "[>] Play" } else { "[||] Pause" };
                 if ui.button(pause_label).on_hover_text("Pause / resume game time").clicked() {
                     if is_paused {
                         virtual_time.unpause();
@@ -129,7 +194,7 @@ fn cutscene_editor_panel(
                 .show(ui, |ui| {
                     for (i, ev) in script.events.iter().enumerate() {
                         let fired = script_state.fired.contains(&ev.id);
-                        let prefix = if fired { "✓" } else { "·" };
+                        let prefix = if fired { "[x]" } else { "[ ]" };
                         let trigger_str = format_trigger(&ev.trigger);
                         let label = format!("{}  {:<22} {}", prefix, truncate(&ev.id, 22), trigger_str);
                         let selected = editor.selected_event == i;
@@ -153,7 +218,7 @@ fn cutscene_editor_panel(
             // Jump button — only valid for time-triggered events.
             if let Trigger::Time { seconds } = &ev.trigger {
                 if ui
-                    .button(format!("⏭ Jump to '{}' (t={:.1}s)", ev.id, seconds))
+                    .button(format!("[>>|] Jump to '{}' (t={:.1}s)", ev.id, seconds))
                     .on_hover_text("Reset elapsed, mark earlier events as fired, clear later events")
                     .clicked()
                 {
