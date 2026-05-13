@@ -241,6 +241,8 @@ fn cutscene_editor_panel(
             });
 
             let mut event_delete: Option<usize> = None;
+            let mut event_move: Option<(usize, isize)> = None; // (index, direction +/- 1)
+            let event_count = script.events.len();
             egui::ScrollArea::vertical()
                 .id_salt("event_scroll")
                 .max_height(180.0)
@@ -254,12 +256,31 @@ fn cutscene_editor_panel(
                             if ui.selectable_label(editor.selected_event == i, egui::RichText::new(&label).monospace()).clicked() {
                                 editor.selected_event = i;
                             }
-                            if ui.small_button("x").on_hover_text("Delete event").clicked() {
+                            if ui.add_enabled(i > 0, egui::Button::new("^").small())
+                                .on_hover_text("Move up").clicked()
+                            {
+                                event_move = Some((i, -1));
+                            }
+                            if ui.add_enabled(i + 1 < event_count, egui::Button::new("v").small())
+                                .on_hover_text("Move down").clicked()
+                            {
+                                event_move = Some((i, 1));
+                            }
+                            if ui.small_button("DEL").on_hover_text("Delete event").clicked() {
                                 event_delete = Some(i);
                             }
                         });
                     }
                 });
+            if let Some((i, dir)) = event_move {
+                let j = (i as isize + dir) as usize;
+                script.events.swap(i, j);
+                if editor.selected_event == i {
+                    editor.selected_event = j;
+                } else if editor.selected_event == j {
+                    editor.selected_event = i;
+                }
+            }
             if let Some(i) = event_delete {
                 script.events.remove(i);
                 if editor.selected_event >= script.events.len() && !script.events.is_empty() {
@@ -317,6 +338,8 @@ fn cutscene_editor_panel(
             });
 
             let mut action_delete: Option<usize> = None;
+            let mut action_move: Option<(usize, isize)> = None;
+            let action_count = ev.actions.len();
             egui::ScrollArea::vertical()
                 .id_salt("action_scroll")
                 .max_height(360.0)
@@ -327,7 +350,17 @@ fn cutscene_editor_panel(
                             ui.horizontal(|ui| {
                                 ui.label(egui::RichText::new(format!("[{}]", j + 1)).strong());
                                 ui.label(action_type_name(a));
-                                if ui.small_button("x").on_hover_text("Delete action").clicked() {
+                                if ui.add_enabled(j > 0, egui::Button::new("^").small())
+                                    .on_hover_text("Move up").clicked()
+                                {
+                                    action_move = Some((j, -1));
+                                }
+                                if ui.add_enabled(j + 1 < action_count, egui::Button::new("v").small())
+                                    .on_hover_text("Move down").clicked()
+                                {
+                                    action_move = Some((j, 1));
+                                }
+                                if ui.small_button("DEL").on_hover_text("Delete action").clicked() {
                                     action_delete = Some(j);
                                 }
                             });
@@ -335,6 +368,10 @@ fn cutscene_editor_panel(
                         });
                     }
                 });
+            if let Some((j, dir)) = action_move {
+                let k = (j as isize + dir) as usize;
+                ev.actions.swap(j, k);
+            }
             if let Some(j) = action_delete {
                 ev.actions.remove(j);
             }
