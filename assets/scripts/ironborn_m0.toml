@@ -1,9 +1,24 @@
+# Mission 1 — The Ironfields Depot (Ironborn perspective).
+#
+# Per the map briefing: "Three weeks we've been running that depot. Our fuel,
+# our hands, our dead keeping the pipes clear. Corp showed up with paperwork
+# this morning. You know what we do with paperwork. Take it back. Hold it."
+#
+# Per docs/campaign.md canon: m0 is the ignition point, not a ritual site.
+# The Architect filed survey documentation with both offices on the same
+# morning, sparking the war. The Ironborn don't know this — they think Corp
+# showed up of their own corporate stupidity. The intrigue is in what they
+# don't know.
+#
+# The location is Refinery Seven (a fuel depot, not a foundry — fixed from
+# the earlier draft). Cinematic mirror of combine_m0's armor reveal.
+
 [[events]]
-id = "forge_master_dialogue"
+id = "perimeter_lines"
 trigger = { type = "time", seconds = 0.0 }
 actions = [
-  { type = "dialogue", speaker = "Foreman", text = "Corp thinks paperwork makes it theirs. We're going to remind them who actually built this place. Hold the foundry." },
-  { type = "objective", text = "Hold the Foundry against the Combine assault" },
+  { type = "dialogue", speaker = "Foreman", text = "Three weeks running this refinery. Our hands. Our dead in the pipes. Corp showed up with a piece of paper this morning. We hold." },
+  { type = "objective", text = "Hold Refinery Seven against the Combine assault" },
 ]
 
 [[events]]
@@ -11,7 +26,7 @@ id = "combine_probe"
 trigger = { type = "time", seconds = 45.0 }
 actions = [
   { type = "spawn_units", faction = "Combine", unit_type = "Riflemen", count = 3, x = 55, y = 26 },
-  { type = "dialogue", speaker = "Foreman", text = "Corp infantry probing the perimeter. Show them the cost of trespass." },
+  { type = "dialogue", speaker = "Foreman", text = "Corp infantry probing the perimeter. Show them what they're spending lives to claim." },
 ]
 
 [[events]]
@@ -20,15 +35,24 @@ trigger = { type = "time", seconds = 150.0 }
 actions = [
   { type = "spawn_units", faction = "Combine", unit_type = "HeavyArmor", count = 1, x = 60, y = 22 },
   { type = "spawn_units", faction = "Combine", unit_type = "Riflemen", count = 2, x = 58, y = 26 },
-  { type = "dialogue", speaker = "Foreman", text = "They brought armor. Get the welders on that hull — we've cracked tougher shells than that." },
+  { type = "camera_focus", target = { type = "unit", faction = "combine", unit_type = "heavy_armor" }, framing = "over_shoulder" },
+  { type = "camera_shake", intensity = 0.3, duration = 1.2 },
+  { type = "dialogue", speaker = "Foreman", text = "They brought armor. Get welders on that hull — we've cracked tougher shells than what Corp brings." },
+]
+
+[[events]]
+id = "release_armor"
+trigger = { type = "time", seconds = 165.0 }
+actions = [
+  { type = "camera_release" },
 ]
 
 [[events]]
 id = "emergency_repair"
 trigger = { type = "condition", condition = "beat", beat_id = "LastStand" }
 actions = [
-  { type = "dialogue", speaker = "Foreman", text = "Emergency Repair Protocol activated — all crews to the foundry walls! We hold or we lose everything we built!" },
-  { type = "change_objective", text = "Emergency: hold the foundry perimeter" },
+  { type = "dialogue", speaker = "Foreman", text = "Emergency Repair Protocol — every welder on the wall. We hold or we lose everything we built." },
+  { type = "change_objective", text = "Emergency: hold the refinery perimeter" },
 ]
 
 [[events]]
@@ -37,5 +61,5 @@ trigger = { type = "time", seconds = 240.0 }
 actions = [
   { type = "spawn_units", faction = "Combine", unit_type = "Riflemen", count = 5, x = 62, y = 24 },
   { type = "spawn_units", faction = "Combine", unit_type = "HeavyArmor", count = 1, x = 60, y = 18 },
-  { type = "dialogue", speaker = "Foreman", text = "Full Corp assault on the foundry! This is their big push — if we break them here, they don't come back." },
+  { type = "dialogue", speaker = "Foreman", text = "Full Corp commitment. Break them here and the message travels. The Ironfields holds." },
 ]

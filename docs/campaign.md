@@ -31,7 +31,34 @@ Both Combine and Ironborn play through the same five world events from opposite 
 | 2 | The Ashline Crossing | Assault | Assault | Control |
 | 3 | The Pale Ground | Defense | Assault | Assault |
 | 4 | The Waking Machines | Assault | Extraction | Survival |
-| 5 | The Last Works | Assault | Assault | Assault |
+| 5 | The Last Works | Survival | Survival | Assault |
+
+> **Note** (post-launch correction): m4 was originally typed as Assault for Combine
+> and Ironborn, but their briefings describe holding position against a nameless
+> emergence (no command, no reinforcements, "hold for as long as holding means
+> anything"). Maps + win conditions updated to Survival 20-min; the briefings
+> remain authoritative.
+
+---
+
+## Canon Map: Ritual Sites & Mission Index
+
+The Architect's nineteen-year plan culminates in five ritual sites being soaked
+in fear, blood, and prolonged conflict. The campaigns sample those events:
+
+| Mission | World Event | Ritual Site | Architect's role |
+|---|---|---|---|
+| m0 | Ironfields Depot | **(not a site)** — ignition only | Files survey paperwork to both Combine and Ironborn on the same morning. First contact neither side will forgive. The Architect is not at the depot; their bunker is elsewhere, surviving Hollow attracted by the broader ritual ramp. |
+| m1 | Ashline Crossing | **2nd site (the ravine)** | The bridge above the ravine is cover. Hours of artillery, boots on the stone, fear and pressure register in the second site below. Combine scouts flag "unusual readings"; Ironborn scouts won't go near the ravine edges after dark. Neither reports the same thing. |
+| m2 | The Pale Ground | **3rd site (oldest)** | Predates the diesel age. Reads fear. The Pale Ground does not respond to the Architect (they are not afraid) — so they need frightened soldiers from both factions walking it, bleeding on it, fighting over it. Survey teams went silent. "It has already begun composing something from what it finds." |
+| m3 | The Waking Machines | **4th site (the forge)** | Site activation comes earlier than the Architect projected. Unit 7-G's emergent consciousness is a side effect of the resonance — "I planned for activation. I did not plan for beauty." |
+| m4 | The Last Works | **5th and final site** | The Ancient One awakens. It is not contained, not grateful, not cooperative. The Architect's final realization: "I built a door. I did not consider that doors open from both sides." |
+
+**Consequence for script authoring:** every Combine and Ironborn mission must carry
+a subtle echo of what the Architect's POV reveals — scouts flagging readings,
+teams going silent, soldiers feeling watched. The Architect's missions reveal
+the through-line; the other factions' missions show the same events from inside
+the manipulation, without knowing they are being read.
 
 ---
 

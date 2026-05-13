@@ -1,40 +1,68 @@
+# Mission 1 — The Ironfields Depot (Architect perspective).
+#
+# Per the map briefing: "I filed the survey documentation with both offices
+# on the same morning. Different forms, same coordinates. ... I needed a
+# first contact that neither side would forgive. This is the ignition point."
+#
+# Per docs/campaign.md canon: m0 is NOT a ritual site. The Architect is in
+# their bunker, surviving Hollow attracted by the broader ritual ramp-up,
+# while remotely manipulating Combine and Ironborn to draw first blood
+# over a refinery neither side knows the other was sent to. The voice is
+# private log, satisfied at the cleverness, dispassionate about cost.
+
 [[events]]
-id = "everything_proceeds"
+id = "log_open"
 trigger = { type = "time", seconds = 0.0 }
 actions = [
-  { type = "dialogue", speaker = "Architect", text = "Everything proceeds as planned. The incursion is a side effect of the ritual — manageable, contained. Survive, gather data, and do not interfere with the process." },
-  { type = "objective", text = "Survive the ritual's side effects" },
+  { type = "dialogue", speaker = "Architect", text = "Log, ignition day. Both packets were filed at 0700. Different forms, same coordinates. The Combine moves on paperwork. The Ironborn moves on presence. They will meet at the refinery before either of them understands they were sent." },
+  { type = "objective", text = "Survive the Hollow incursion while ignition completes" },
 ]
 
 [[events]]
-id = "first_scouts"
+id = "first_hollow"
 trigger = { type = "time", seconds = 30.0 }
 actions = [
   { type = "spawn_units", faction = "Hollow", unit_type = "Riflemen", count = 2, x = 50, y = 26 },
-  { type = "dialogue", speaker = "Architect", text = "Hollow scouts at the perimeter. Expected. Engage as needed." },
+  { type = "dialogue", speaker = "Architect", text = "Hollow at the perimeter. Drawn by the broader resonance, not by us. Engage." },
 ]
 
 [[events]]
-id = "hollow_wave"
+id = "first_contact_far_away"
 trigger = { type = "time", seconds = 120.0 }
 actions = [
   { type = "spawn_units", faction = "Hollow", unit_type = "Riflemen", count = 4, x = 55, y = 24 },
-  { type = "dialogue", speaker = "Architect", text = "The ritual is drawing them in larger numbers. Fascinating. Hold the perimeter." },
+  { type = "dialogue", speaker = "Architect", text = "Field channel reports first contact at Refinery Seven. Both sides claim the other fired first. Both are right. Both will remember." },
 ]
 
 [[events]]
-id = "data_gathering"
-trigger = { type = "time", seconds = 300.0 }
+id = "satisfaction"
+trigger = { type = "time", seconds = 240.0 }
 actions = [
-  { type = "dialogue", speaker = "Architect", text = "Fascinating... the ritual is working. The resonance is building exactly as modeled. A few minutes more." },
+  { type = "camera_focus", target = { type = "home_base" }, framing = "close_up" },
+  { type = "dialogue", speaker = "Architect", text = "It is — quieter than I expected. To start a war. You sign two pieces of paper. You watch from a distance. The fear they feel is not directed at you. That is the trick of it." },
+]
+
+[[events]]
+id = "release_satisfaction"
+trigger = { type = "time", seconds = 260.0 }
+actions = [
+  { type = "camera_release" },
 ]
 
 [[events]]
 id = "hollow_surge"
-trigger = { type = "time", seconds = 500.0 }
+trigger = { type = "time", seconds = 420.0 }
 actions = [
   { type = "spawn_units", faction = "Hollow", unit_type = "Riflemen", count = 5, x = 52, y = 22 },
   { type = "spawn_units", faction = "Hollow", unit_type = "HeavyWeapons", count = 1, x = 55, y = 18 },
-  { type = "dialogue", speaker = "Architect", text = "Surge pattern exceeds projections. Adjust defensive positioning — do not let them reach the ritual site." },
-  { type = "change_objective", text = "Hold the perimeter until the ritual completes" },
+  { type = "camera_shake", intensity = 0.25, duration = 1.0 },
+  { type = "dialogue", speaker = "Architect", text = "Larger surge than projected. The bunker is not a ritual site — they should not be converging here. Adjust defensive positioning. The first sites are reaching further than I modeled." },
+]
+
+[[events]]
+id = "ignition_complete"
+trigger = { type = "time", seconds = 720.0 }
+actions = [
+  { type = "dialogue", speaker = "Architect", text = "Ignition is stable. The refinery will fall — or hold — and either way the next four years are bought. The second site can begin its preparation. Hold here until I can move." },
+  { type = "change_objective", text = "Hold until the ignition stabilizes" },
 ]
