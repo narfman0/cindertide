@@ -4,7 +4,7 @@
 // of events that fire based on time elapsed or named beat conditions.
 
 use bevy::prelude::*;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashSet, VecDeque};
 
 use crate::beats::{BeatId, FiredBeats};
@@ -17,26 +17,26 @@ use crate::factions::LoadedFactions;
 
 // ── Data types ────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct MissionScript {
     pub events: Vec<ScriptEvent>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ScriptEvent {
     pub id: String,
     pub trigger: Trigger,
     pub actions: Vec<Action>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Trigger {
     Time { seconds: f32 },
     Condition { condition: String, beat_id: Option<String> },
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Action {
     Dialogue { speaker: Option<String>, text: String },
@@ -83,6 +83,11 @@ impl MissionScript {
 #[derive(Resource, Default)]
 pub struct ScriptState {
     pub script: Option<MissionScript>,
+    /// Filesystem path the current script was loaded from (e.g.
+    /// `"assets/scripts/combine_m0.toml"`). Used by the cutscene editor to save
+    /// edits back. `None` when no script is loaded or the script was loaded
+    /// from an inline source (e.g., map TOML translated events).
+    pub source_path: Option<String>,
     /// Event ids that have already fired.
     pub fired: HashSet<String>,
     /// Pending dialogue messages — shown one at a time.
@@ -101,10 +106,12 @@ impl ScriptState {
             Ok(script) => {
                 info!("[script] loaded {path} ({} events)", script.events.len());
                 self.script = Some(script);
+                self.source_path = Some(path);
             }
             Err(e) => {
                 info!("[script] no script at {path}: {e}");
                 self.script = None;
+                self.source_path = None;
             }
         }
         self.fired.clear();

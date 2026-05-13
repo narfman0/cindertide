@@ -14,7 +14,7 @@
 // can override.
 
 use bevy::prelude::*;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// A single cinematographer recipe: where the camera sits relative to its subject,
 /// and how zoomed-in it is (orthographic scale).
@@ -105,7 +105,7 @@ impl CameraShake {
 
 /// Script-level camera focus target. Resolved against the live ECS in
 /// `script_tick_system` and written into the global `CameraTarget` resource.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CameraFocusTarget {
     /// Center the camera on the player's home base (`command_bunker` buildings).
