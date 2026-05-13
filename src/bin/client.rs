@@ -2630,6 +2630,15 @@ fn handle_ui_input(
 
                     if !map_loaded {
                         cindertide::setup_demo_scenario(world, &player, mission_index);
+                    } else {
+                        // setup_demo_scenario also loads `assets/scripts/<faction>_m<idx>.toml`;
+                        // when a SavedMap was used we skip that path, so load the script
+                        // explicitly here so MissionScriptPlugin (and the cutscene editor)
+                        // see the typed events including the camera_* action variants.
+                        let script_name = format!("{}_m{}", player.id(), mission_index);
+                        if let Some(mut state) = world.get_resource_mut::<ScriptState>() {
+                            state.load_script(&script_name);
+                        }
                     }
                     cindertide::bake_navmesh(world);
 
