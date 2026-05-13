@@ -1,32 +1,87 @@
+# Mission 2 — The Ashline Crossing (Combine perspective).
+#
+# Per the map briefing: "The Ashline bridge is the only viable northern
+# supply route. ... Scouts have flagged unusual readings from the ravine
+# below — geology team is en route, not your concern. Your concern is the
+# bridge."
+#
+# Per docs/campaign.md canon: the ravine IS the second ritual site. The
+# bridge fight is the cover the Architect designed. Combine soldiers
+# experience unease they're told to ignore. Field Comms relays the
+# classified-frame: questions go upward and don't come back.
+#
+# Cinematic beats: an early "ravine reading" line that's flatly dismissed,
+# Ironborn counter-push cinematic, a late tone-shift where Field Comms
+# acknowledges the geology team has gone silent (without naming what that
+# might mean).
+
 [[events]]
-id = "briefing"
+id = "bridge_setup"
 trigger = { type = "time", seconds = 0.0 }
 actions = [
-  { type = "dialogue", speaker = "Field Comms", text = "Ironborn Foundry is their primary staging installation. Its destruction ends their offensive capability in this sector." },
-  { type = "objective", text = "Destroy the Ironborn Foundry" },
+  { type = "dialogue", speaker = "Field Comms", text = "Ashline bridge is the northern supply line. Hold it. Geology team is in the ravine — not your problem. The bridge is the problem." },
+  { type = "objective", text = "Hold the Ashline crossing" },
 ]
 
 [[events]]
-id = "foundry_patrol"
-trigger = { type = "time", seconds = 120.0 }
+id = "first_probe"
+trigger = { type = "time", seconds = 90.0 }
 actions = [
-  { type = "spawn_units", faction = "Ironborn", unit_type = "Riflemen", count = 2, x = 100, y = 30 },
-  { type = "dialogue", speaker = "Field Comms", text = "Ironborn patrol, foundry perimeter. Two units. Engage before they spot the advance." },
+  { type = "spawn_units", faction = "Ironborn", unit_type = "Riflemen", count = 3, x = 100, y = 30 },
+  { type = "dialogue", speaker = "Field Comms", text = "Ironborn forward elements at the crossing. Engage." },
 ]
 
 [[events]]
-id = "counterattack"
+id = "ravine_reading"
+trigger = { type = "time", seconds = 180.0 }
+actions = [
+  { type = "dialogue", speaker = "Field Comms", text = "Geology team has flagged a reading. Command has reviewed the reading. Command is not sharing the review. The bridge remains the priority." },
+]
+
+[[events]]
+id = "ironborn_armor"
 trigger = { type = "time", seconds = 300.0 }
 actions = [
-  { type = "spawn_units", faction = "Ironborn", unit_type = "Riflemen", count = 4, x = 110, y = 20 },
-  { type = "spawn_units", faction = "Ironborn", unit_type = "HeavyArmor", count = 1, x = 108, y = 15 },
-  { type = "dialogue", speaker = "Field Comms", text = "Ironborn are aware of the advance. Counterattack incoming — armor and infantry. Maintain pressure on the foundry." },
+  { type = "spawn_units", faction = "Ironborn", unit_type = "HeavyArmor", count = 1, x = 108, y = 18 },
+  { type = "spawn_units", faction = "Ironborn", unit_type = "Riflemen", count = 4, x = 110, y = 22 },
+  { type = "camera_focus", target = { type = "unit", faction = "ironborn", unit_type = "heavy_armor" }, framing = "low_angle_hero" },
+  { type = "camera_shake", intensity = 0.3, duration = 1.2 },
+  { type = "dialogue", speaker = "Foreman", text = "If they keep the bridge, our north line dies. Take it." },
+]
+
+[[events]]
+id = "comms_response"
+trigger = { type = "time", seconds = 308.0 }
+actions = [
+  { type = "camera_focus", target = { type = "position", x = 64, y = 40 }, framing = "over_shoulder" },
+  { type = "dialogue", speaker = "Field Comms", text = "Ironborn armor at the crossing. Defensive priority confirmed. Hold the bridge." },
+]
+
+[[events]]
+id = "release_armor"
+trigger = { type = "time", seconds = 325.0 }
+actions = [
+  { type = "camera_release" },
+]
+
+[[events]]
+id = "geology_silent"
+trigger = { type = "time", seconds = 540.0 }
+actions = [
+  { type = "dialogue", speaker = "Field Comms", text = "The geology team has stopped reporting. Their last transmission was a partial sentence. The bridge remains the priority." },
 ]
 
 [[events]]
 id = "hero_goes_down"
 trigger = { type = "condition", condition = "beat", beat_id = "HeroGoesDown" }
 actions = [
-  { type = "dialogue", speaker = "Field Comms", text = "Defensive reposition authorized. Consolidate and resume the assault. The foundry is the objective." },
-  { type = "change_objective", text = "Regroup and resume the assault on the Ironborn Foundry" },
+  { type = "dialogue", speaker = "Field Comms", text = "Defensive reposition authorized. Consolidate. The bridge holds." },
+  { type = "change_objective", text = "Regroup and hold the Ashline bridge" },
+]
+
+[[events]]
+id = "reinforcements_window"
+trigger = { type = "time", seconds = 900.0 }
+actions = [
+  { type = "dialogue", speaker = "Field Comms", text = "Reinforcement column in transit. Hold position. Do not pursue across the bridge." },
 ]

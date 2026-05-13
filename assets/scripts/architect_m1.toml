@@ -1,33 +1,85 @@
+# Mission 2 — The Ashline Crossing (Architect perspective).
+#
+# Per the map briefing: "The bridge is irrelevant. The ravine is the second
+# site. ... I have been waiting three years for someone to fight over this
+# particular bridge."
+#
+# Per docs/campaign.md canon: the second ritual site sits below the bridge.
+# The Architect's mission is Control (per the world-events table) — but
+# narratively they are recording readings, not capturing terrain. They
+# observe both factions delivering hours of fear into the stone above the
+# second site. Hollow are drawn to the resonance, which the Architect
+# accepts as cost.
+
 [[events]]
-id = "sacrifices_necessary"
+id = "log_open"
 trigger = { type = "time", seconds = 0.0 }
 actions = [
-  { type = "dialogue", speaker = "Architect", text = "The sacrifices were necessary. Hold the ritual sites — every minute of combat above the ravine feeds the second site's activation." },
-  { type = "objective", text = "Hold the ritual sites" },
+  { type = "dialogue", speaker = "Architect", text = "Three years waiting for someone to fight over this particular bridge. The bridge is irrelevant. The ravine is the second site. Every minute of combat above it is a minute of fear delivered into the stone." },
+  { type = "objective", text = "Hold the readings position above the second site" },
 ]
 
 [[events]]
-id = "first_emergence"
+id = "first_hollow"
 trigger = { type = "time", seconds = 90.0 }
 actions = [
   { type = "spawn_units", faction = "Hollow", unit_type = "Riflemen", count = 3, x = 95, y = 40 },
-  { type = "dialogue", speaker = "Architect", text = "First Hollow emergence from the eastern approach. Engage — their fear feeds the process." },
+  { type = "camera_focus", target = { type = "unit", faction = "hollow", unit_type = "riflemen" }, framing = "off_kilter" },
+  { type = "dialogue", speaker = "Architect", text = "First Hollow emergence. Drawn to the resonance. Their fear feeds the second site faster than the soldiers' fear above. An efficient asset." },
 ]
 
 [[events]]
-id = "data_point"
+id = "release_first"
+trigger = { type = "time", seconds = 108.0 }
+actions = [
+  { type = "camera_release" },
+]
+
+[[events]]
+id = "battle_above"
 trigger = { type = "time", seconds = 240.0 }
 actions = [
-  { type = "dialogue", speaker = "Architect", text = "Another data point collected. The site's resonance has increased by a measurable factor. Maintain combat pressure." },
+  { type = "dialogue", speaker = "Architect", text = "The Combine geology team has been removed from the ravine. They will report unusual readings. They will be classified above their own clearance. The Ironborn lost a scout. The Foreman will not investigate. Both reactions are correct." },
 ]
 
 [[events]]
-id = "hollow_convergence"
+id = "resonance_quickening"
+trigger = { type = "time", seconds = 360.0 }
+actions = [
+  { type = "camera_focus", target = { type = "home_base" }, framing = "close_up" },
+  { type = "dialogue", speaker = "Architect", text = "The stone is responding faster than projected. Three years was the lower bound; I should have allowed two and a half. Note this for the third site." },
+]
+
+[[events]]
+id = "release_quickening"
+trigger = { type = "time", seconds = 380.0 }
+actions = [
+  { type = "camera_release" },
+]
+
+[[events]]
+id = "convergence"
 trigger = { type = "time", seconds = 480.0 }
 actions = [
   { type = "spawn_units", faction = "Hollow", unit_type = "Riflemen", count = 5, x = 100, y = 35 },
   { type = "spawn_units", faction = "Hollow", unit_type = "HeavyWeapons", count = 1, x = 103, y = 30 },
   { type = "spawn_units", faction = "Hollow", unit_type = "HeavyArmor", count = 1, x = 105, y = 25 },
-  { type = "dialogue", speaker = "Architect", text = "Full convergence on the ritual site. They can sense what's happening here. Hold them back — the reading is almost complete." },
-  { type = "change_objective", text = "Defend the ritual sites through the Hollow convergence" },
+  { type = "camera_focus", target = { type = "unit", faction = "hollow", unit_type = "heavy_armor" }, framing = "wide_establishing" },
+  { type = "camera_shake", intensity = 0.4, duration = 1.4 },
+  { type = "dialogue", speaker = "Architect", text = "Convergence on the position. They can sense the second site approaching activation. Hold them back. The reading must complete." },
+  { type = "change_objective", text = "Hold position until the second site is fully soaked" },
+]
+
+[[events]]
+id = "release_final"
+trigger = { type = "time", seconds = 500.0 }
+actions = [
+  { type = "camera_release" },
+]
+
+[[events]]
+id = "site_soaked"
+trigger = { type = "time", seconds = 720.0 }
+actions = [
+  { type = "dialogue", speaker = "Architect", text = "The site is soaked. The reading is complete. Three remaining." },
 ]

@@ -1,9 +1,25 @@
+# Mission 2 — The Ashline Crossing (Ironborn perspective).
+#
+# Per the map briefing: "Push through the Ashline before they fortify the
+# far side. ... Something's off about the ravine — scouts won't go near
+# the edges after dark, won't say why. Don't ask them. Just take the bridge."
+#
+# Per docs/campaign.md canon: the ravine IS the second ritual site. The
+# Ironborn scouts feel the wrongness directly — they don't have the Corp
+# habit of classifying their fear, so they simply refuse to look. The
+# Foreman's voice acknowledges the cost: don't ask, don't make them name it,
+# do the work in front of you.
+#
+# Cinematic beats: Combine armor reveal at the bridge (over_shoulder),
+# a quiet line late in the mission where a scout doesn't come back from
+# the ravine and the Foreman declines to comment.
+
 [[events]]
-id = "opening"
+id = "the_bridge"
 trigger = { type = "time", seconds = 0.0 }
 actions = [
-  { type = "dialogue", speaker = "Foreman", text = "That scrapyard is ours by right — salvagers worked those piles before Corp even knew this territory existed. Take it back." },
-  { type = "objective", text = "Capture the Combine Scrapyard" },
+  { type = "dialogue", speaker = "Foreman", text = "Push the Ashline before they fortify the far side. Cut their north line and they fight on one stomach. Take the bridge." },
+  { type = "objective", text = "Take the Ashline bridge" },
 ]
 
 [[events]]
@@ -11,15 +27,47 @@ id = "combine_patrol"
 trigger = { type = "time", seconds = 90.0 }
 actions = [
   { type = "spawn_units", faction = "Combine", unit_type = "Riflemen", count = 2, x = 95, y = 35 },
-  { type = "dialogue", speaker = "Foreman", text = "Corp patrol between us and the objective. Cut through them." },
+  { type = "dialogue", speaker = "Foreman", text = "Corp patrol between us and the crossing. Cut through them." },
 ]
 
 [[events]]
-id = "combine_reinforcements"
-trigger = { type = "time", seconds = 240.0 }
+id = "scout_does_not_return"
+trigger = { type = "time", seconds = 180.0 }
 actions = [
-  { type = "spawn_units", faction = "Combine", unit_type = "Riflemen", count = 4, x = 110, y = 20 },
+  { type = "dialogue", speaker = "Foreman", text = "Mira's squad went down to the ravine to check a flank. Two came back. Mira didn't. They are not saying why. Do not ask. Keep moving on the bridge." },
+]
+
+[[events]]
+id = "combine_armor"
+trigger = { type = "time", seconds = 300.0 }
+actions = [
+  { type = "spawn_units", faction = "Combine", unit_type = "HeavyArmor", count = 1, x = 108, y = 18 },
+  { type = "spawn_units", faction = "Combine", unit_type = "Riflemen", count = 4, x = 110, y = 22 },
   { type = "spawn_units", faction = "Combine", unit_type = "HeavyWeapons", count = 1, x = 112, y = 15 },
-  { type = "dialogue", speaker = "Foreman", text = "Corp spotted our advance on the scrapyard — they're rushing reinforcements to cut us off!" },
-  { type = "change_objective", text = "Fight through the reinforcements and capture the Scrapyard" },
+  { type = "camera_focus", target = { type = "unit", faction = "combine", unit_type = "heavy_armor" }, framing = "over_shoulder" },
+  { type = "camera_shake", intensity = 0.3, duration = 1.2 },
+  { type = "dialogue", speaker = "Foreman", text = "Corp armor on the bridge. Hit it from both sides. We don't lose the crossing." },
+]
+
+[[events]]
+id = "release_armor"
+trigger = { type = "time", seconds = 318.0 }
+actions = [
+  { type = "camera_release" },
+]
+
+[[events]]
+id = "second_unease"
+trigger = { type = "time", seconds = 540.0 }
+actions = [
+  { type = "dialogue", speaker = "Foreman", text = "Whatever the scouts felt down there — it didn't move toward us. It didn't move away either. Keep the bridge work clean. We leave when the bridge is ours." },
+]
+
+[[events]]
+id = "final_push"
+trigger = { type = "time", seconds = 780.0 }
+actions = [
+  { type = "spawn_units", faction = "Combine", unit_type = "Riflemen", count = 5, x = 105, y = 25 },
+  { type = "dialogue", speaker = "Foreman", text = "Corp committing to take it back. They came too far for a piece of paper. Hold the bridge." },
+  { type = "change_objective", text = "Hold the Ashline bridge against the Combine counter-push" },
 ]
