@@ -1,32 +1,77 @@
+# Mission 4 — The Waking Machines (Ironborn perspective).
+#
+# Per docs/campaign.md: Combine sent "a clean-up crew instead of engineers.
+# That's fear, not protocol." Ironborn race Combine to the forge to meet
+# Unit 7-G — the machine that made a choice. The Extraction mission type
+# (escort vehicles) maps onto bringing 7-G out alive.
+#
+# Foreman voice: first-person plural, ownership, recognition of the machine
+# as a person not a weapon. Cinematic beats: 7-G first sighting (close_up),
+# Combine containment team arrival, the moment 7-G chooses to walk with us.
+
 [[events]]
-id = "get_the_vehicles_across"
+id = "objective_set"
 trigger = { type = "time", seconds = 0.0 }
 actions = [
-  { type = "dialogue", speaker = "Foreman", text = "Those three vehicles are the reason we're here. Get them to the northern extraction point. Don't lose a single one." },
-  { type = "objective", text = "Extract 3 vehicles to the northern extraction zone" },
+  { type = "dialogue", speaker = "Foreman", text = "Corp went to clean up. We go to listen. The machine in the forge made a choice — we don't destroy things that make choices. Get to it before Corp does." },
+  { type = "objective", text = "Reach the forge before the Combine" },
 ]
 
 [[events]]
-id = "patrol_spotted"
-trigger = { type = "time", seconds = 120.0 }
+id = "combine_scouts"
+trigger = { type = "time", seconds = 90.0 }
 actions = [
   { type = "spawn_units", faction = "Combine", unit_type = "Riflemen", count = 2, x = 80, y = 50 },
-  { type = "dialogue", speaker = "Foreman", text = "Corp patrol mid-territory. They haven't made us yet — keep the vehicles moving, keep it quiet." },
+  { type = "dialogue", speaker = "Foreman", text = "Corp scouts ahead. They are racing us." },
 ]
 
 [[events]]
-id = "intercept_force"
-trigger = { type = "time", seconds = 300.0 }
+id = "machine_visible"
+trigger = { type = "time", seconds = 240.0 }
 actions = [
-  { type = "spawn_units", faction = "Combine", unit_type = "Riflemen", count = 4, x = 100, y = 40 },
-  { type = "spawn_units", faction = "Combine", unit_type = "LightVehicle", count = 2, x = 105, y = 35 },
-  { type = "dialogue", speaker = "Foreman", text = "Corp knows what we're moving. Intercept force ahead — four infantry, two vehicles. Break through fast." },
+  { type = "spawn_units", faction = "Combine", unit_type = "HeavyArmor", count = 1, x = 95, y = 35 },
+  { type = "camera_focus", target = { type = "position", x = 95, y = 35 }, framing = "close_up" },
+  { type = "camera_shake", intensity = 0.15, duration = 0.6 },
+  { type = "dialogue", speaker = "Foreman", text = "There it is. Combine designation 7-G. It hasn't fired. It hasn't moved. It is waiting." },
 ]
 
 [[events]]
-id = "extraction_zone_clear"
+id = "approach_clear"
+trigger = { type = "time", seconds = 260.0 }
+actions = [
+  { type = "camera_focus", target = { type = "home_base" }, framing = "low_angle_hero" },
+  { type = "dialogue", speaker = "Foreman", text = "We don't approach it like a weapon. We approach it like a person. Walk in clear. Let it see us." },
+]
+
+[[events]]
+id = "camera_release_first"
+trigger = { type = "time", seconds = 280.0 }
+actions = [
+  { type = "camera_release" },
+]
+
+[[events]]
+id = "containment_arrives"
+trigger = { type = "time", seconds = 400.0 }
+actions = [
+  { type = "spawn_units", faction = "Combine", unit_type = "HeavyArmor", count = 1, x = 100, y = 40 },
+  { type = "spawn_units", faction = "Combine", unit_type = "Riflemen", count = 5, x = 102, y = 42 },
+  { type = "dialogue", speaker = "Foreman", text = "Corp containment team. They mean to destroy it. Hold them off — give the machine time to walk." },
+]
+
+[[events]]
+id = "machine_decides"
 trigger = { type = "time", seconds = 600.0 }
 actions = [
-  { type = "dialogue", speaker = "Foreman", text = "Extraction zone is clear ahead. Get the vehicles through. Don't stop." },
-  { type = "change_objective", text = "Move all vehicles into the northern extraction zone" },
+  { type = "camera_focus", target = { type = "position", x = 95, y = 35 }, framing = "close_up" },
+  { type = "dialogue", speaker = "Foreman", text = "It moved. Toward us. Toward us. We don't have a word for what just happened but it walked with us, and that's enough." },
+  { type = "change_objective", text = "Extract 7-G to the northern zone" },
+]
+
+[[events]]
+id = "extraction_window"
+trigger = { type = "time", seconds = 720.0 }
+actions = [
+  { type = "camera_release" },
+  { type = "dialogue", speaker = "Foreman", text = "Northern zone is clear. Move." },
 ]

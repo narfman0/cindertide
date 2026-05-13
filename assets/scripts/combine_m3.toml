@@ -1,39 +1,89 @@
+# Mission 4 — The Waking Machines (Combine perspective).
+#
+# Per docs/campaign.md: Unit 7-G "protected a soldier outside its assigned
+# perimeter, then destroyed three allied units, then stopped." Combine sends
+# a containment team to the forge to retrieve or destroy 7-G. The arc per
+# the briefing: Field Comms's procedural voice begins to fracture under the
+# weight of "apparent grief" in a field report.
+#
+# Cinematic beats: 7-G reveal (close_up), Ironborn arrival (low_angle_hero
+# POV switch — they aren't shooting), tone-break (Field Comms quoting the
+# field report verbatim, voice cracks).
+
 [[events]]
-id = "recon_dialogue"
+id = "deployment"
 trigger = { type = "time", seconds = 0.0 }
 actions = [
-  { type = "dialogue", speaker = "Field Comms", text = "Deep Ironborn territory. Establish position before engaging — their installations here are entrenched." },
-  { type = "objective", text = "Build a force and assault the Ironborn base" },
+  { type = "dialogue", speaker = "Field Comms", text = "Approach vector locked on the forge. Unit 7-G is somewhere inside. Retrieval is preferred. Destruction is acceptable. Engagement parameters at your discretion within the briefing." },
+  { type = "objective", text = "Reach the forge and contain Unit 7-G" },
 ]
 
 [[events]]
-id = "first_contact"
+id = "ironborn_patrol"
 trigger = { type = "time", seconds = 90.0 }
 actions = [
   { type = "spawn_units", faction = "Ironborn", unit_type = "Riflemen", count = 2, x = 80, y = 40 },
-  { type = "dialogue", speaker = "Field Comms", text = "Ironborn patrol, mid-field. Two units. Engage or evade — your operational discretion." },
+  { type = "dialogue", speaker = "Field Comms", text = "Ironborn patrol confirmed in the approach. Engage." },
 ]
 
 [[events]]
-id = "second_base_intel"
-trigger = { type = "time", seconds = 360.0 }
+id = "first_strange_unit"
+trigger = { type = "time", seconds = 240.0 }
 actions = [
-  { type = "dialogue", speaker = "Field Comms", text = "Intelligence has flagged a second Ironborn position, northeast. Reinforced. Plan accordingly." },
+  { type = "spawn_units", faction = "Combine", unit_type = "HeavyArmor", count = 1, x = 90, y = 30 },
+  { type = "camera_focus", target = { type = "position", x = 90, y = 30 }, framing = "close_up" },
+  { type = "camera_shake", intensity = 0.15, duration = 0.6 },
+  { type = "dialogue", speaker = "Field Comms", text = "Combine armor unit, mid-field. Designation: 7-G. It is not engaging. It is not retreating. It is — standing." },
 ]
 
 [[events]]
-id = "full_assault"
-trigger = { type = "time", seconds = 600.0 }
+id = "ironborn_arrival"
+trigger = { type = "time", seconds = 270.0 }
 actions = [
-  { type = "spawn_units", faction = "Ironborn", unit_type = "Riflemen", count = 6, x = 110, y = 22 },
-  { type = "spawn_units", faction = "Ironborn", unit_type = "HeavyArmor", count = 2, x = 108, y = 15 },
-  { type = "dialogue", speaker = "Field Comms", text = "Ironborn committing to full assault on our position. Defensive engagement required." },
+  { type = "spawn_units", faction = "Ironborn", unit_type = "HeavyArmor", count = 1, x = 100, y = 35 },
+  { type = "spawn_units", faction = "Ironborn", unit_type = "Riflemen", count = 4, x = 102, y = 38 },
+  { type = "camera_focus", target = { type = "unit", faction = "ironborn", unit_type = "heavy_armor" }, framing = "low_angle_hero" },
+  { type = "dialogue", speaker = "Foreman", text = "If a machine can choose, it can choose us. Let it choose. We don't need to win this fight — we need to be here when it makes a choice." },
 ]
 
 [[events]]
-id = "attack_window"
+id = "comms_response"
+trigger = { type = "time", seconds = 280.0 }
+actions = [
+  { type = "camera_focus", target = { type = "position", x = 90, y = 30 }, framing = "close_up" },
+  { type = "dialogue", speaker = "Field Comms", text = "Ironborn presence confirmed. They appear to be — observing. Maintain primary objective. Contain 7-G." },
+]
+
+[[events]]
+id = "camera_release_first"
+trigger = { type = "time", seconds = 300.0 }
+actions = [
+  { type = "camera_release" },
+  { type = "change_objective", text = "Reach 7-G before the Ironborn do" },
+]
+
+[[events]]
+id = "ironborn_pressure"
+trigger = { type = "time", seconds = 480.0 }
+actions = [
+  { type = "spawn_units", faction = "Ironborn", unit_type = "HeavyWeapons", count = 1, x = 105, y = 32 },
+  { type = "spawn_units", faction = "Ironborn", unit_type = "Riflemen", count = 4, x = 108, y = 34 },
+  { type = "dialogue", speaker = "Field Comms", text = "Ironborn reinforcement detected. They are committing to the position. Press through." },
+]
+
+[[events]]
+id = "tone_break"
+trigger = { type = "time", seconds = 720.0 }
+actions = [
+  { type = "camera_focus", target = { type = "position", x = 90, y = 30 }, framing = "close_up" },
+  { type = "dialogue", speaker = "Field Comms", text = "It is — Command, the field report says 'apparent grief.' I am quoting the field report. I do not have a procedural response for this. Continue the objective." },
+]
+
+[[events]]
+id = "final_window"
 trigger = { type = "time", seconds = 900.0 }
 actions = [
-  { type = "dialogue", speaker = "Field Comms", text = "Their assault reduced their base strength. The window is open. Push to the primary target now." },
-  { type = "change_objective", text = "Strike the weakened Ironborn base now" },
+  { type = "camera_release" },
+  { type = "dialogue", speaker = "Field Comms", text = "Make a decision. Retrieve or destroy. The window is closing." },
+  { type = "change_objective", text = "Retrieve or destroy Unit 7-G — close the operation" },
 ]

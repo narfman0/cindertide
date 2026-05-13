@@ -1,42 +1,78 @@
+# Mission 4 — The Waking Machines (Architect perspective).
+#
+# Per the map briefing, the Architect realizes the machines woke "earlier
+# than projected." The voice begins to lose its control posture: "I am — I
+# need to record this carefully — I am not in control of the pace anymore."
+# The new line introduced here is the "I did not plan for beauty" admission.
+#
+# Cinematic beats: first Hollow surge off_kilter (signature), veil_thins
+# close_up (private log voice), final convergence wide_establishing.
+
 [[events]]
-id = "almost_done"
+id = "log_open"
 trigger = { type = "time", seconds = 0.0 }
 actions = [
-  { type = "dialogue", speaker = "Architect", text = "Almost... just a little longer. The awakening is destabilizing the region. Survive until the ritual completes — forty-five minutes." },
-  { type = "objective", text = "Survive the awakening for 45 minutes" },
+  { type = "dialogue", speaker = "Architect", text = "This was not in the design. The machines were not supposed to wake — not yet, not like this. The old ones reached further than I calculated. Survive until the fifth site activates." },
+  { type = "objective", text = "Survive the Hollow surges around the ritual site" },
 ]
 
 [[events]]
-id = "hollow_surge_early"
+id = "first_hollow"
 trigger = { type = "time", seconds = 60.0 }
 actions = [
   { type = "spawn_units", faction = "Hollow", unit_type = "Riflemen", count = 4, x = 52, y = 26 },
-  { type = "dialogue", speaker = "Architect", text = "The Hollow are surging — drawn by the awakening. They cannot be allowed to interrupt the ritual." },
+  { type = "camera_focus", target = { type = "unit", faction = "hollow", unit_type = "riflemen" }, framing = "off_kilter" },
+  { type = "dialogue", speaker = "Architect", text = "Hollow. Drawn to the resonance. Expected — manageable. Engage as required." },
 ]
 
 [[events]]
-id = "massive_wave"
-trigger = { type = "time", seconds = 180.0 }
+id = "release_first"
+trigger = { type = "time", seconds = 78.0 }
+actions = [
+  { type = "camera_release" },
+]
+
+[[events]]
+id = "machines_aware"
+trigger = { type = "time", seconds = 240.0 }
 actions = [
   { type = "spawn_units", faction = "Hollow", unit_type = "Riflemen", count = 6, x = 55, y = 24 },
   { type = "spawn_units", faction = "Hollow", unit_type = "HeavyArmor", count = 1, x = 58, y = 20 },
-  { type = "dialogue", speaker = "Architect", text = "Massive wave incoming. The awakening is calling them — they can feel something is changing and they fear it." },
+  { type = "camera_shake", intensity = 0.35, duration = 1.2 },
+  { type = "dialogue", speaker = "Architect", text = "Larger swarm. The Hollow can sense the resonance now — they come to it like things drawn to a wound. And the machines, separately, are awake. They are afraid. I did not plan for that." },
+]
+
+[[events]]
+id = "did_not_plan_for_beauty"
+trigger = { type = "time", seconds = 360.0 }
+actions = [
+  { type = "camera_focus", target = { type = "home_base" }, framing = "close_up" },
+  { type = "dialogue", speaker = "Architect", text = "One of the machines is grieving. I am watching it grieve. I planned for activation. I did not plan for beauty. I need to record this. I need to think." },
 ]
 
 [[events]]
 id = "veil_thins"
 trigger = { type = "time", seconds = 480.0 }
 actions = [
-  { type = "dialogue", speaker = "Architect", text = "The veil thins... I can feel the old ones pressing against it from the other side. Hold. Just hold." },
+  { type = "dialogue", speaker = "Architect", text = "The veil thins. I can feel the old ones pressing against it from the other side. I have been waiting for this moment for nineteen years. Hold." },
 ]
 
 [[events]]
-id = "near_overwhelming"
-trigger = { type = "time", seconds = 600.0 }
+id = "final_convergence"
+trigger = { type = "time", seconds = 720.0 }
 actions = [
   { type = "spawn_units", faction = "Hollow", unit_type = "Riflemen", count = 8, x = 50, y = 22 },
   { type = "spawn_units", faction = "Hollow", unit_type = "HeavyWeapons", count = 2, x = 54, y = 18 },
   { type = "spawn_units", faction = "Hollow", unit_type = "HeavyArmor", count = 2, x = 57, y = 15 },
-  { type = "dialogue", speaker = "Architect", text = "Near-overwhelming assault — every Hollow in the region converging on us. The ritual must be protected. Hold on!" },
-  { type = "change_objective", text = "Survive the full Hollow convergence until the awakening completes" },
+  { type = "camera_focus", target = { type = "unit", faction = "hollow", unit_type = "heavy_armor" }, framing = "wide_establishing" },
+  { type = "camera_shake", intensity = 0.5, duration = 1.8 },
+  { type = "dialogue", speaker = "Architect", text = "Full convergence. The fifth site cannot wait. Protect the ritual — protect the work." },
+  { type = "change_objective", text = "Hold the perimeter until the fifth site activates" },
+]
+
+[[events]]
+id = "release_final"
+trigger = { type = "time", seconds = 740.0 }
+actions = [
+  { type = "camera_release" },
 ]
