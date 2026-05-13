@@ -1,34 +1,94 @@
+# Mission 5 — The Last Works (Ironborn perspective).
+#
+# Per the map briefing: "The ground split open at The Last Works and
+# something came out that none of us have words for. Corp is gone —
+# their command, their lines, their flags. It's just us now and whatever
+# that is. We're not running."
+#
+# Foreman voice holds steady but the cadence shortens. "We hold not
+# because we can win. Because this is what we do." Hollow forces emerge.
+# Win at t=1200 ("It passed over us. Through us, almost").
+#
+# Cinematic beats: first Hollow emergence off_kilter, Foreman's "stand up"
+# moment on home_base in low_angle_hero, massive assault wide_establishing,
+# final close_up for "we are still here."
+
 [[events]]
-id = "we_end_this"
+id = "ground_split"
 trigger = { type = "time", seconds = 0.0 }
 actions = [
-  { type = "dialogue", speaker = "Foreman", text = "We end this here. The Combine Command Bunker falls today. Raze it to the ground." },
-  { type = "objective", text = "Destroy the Combine Command Bunker" },
+  { type = "dialogue", speaker = "Foreman", text = "The ground split open at The Last Works. Corp is gone — their command, their lines, their flags. It is us and whatever that is. We are not running. We hold." },
+  { type = "objective", text = "Hold the position" },
 ]
 
 [[events]]
-id = "defense_wave"
-trigger = { type = "time", seconds = 150.0 }
+id = "first_emergence"
+trigger = { type = "time", seconds = 60.0 }
 actions = [
-  { type = "spawn_units", faction = "Combine", unit_type = "Riflemen", count = 4, x = 100, y = 35 },
-  { type = "spawn_units", faction = "Combine", unit_type = "HeavyArmor", count = 1, x = 105, y = 28 },
-  { type = "dialogue", speaker = "Foreman", text = "Corp rallying their defense — they're not giving up that bunker without a fight." },
+  { type = "spawn_units", faction = "Hollow", unit_type = "Riflemen", count = 4, x = 90, y = 30 },
+  { type = "camera_focus", target = { type = "unit", faction = "hollow", unit_type = "riflemen" }, framing = "off_kilter" },
+  { type = "camera_shake", intensity = 0.3, duration = 1.2 },
+  { type = "dialogue", speaker = "Foreman", text = "There they are. Or it. The shape is not right — but they are bodies and they are coming. That is enough to fight." },
 ]
 
 [[events]]
-id = "veteran_squad"
-trigger = { type = "condition", condition = "beat", beat_id = "LastStand" }
+id = "release_first"
+trigger = { type = "time", seconds = 80.0 }
 actions = [
-  { type = "spawn_units", faction = "Ironborn", unit_type = "HeavyArmor", count = 2, x = 8, y = 65 },
-  { type = "dialogue", speaker = "Foreman", text = "Veteran armor crews arriving from the depot. They heard the call. Get them into the fight!" },
+  { type = "camera_release" },
+  { type = "dialogue", speaker = "Foreman", text = "Do not think about what they are. Think about which side of the line they are on." },
 ]
 
 [[events]]
-id = "massive_reinforcement"
-trigger = { type = "time", seconds = 600.0 }
+id = "growing_wave"
+trigger = { type = "time", seconds = 240.0 }
 actions = [
-  { type = "spawn_units", faction = "Ironborn", unit_type = "Riflemen", count = 5, x = 8, y = 62 },
-  { type = "spawn_units", faction = "Combine", unit_type = "Riflemen", count = 6, x = 112, y = 20 },
-  { type = "spawn_units", faction = "Combine", unit_type = "HeavyWeapons", count = 2, x = 110, y = 15 },
-  { type = "dialogue", speaker = "Foreman", text = "Both sides throwing everything into this fight. This is the moment the Ironfields was built for — push through!" },
+  { type = "spawn_units", faction = "Hollow", unit_type = "Riflemen", count = 6, x = 95, y = 35 },
+  { type = "spawn_units", faction = "Hollow", unit_type = "HeavyWeapons", count = 1, x = 98, y = 30 },
+  { type = "camera_shake", intensity = 0.35, duration = 1.2 },
+  { type = "dialogue", speaker = "Foreman", text = "More of them. They come from the ground. We hold." },
+]
+
+[[events]]
+id = "we_stand"
+trigger = { type = "time", seconds = 480.0 }
+actions = [
+  { type = "camera_focus", target = { type = "home_base" }, framing = "low_angle_hero" },
+  { type = "dialogue", speaker = "Foreman", text = "Ironborn don't run from things we can't name. We've built our whole culture on standing up after. Stand up." },
+]
+
+[[events]]
+id = "release_stand"
+trigger = { type = "time", seconds = 500.0 }
+actions = [
+  { type = "camera_release" },
+]
+
+[[events]]
+id = "massive_assault"
+trigger = { type = "time", seconds = 720.0 }
+actions = [
+  { type = "spawn_units", faction = "Hollow", unit_type = "Riflemen", count = 10, x = 90, y = 25 },
+  { type = "spawn_units", faction = "Hollow", unit_type = "HeavyArmor", count = 2, x = 95, y = 28 },
+  { type = "spawn_units", faction = "Hollow", unit_type = "HeavyWeapons", count = 2, x = 98, y = 32 },
+  { type = "camera_focus", target = { type = "unit", faction = "hollow", unit_type = "heavy_armor" }, framing = "wide_establishing" },
+  { type = "camera_shake", intensity = 0.5, duration = 2.0 },
+  { type = "dialogue", speaker = "Foreman", text = "All of them at once. We hold. This is what we do." },
+]
+
+[[events]]
+id = "it_passes"
+trigger = { type = "time", seconds = 1080.0 }
+actions = [
+  { type = "camera_focus", target = { type = "home_base" }, framing = "close_up" },
+  { type = "dialogue", speaker = "Foreman", text = "It is going. Past us. Through us, almost. We lost good people. But we are still here." },
+]
+
+[[events]]
+id = "aftermath"
+trigger = { type = "time", seconds = 1200.0 }
+actions = [
+  { type = "camera_release" },
+  { type = "dialogue", speaker = "Foreman", text = "Start salvaging. We are going to need everything we can carry for what comes next." },
+  { type = "win_mission" },
 ]

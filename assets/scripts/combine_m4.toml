@@ -1,34 +1,94 @@
+# Mission 5 — The Last Works (Combine perspective).
+#
+# Per the map briefing: "Command is offline. What emerged from the subsurface
+# at grid 9-Last is not a geological event and it is not an enemy faction."
+# Field Comms voice fractures completely. By mid-mission they admit they
+# are not Command — just whoever still has a working radio.
+#
+# Hollow forces emerge from the ground in escalating waves. No reinforcements,
+# no extraction — the mission is to hold until it passes. Win condition
+# fires from the script at t=1200 ("It stopped. It is going.").
+#
+# Cinematic beats: first contact off_kilter (signature Hollow framing),
+# Field Comms tone-break close_up on home base, massive surge
+# wide_establishing, final "it is going" close_up.
+
 [[events]]
-id = "this_is_it"
+id = "deployment"
 trigger = { type = "time", seconds = 0.0 }
 actions = [
-  { type = "dialogue", speaker = "Field Comms", text = "This is the Ironborn primary installation. Full demolition authorized. Destroy every structure and this engagement ends." },
-  { type = "objective", text = "Destroy all Ironborn structures" },
+  { type = "dialogue", speaker = "Field Comms", text = "No reinforcements. No extraction. Hold the position." },
+  { type = "objective", text = "Hold the position" },
 ]
 
 [[events]]
-id = "probing_attack"
-trigger = { type = "time", seconds = 120.0 }
+id = "first_contact"
+trigger = { type = "time", seconds = 60.0 }
 actions = [
-  { type = "spawn_units", faction = "Ironborn", unit_type = "Riflemen", count = 3, x = 90, y = 40 },
-  { type = "dialogue", speaker = "Field Comms", text = "Ironborn probe force — three units. Defensive engagement." },
+  { type = "spawn_units", faction = "Hollow", unit_type = "Riflemen", count = 4, x = 100, y = 30 },
+  { type = "camera_focus", target = { type = "unit", faction = "hollow", unit_type = "riflemen" }, framing = "off_kilter" },
+  { type = "camera_shake", intensity = 0.3, duration = 1.2 },
+  { type = "dialogue", speaker = "Field Comms", text = "Contact. Designation — unknown. They are not Ironborn. They are not — Command, what am I looking at?" },
 ]
 
 [[events]]
-id = "airdrop_reinforcements"
-trigger = { type = "condition", condition = "beat", beat_id = "LastStand" }
+id = "comms_release_1"
+trigger = { type = "time", seconds = 80.0 }
 actions = [
-  { type = "spawn_units", faction = "Combine", unit_type = "HeavyWeapons", count = 3, x = 8, y = 65 },
-  { type = "dialogue", speaker = "Field Comms", text = "Heavy weapons teams inbound by air. Command has not forgotten this position. Hold until they land." },
+  { type = "camera_release" },
+  { type = "dialogue", speaker = "Field Comms", text = "Engaging hostile elements. Designation deferred." },
 ]
 
 [[events]]
-id = "massive_counterattack"
-trigger = { type = "time", seconds = 600.0 }
+id = "increasing_surge"
+trigger = { type = "time", seconds = 240.0 }
 actions = [
-  { type = "spawn_units", faction = "Ironborn", unit_type = "HeavyArmor", count = 3, x = 110, y = 18 },
-  { type = "spawn_units", faction = "Ironborn", unit_type = "Riflemen", count = 8, x = 112, y = 22 },
-  { type = "spawn_units", faction = "Ironborn", unit_type = "HeavyWeapons", count = 2, x = 108, y = 12 },
-  { type = "dialogue", speaker = "Field Comms", text = "Ironborn committing full remaining strength. Three armor units, eight infantry, two heavy weapons. This is their last engagement. Neutralize it." },
-  { type = "change_objective", text = "Survive the Ironborn last stand — then destroy all remaining structures" },
+  { type = "spawn_units", faction = "Hollow", unit_type = "Riflemen", count = 6, x = 105, y = 35 },
+  { type = "spawn_units", faction = "Hollow", unit_type = "HeavyWeapons", count = 1, x = 108, y = 32 },
+  { type = "camera_shake", intensity = 0.4, duration = 1.5 },
+  { type = "dialogue", speaker = "Field Comms", text = "More of them. From — the ground? From the ground. They are coming from the ground." },
+]
+
+[[events]]
+id = "tone_break_full"
+trigger = { type = "time", seconds = 480.0 }
+actions = [
+  { type = "camera_focus", target = { type = "home_base" }, framing = "close_up" },
+  { type = "dialogue", speaker = "Field Comms", text = "I see you. I see all of you on the position. I am not Command — Command is offline. I am whoever still has a working radio. I am not leaving. Neither are you. Hold." },
+]
+
+[[events]]
+id = "release_break"
+trigger = { type = "time", seconds = 500.0 }
+actions = [
+  { type = "camera_release" },
+]
+
+[[events]]
+id = "massive_surge"
+trigger = { type = "time", seconds = 720.0 }
+actions = [
+  { type = "spawn_units", faction = "Hollow", unit_type = "Riflemen", count = 10, x = 100, y = 25 },
+  { type = "spawn_units", faction = "Hollow", unit_type = "HeavyArmor", count = 2, x = 105, y = 28 },
+  { type = "spawn_units", faction = "Hollow", unit_type = "HeavyWeapons", count = 2, x = 108, y = 32 },
+  { type = "camera_focus", target = { type = "unit", faction = "hollow", unit_type = "heavy_armor" }, framing = "wide_establishing" },
+  { type = "camera_shake", intensity = 0.5, duration = 2.0 },
+  { type = "dialogue", speaker = "Field Comms", text = "All of them. All at once. Whatever this is — it knows we are here." },
+]
+
+[[events]]
+id = "it_stops"
+trigger = { type = "time", seconds = 1080.0 }
+actions = [
+  { type = "camera_focus", target = { type = "home_base" }, framing = "close_up" },
+  { type = "dialogue", speaker = "Field Comms", text = "It stopped. The ones nearest us — they stopped. Are they — they are leaving. They are not engaging us. They are leaving." },
+]
+
+[[events]]
+id = "aftermath"
+trigger = { type = "time", seconds = 1200.0 }
+actions = [
+  { type = "camera_release" },
+  { type = "dialogue", speaker = "Field Comms", text = "Command is coming back online. I am — sorry. You will be debriefed. Nobody will ask the right questions. I am sorry you saw it directly." },
+  { type = "win_mission" },
 ]

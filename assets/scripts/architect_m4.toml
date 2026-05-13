@@ -1,3 +1,23 @@
+# Mission 5 — The Last Works (Architect perspective).
+#
+# Per the map briefing: nineteen years, five sites, two factions, thousands
+# dead — all to wake the Ancient One. It is awake. It is looking at the
+# Architect. "I built a door. I did not consider that doors open from both
+# sides."
+#
+# Writing was already strong; this revision adds cinematic camera work to
+# the four big revelation beats. The original text content of each line
+# is preserved.
+#
+# Cinematic beats:
+#   - Hollow counterattack at t=120: off_kilter on the heavy armor (the
+#     Architect calls it "tactical intelligence" — first hint of agency)
+#   - "I should feel triumph" at t=300: close_up on home_base (private log)
+#   - LastStand reinforcements: low_angle_hero on home_base ("nineteen years")
+#   - Final revelation at t=600: wide_establishing on the Hollow swarm
+#   - Last entry at t=720 (was 2400 — far too long to wait): close_up,
+#     followed by camera_release for the final gameplay window.
+
 [[events]]
 id = "miscalculation"
 trigger = { type = "time", seconds = 0.0 }
@@ -12,14 +32,31 @@ trigger = { type = "time", seconds = 120.0 }
 actions = [
   { type = "spawn_units", faction = "Hollow", unit_type = "Riflemen", count = 4, x = 95, y = 40 },
   { type = "spawn_units", faction = "Hollow", unit_type = "HeavyArmor", count = 1, x = 100, y = 33 },
-  { type = "dialogue", speaker = "Architect", text = "The Hollow surge in its defense — it is directing them. I didn't account for tactical intelligence at this scale." },
+  { type = "camera_focus", target = { type = "unit", faction = "hollow", unit_type = "heavy_armor" }, framing = "off_kilter" },
+  { type = "camera_shake", intensity = 0.4, duration = 1.4 },
+  { type = "dialogue", speaker = "Architect", text = "The Hollow surge in its defense — it is directing them. I did not account for tactical intelligence at this scale." },
+]
+
+[[events]]
+id = "release_counterattack"
+trigger = { type = "time", seconds = 138.0 }
+actions = [
+  { type = "camera_release" },
 ]
 
 [[events]]
 id = "this_is_what_i_wanted"
 trigger = { type = "time", seconds = 300.0 }
 actions = [
-  { type = "dialogue", speaker = "Architect", text = "This is what I wanted... wasn't it? I spent nineteen years building toward this moment. I should feel triumph. I don't feel triumph." },
+  { type = "camera_focus", target = { type = "home_base" }, framing = "close_up" },
+  { type = "dialogue", speaker = "Architect", text = "This is what I wanted... wasn't it? I spent nineteen years building toward this moment. I should feel triumph. I do not feel triumph." },
+]
+
+[[events]]
+id = "release_reflection"
+trigger = { type = "time", seconds = 320.0 }
+actions = [
+  { type = "camera_release" },
 ]
 
 [[events]]
@@ -28,7 +65,8 @@ trigger = { type = "condition", condition = "beat", beat_id = "LastStand" }
 actions = [
   { type = "spawn_units", faction = "Covenant", unit_type = "HeavyWeapons", count = 3, x = 8, y = 65 },
   { type = "spawn_units", faction = "Covenant", unit_type = "Riflemen", count = 3, x = 10, y = 68 },
-  { type = "dialogue", speaker = "Architect", text = "I won't let it end like this. Not after nineteen years. Every remaining asset — deploy everything. We finish this now." },
+  { type = "camera_focus", target = { type = "home_base" }, framing = "low_angle_hero" },
+  { type = "dialogue", speaker = "Architect", text = "I will not let it end like this. Not after nineteen years. Every remaining asset — deploy everything. We finish this now." },
 ]
 
 [[events]]
@@ -38,13 +76,23 @@ actions = [
   { type = "spawn_units", faction = "Hollow", unit_type = "Riflemen", count = 8, x = 110, y = 20 },
   { type = "spawn_units", faction = "Hollow", unit_type = "HeavyArmor", count = 3, x = 112, y = 15 },
   { type = "spawn_units", faction = "Hollow", unit_type = "HeavyWeapons", count = 2, x = 108, y = 25 },
+  { type = "camera_focus", target = { type = "unit", faction = "hollow", unit_type = "heavy_armor" }, framing = "wide_establishing" },
+  { type = "camera_shake", intensity = 0.5, duration = 2.0 },
   { type = "dialogue", speaker = "Architect", text = "It planned further ahead than I did. Every site, every engagement, every death — it was already composing something from what it found. And I was the last piece it needed." },
 ]
 
 [[events]]
 id = "last_entry"
-trigger = { type = "time", seconds = 2400.0 }
+trigger = { type = "time", seconds = 720.0 }
 actions = [
+  { type = "camera_focus", target = { type = "home_base" }, framing = "close_up" },
   { type = "dialogue", speaker = "Architect", text = "This is the last entry I will make as myself." },
   { type = "change_objective", text = "End this — whatever the cost" },
+]
+
+[[events]]
+id = "release_final"
+trigger = { type = "time", seconds = 740.0 }
+actions = [
+  { type = "camera_release" },
 ]
