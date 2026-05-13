@@ -10,6 +10,7 @@ use std::collections::{HashSet, VecDeque};
 use crate::beats::{BeatId, FiredBeats};
 use crate::buildings::{BuildingPos, BuildingTypeId};
 use crate::camera::{framing_for, CameraFocusTarget, CameraShake, CameraTarget, CinematicFraming, FramingPreset};
+use crate::hollow::{HollowMode, HollowSpawner};
 use crate::map::{Faction, GridPos};
 use crate::mission::Mission;
 use crate::units::{UnitBundle, UnitPos, UnitTypeId, HomeBase};
@@ -69,7 +70,17 @@ pub enum Action {
     /// Intensities of ~0.05 read as small jolts; ~0.2 reads as an explosion;
     /// ~0.5 is heavy/uncanny (good for Hollow events).
     CameraShake { intensity: f32, duration: f32 },
+    /// Drop a `HollowSpawner` corruption zone at the given grid tile. Mode controls
+    /// the spawn interval (consuming=6s/subsuming=8s/indifferent=10s); each tick
+    /// the spawner produces a Hollow rifleman at its position.
+    SpawnHollowZone {
+        #[serde(default = "default_hollow_mode")] mode: String,
+        x: i32,
+        y: i32,
+    },
 }
+
+fn default_hollow_mode() -> String { "consuming".to_string() }
 
 impl MissionScript {
     pub fn load(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
@@ -296,6 +307,15 @@ pub fn script_tick_system(
                 Action::CameraShake { intensity, duration } => {
                     info!("[script] camera_shake intensity={} duration={}", intensity, duration);
                     camera_shake.trigger(*intensity, *duration);
+                }
+                Action::SpawnHollowZone { mode, x, y } => {
+                    let m = match mode.to_lowercase().as_str() {
+                        "subsuming" => HollowMode::Subsuming,
+                        "indifferent" => HollowMode::Indifferent,
+                        _ => HollowMode::Consuming,
+                    };
+                    info!("[script] spawned hollow zone ({:?}) at ({}, {})", m, x, y);
+                    commands.spawn(HollowSpawner::new(m, *x, *y));
                 }
             }
         }

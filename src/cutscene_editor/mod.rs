@@ -48,7 +48,10 @@ const ACTION_TYPES: &[&str] = &[
     "camera_focus",
     "camera_release",
     "camera_shake",
+    "spawn_hollow_zone",
 ];
+
+const HOLLOW_MODES: &[&str] = &["consuming", "subsuming", "indifferent"];
 
 /// Resource holding the on-disk root where prefetched assets live.
 /// Populated at startup by the client's main fn; needed by `load_egui_fonts`
@@ -494,6 +497,27 @@ fn edit_action(ui: &mut egui::Ui, a: &mut Action) {
             ui.add(egui::Slider::new(intensity, 0.0..=1.0).text("intensity"));
             ui.add(egui::Slider::new(duration, 0.0..=5.0).text("duration (s)"));
         }
+        Action::SpawnHollowZone { mode, x, y } => {
+            ui.horizontal(|ui| {
+                ui.label("mode:");
+                let mut current = mode.clone();
+                let prev = current.clone();
+                egui::ComboBox::from_id_salt(format!("hollow_mode_{:p}", mode as *const _))
+                    .selected_text(&current)
+                    .show_ui(ui, |ui| {
+                        for m in HOLLOW_MODES {
+                            ui.selectable_value(&mut current, m.to_string(), *m);
+                        }
+                    });
+                if current != prev { *mode = current; }
+            });
+            ui.horizontal(|ui| {
+                ui.label("x:");
+                ui.add(egui::DragValue::new(x).speed(1.0));
+                ui.label("y:");
+                ui.add(egui::DragValue::new(y).speed(1.0));
+            });
+        }
     }
 }
 
@@ -581,6 +605,7 @@ fn action_type_name(a: &Action) -> &'static str {
         Action::CameraFocus { .. } => "camera_focus",
         Action::CameraRelease => "camera_release",
         Action::CameraShake { .. } => "camera_shake",
+        Action::SpawnHollowZone { .. } => "spawn_hollow_zone",
     }
 }
 
@@ -601,6 +626,7 @@ fn default_action(kind: &str) -> Action {
         "camera_focus" => Action::CameraFocus { target: CameraFocusTarget::HomeBase, framing: None },
         "camera_release" => Action::CameraRelease,
         "camera_shake" => Action::CameraShake { intensity: 0.2, duration: 0.8 },
+        "spawn_hollow_zone" => Action::SpawnHollowZone { mode: "consuming".to_string(), x: 64, y: 40 },
         _ => Action::Dialogue { speaker: None, text: String::new() },
     }
 }

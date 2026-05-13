@@ -25,6 +25,11 @@ actions = [
 id = "first_contact"
 trigger = { type = "time", seconds = 60.0 }
 actions = [
+  # Drop two corruption zones along the eastern approach — Hollow units emerge
+  # continuously from each at consuming-mode interval (6s). Plus an immediate
+  # spawn pulse so the player has something to react to within the same frame.
+  { type = "spawn_hollow_zone", mode = "consuming", x = 100, y = 30 },
+  { type = "spawn_hollow_zone", mode = "consuming", x = 105, y = 35 },
   { type = "spawn_units", faction = "Hollow", unit_type = "Riflemen", count = 4, x = 100, y = 30 },
   { type = "camera_focus", target = { type = "unit", faction = "hollow", unit_type = "riflemen" }, framing = "off_kilter" },
   { type = "camera_shake", intensity = 0.3, duration = 1.2 },
@@ -43,7 +48,8 @@ actions = [
 id = "increasing_surge"
 trigger = { type = "time", seconds = 240.0 }
 actions = [
-  { type = "spawn_units", faction = "Hollow", unit_type = "Riflemen", count = 6, x = 105, y = 35 },
+  # Add a third zone further south — pressure widens across the position.
+  { type = "spawn_hollow_zone", mode = "consuming", x = 95, y = 40 },
   { type = "spawn_units", faction = "Hollow", unit_type = "HeavyWeapons", count = 1, x = 108, y = 32 },
   { type = "camera_shake", intensity = 0.4, duration = 1.5 },
   { type = "dialogue", speaker = "Field Comms", text = "More of them. From — the ground? From the ground. They are coming from the ground." },
@@ -68,7 +74,9 @@ actions = [
 id = "massive_surge"
 trigger = { type = "time", seconds = 720.0 }
 actions = [
-  { type = "spawn_units", faction = "Hollow", unit_type = "Riflemen", count = 10, x = 100, y = 25 },
+  # The ground opens wider — two new fast-emergence zones plus the heavy units.
+  { type = "spawn_hollow_zone", mode = "consuming", x = 90, y = 28 },
+  { type = "spawn_hollow_zone", mode = "consuming", x = 102, y = 25 },
   { type = "spawn_units", faction = "Hollow", unit_type = "HeavyArmor", count = 2, x = 105, y = 28 },
   { type = "spawn_units", faction = "Hollow", unit_type = "HeavyWeapons", count = 2, x = 108, y = 32 },
   { type = "camera_focus", target = { type = "unit", faction = "hollow", unit_type = "heavy_armor" }, framing = "wide_establishing" },

@@ -25,6 +25,10 @@ actions = [
 id = "first_emergence"
 trigger = { type = "time", seconds = 60.0 }
 actions = [
+  # Two corruption zones at the eastern approach. Continuous emergence pressure
+  # alongside the immediate spawn pulse.
+  { type = "spawn_hollow_zone", mode = "consuming", x = 90, y = 30 },
+  { type = "spawn_hollow_zone", mode = "consuming", x = 95, y = 35 },
   { type = "spawn_units", faction = "Hollow", unit_type = "Riflemen", count = 4, x = 90, y = 30 },
   { type = "camera_focus", target = { type = "unit", faction = "hollow", unit_type = "riflemen" }, framing = "off_kilter" },
   { type = "camera_shake", intensity = 0.3, duration = 1.2 },
@@ -43,7 +47,8 @@ actions = [
 id = "growing_wave"
 trigger = { type = "time", seconds = 240.0 }
 actions = [
-  { type = "spawn_units", faction = "Hollow", unit_type = "Riflemen", count = 6, x = 95, y = 35 },
+  # Add a third zone south. Heavy weapons spawn from the script as a punctuation.
+  { type = "spawn_hollow_zone", mode = "consuming", x = 85, y = 40 },
   { type = "spawn_units", faction = "Hollow", unit_type = "HeavyWeapons", count = 1, x = 98, y = 30 },
   { type = "camera_shake", intensity = 0.35, duration = 1.2 },
   { type = "dialogue", speaker = "Foreman", text = "More of them. They come from the ground. We hold." },
@@ -68,7 +73,9 @@ actions = [
 id = "massive_assault"
 trigger = { type = "time", seconds = 720.0 }
 actions = [
-  { type = "spawn_units", faction = "Hollow", unit_type = "Riflemen", count = 10, x = 90, y = 25 },
+  # The ground opens wider — two new emergence points plus the heavy units.
+  { type = "spawn_hollow_zone", mode = "consuming", x = 80, y = 28 },
+  { type = "spawn_hollow_zone", mode = "consuming", x = 92, y = 25 },
   { type = "spawn_units", faction = "Hollow", unit_type = "HeavyArmor", count = 2, x = 95, y = 28 },
   { type = "spawn_units", faction = "Hollow", unit_type = "HeavyWeapons", count = 2, x = 98, y = 32 },
   { type = "camera_focus", target = { type = "unit", faction = "hollow", unit_type = "heavy_armor" }, framing = "wide_establishing" },
