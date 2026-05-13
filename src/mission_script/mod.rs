@@ -272,7 +272,7 @@ pub fn script_tick_system(
                     }
                 }
                 Action::CameraFocus { target, framing } => {
-                    if let Some(new_target) = resolve_camera_target(
+                    let resolved = resolve_camera_target(
                         target,
                         framing.as_deref(),
                         mission_q.iter().next(),
@@ -280,14 +280,21 @@ pub fn script_tick_system(
                         &units_q,
                         &buildings_q,
                         &cinematic_q,
-                    ) {
-                        *camera_target = new_target;
+                    );
+                    match resolved {
+                        Some(new_target) => {
+                            info!("[script] camera_focus → {:?} (framing override: {:?})", target, framing);
+                            *camera_target = new_target;
+                        }
+                        None => warn!("[script] camera_focus could not resolve {:?}", target),
                     }
                 }
                 Action::CameraRelease => {
+                    info!("[script] camera_release");
                     *camera_target = CameraTarget::Free;
                 }
                 Action::CameraShake { intensity, duration } => {
+                    info!("[script] camera_shake intensity={} duration={}", intensity, duration);
                     camera_shake.trigger(*intensity, *duration);
                 }
             }
