@@ -3872,9 +3872,16 @@ fn apply_camera_shake(
 /// (user-driven panning lives in `camera_pan_zoom`). For `LookAt` / `Follow`,
 /// we target `subject + framing.offset` for translation and `framing.scale`
 /// for orthographic zoom; both lerp exponentially.
+///
+/// For `Follow`, units/buildings carry their world position in `UnitPos` /
+/// `BuildingPos` grid components rather than a `Transform` (visual smoothing
+/// happens on a separate render entity); fall through to `Transform` only for
+/// hypothetical non-grid followables.
 fn camera_follow_target(
     target: Res<CameraTarget>,
     mut cam_q: Query<(&mut Transform, &mut Projection), With<IsometricCamera>>,
+    unit_pos_q: Query<&UnitPos>,
+    building_pos_q: Query<&BuildingPos>,
     transforms_q: Query<&Transform, Without<IsometricCamera>>,
     time: Res<Time>,
 ) {
@@ -3882,8 +3889,15 @@ fn camera_follow_target(
         CameraTarget::Free => return,
         CameraTarget::LookAt { point, framing } => (*point, *framing),
         CameraTarget::Follow { entity, framing } => {
-            let Ok(t) = transforms_q.get(*entity) else { return };
-            (t.translation, *framing)
+            if let Ok(p) = unit_pos_q.get(*entity) {
+                (grid_to_world(p.pos.x, p.pos.y), *framing)
+            } else if let Ok(p) = building_pos_q.get(*entity) {
+                (grid_to_world(p.pos.x, p.pos.y), *framing)
+            } else if let Ok(t) = transforms_q.get(*entity) {
+                (t.translation, *framing)
+            } else {
+                return;
+            }
         }
     };
 
