@@ -1,26 +1,81 @@
+# Mission 3 — The Pale Ground (Architect perspective).
+#
+# Per the map briefing: "The Pale Ground is the third site and the oldest.
+# ... I have been visiting it for eleven years. It does not respond to me
+# the way it responds to others — I think because I am not afraid. Fear is
+# the frequency it listens on. I needed two factions of frightened soldiers
+# walking through it, bleeding on it, fighting over it. ... It is reading
+# them right now. It has already begun composing something from what it
+# finds."
+#
+# Per docs/campaign.md canon: the Pale Ground reads fear. The Architect
+# walks it without fear and so it ignores them — which is the cost of the
+# control they prize. Mission type is Assault. The Architect destroys what
+# they call a Hollow "nest" — really, scout-clusters that would have
+# disrupted the survey teams' fear delivery.
+
 [[events]]
-id = "beyond_control"
+id = "log_open"
 trigger = { type = "time", seconds = 0.0 }
 actions = [
-  { type = "dialogue", speaker = "Architect", text = "They grow beyond my control — temporarily. The Hollow nest must be destroyed before they consume my embedded agents. Move quickly." },
-  { type = "objective", text = "Destroy the Hollow Nest" },
+  { type = "dialogue", speaker = "Architect", text = "The third site. The oldest. I have visited it eleven years and it has never spoken to me. It speaks now to the survey teams. It speaks to the soldiers who replaced them. It is composing something. I will protect that composition." },
+  { type = "objective", text = "Clear the Hollow disruptions around the third site" },
 ]
 
 [[events]]
-id = "hollow_patrol"
+id = "first_disruption"
 trigger = { type = "time", seconds = 60.0 }
 actions = [
   { type = "spawn_units", faction = "Hollow", unit_type = "Riflemen", count = 2, x = 80, y = 40 },
-  { type = "dialogue", speaker = "Architect", text = "Hollow patrol in mid-territory. Eliminate them — leave no witnesses to our approach." },
+  { type = "camera_focus", target = { type = "unit", faction = "hollow", unit_type = "riflemen" }, framing = "off_kilter" },
+  { type = "dialogue", speaker = "Architect", text = "Hollow cluster, mid-field. They will reach the survey ruins and frighten the wrong people away. Eliminate before they cross the line." },
 ]
 
 [[events]]
-id = "nest_defense_awakens"
-trigger = { type = "time", seconds = 240.0 }
+id = "release_first"
+trigger = { type = "time", seconds = 78.0 }
+actions = [
+  { type = "camera_release" },
+]
+
+[[events]]
+id = "factions_below"
+trigger = { type = "time", seconds = 180.0 }
+actions = [
+  { type = "dialogue", speaker = "Architect", text = "The Combine has reached the ruins. The Ironborn is half a kilometer behind them. Both will see something that is not in their categories. Both will refuse to name it. The site listens." },
+]
+
+[[events]]
+id = "nest_awakens"
+trigger = { type = "time", seconds = 300.0 }
 actions = [
   { type = "spawn_units", faction = "Hollow", unit_type = "Riflemen", count = 4, x = 105, y = 22 },
   { type = "spawn_units", faction = "Hollow", unit_type = "HeavyWeapons", count = 1, x = 108, y = 18 },
-  { type = "dialogue", speaker = "Architect", text = "The nest knows we're coming. Its defenders are awakening — push through before they can fully mobilize!" },
+  { type = "camera_focus", target = { type = "unit", faction = "hollow", unit_type = "heavy_weapons" }, framing = "off_kilter" },
+  { type = "camera_shake", intensity = 0.35, duration = 1.2 },
+  { type = "dialogue", speaker = "Architect", text = "The Hollow are responding faster than I projected. They sense the resonance change. Press through — the survey teams' fear is delivering at a rate I want to preserve." },
+]
+
+[[events]]
+id = "release_nest"
+trigger = { type = "time", seconds = 320.0 }
+actions = [
+  { type = "camera_release" },
+]
+
+[[events]]
+id = "i_am_not_afraid"
+trigger = { type = "time", seconds = 480.0 }
+actions = [
+  { type = "camera_focus", target = { type = "home_base" }, framing = "close_up" },
+  { type = "dialogue", speaker = "Architect", text = "I walk this ground and it does not speak to me. I have wondered, before, whether that is the same as fearlessness or whether something else has been taken out of me. I record the wondering. I do not resolve it. The work continues." },
+]
+
+[[events]]
+id = "release_reflection"
+trigger = { type = "time", seconds = 500.0 }
+actions = [
+  { type = "camera_release" },
 ]
 
 [[events]]
@@ -28,5 +83,12 @@ id = "contingency_assets"
 trigger = { type = "condition", condition = "beat", beat_id = "LastStand" }
 actions = [
   { type = "spawn_units", faction = "Covenant", unit_type = "HeavyWeapons", count = 2, x = 8, y = 65 },
-  { type = "dialogue", speaker = "Architect", text = "Deploying contingency assets. I prepared for this possibility. Heavy teams inbound — do not waste them." },
+  { type = "dialogue", speaker = "Architect", text = "Contingency assets. I prepared for this possibility. Use them." },
+]
+
+[[events]]
+id = "site_reads_complete"
+trigger = { type = "time", seconds = 720.0 }
+actions = [
+  { type = "dialogue", speaker = "Architect", text = "The third site has its reading. It has composed something from the surveyors and from the soldiers. I do not know what it composed. I am not — afraid to find out. Two remaining." },
 ]

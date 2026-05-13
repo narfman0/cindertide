@@ -1,39 +1,92 @@
+# Mission 3 — The Pale Ground (Ironborn perspective).
+#
+# Per the map briefing: "Corp lost two teams in those ruins and now they're
+# sending soldiers instead of scientists. That tells you everything about
+# what's in there. We go in first, we take what they were after, and we
+# leave before whatever made those teams go quiet makes us go quiet too.
+# Nobody has to be a hero. In and out. But we're not letting them have it."
+#
+# Per docs/campaign.md canon: the Pale Ground is the third (and oldest)
+# ritual site. The Ironborn don't classify their fear, so they NAME it
+# more directly than Combine: "in and out," "nobody has to be a hero,"
+# "whatever's in there." Foreman voice is steady, the directness becomes
+# the discipline.
+#
+# Cinematic: Hollow corruption first appearance off_kilter (the Foreman
+# names the wrongness flatly), Combine arrival (over_shoulder), a late
+# beat where a salvage crew hears something and the Foreman says don't
+# investigate.
+
 [[events]]
-id = "tactical_briefing"
+id = "in_and_out"
 trigger = { type = "time", seconds = 0.0 }
 actions = [
-  { type = "dialogue", speaker = "Foreman", text = "Corp's lines are fortified — but they're holding a static defense. Hit them on the move, don't let them dig in further." },
-  { type = "objective", text = "Break through the Combine fortified lines" },
+  { type = "dialogue", speaker = "Foreman", text = "Corp lost two teams in those ruins. They are sending soldiers next. That tells us what is in there. In and out. Take what they were after. Nobody has to be a hero." },
+  { type = "objective", text = "Reach the survey cache before the Combine" },
 ]
 
 [[events]]
-id = "pillbox_warning"
+id = "approach"
 trigger = { type = "time", seconds = 60.0 }
 actions = [
-  { type = "dialogue", speaker = "Foreman", text = "Pillbox sighted ahead — suppress it before you advance. That thing'll shred infantry in the open." },
+  { type = "spawn_units", faction = "Combine", unit_type = "Riflemen", count = 3, x = 100, y = 35 },
+  { type = "dialogue", speaker = "Foreman", text = "Corp scouts ahead. They are here for the same thing. Cut through." },
 ]
 
 [[events]]
-id = "combine_counterattack"
-trigger = { type = "time", seconds = 180.0 }
+id = "first_glimpse"
+trigger = { type = "time", seconds = 150.0 }
 actions = [
-  { type = "spawn_units", faction = "Combine", unit_type = "Riflemen", count = 4, x = 100, y = 35 },
+  { type = "spawn_units", faction = "Hollow", unit_type = "Riflemen", count = 1, x = 75, y = 30 },
+  { type = "camera_focus", target = { type = "unit", faction = "hollow", unit_type = "riflemen" }, framing = "off_kilter" },
+  { type = "camera_shake", intensity = 0.2, duration = 0.8 },
+  { type = "dialogue", speaker = "Foreman", text = "Something in the ruins. Not Corp. Not us. Body-shaped. Wrong-shaped. Do not stop to look. Move." },
+]
+
+[[events]]
+id = "release_glimpse"
+trigger = { type = "time", seconds = 165.0 }
+actions = [
+  { type = "camera_release" },
+]
+
+[[events]]
+id = "combine_counterforce"
+trigger = { type = "time", seconds = 240.0 }
+actions = [
   { type = "spawn_units", faction = "Combine", unit_type = "HeavyArmor", count = 1, x = 105, y = 28 },
-  { type = "dialogue", speaker = "Foreman", text = "Combine counterattack — armor and infantry pushing our left flank!" },
+  { type = "spawn_units", faction = "Combine", unit_type = "Riflemen", count = 4, x = 102, y = 32 },
+  { type = "camera_focus", target = { type = "unit", faction = "combine", unit_type = "heavy_armor" }, framing = "over_shoulder" },
+  { type = "camera_shake", intensity = 0.3, duration = 1.2 },
+  { type = "dialogue", speaker = "Foreman", text = "Corp armor on the left. They will not back off. Punch the line." },
+]
+
+[[events]]
+id = "release_armor"
+trigger = { type = "time", seconds = 258.0 }
+actions = [
+  { type = "camera_release" },
 ]
 
 [[events]]
 id = "salvage_team"
-trigger = { type = "time", seconds = 420.0 }
+trigger = { type = "time", seconds = 360.0 }
 actions = [
   { type = "spawn_units", faction = "Ironborn", unit_type = "LightVehicle", count = 2, x = 8, y = 65 },
-  { type = "dialogue", speaker = "Foreman", text = "Salvage team inbound with light vehicles — use them to punch through their remaining positions." },
+  { type = "dialogue", speaker = "Foreman", text = "Salvage crew on the road. They will carry what we take. Get to the cache." },
 ]
 
 [[events]]
-id = "final_push_window"
+id = "salvage_heard_something"
+trigger = { type = "time", seconds = 480.0 }
+actions = [
+  { type = "dialogue", speaker = "Foreman", text = "The crew heard something. They will not say what. They will not be the ones who go find out. Keep moving." },
+]
+
+[[events]]
+id = "extract_window"
 trigger = { type = "time", seconds = 600.0 }
 actions = [
-  { type = "dialogue", speaker = "Foreman", text = "Their line is cracking. Push everything through the gap now — don't give them time to reinforce." },
-  { type = "change_objective", text = "Destroy the Combine Command Bunker and end their operation" },
+  { type = "dialogue", speaker = "Foreman", text = "Cache is loaded. Out the way we came. We keep what we found. We do not name it." },
+  { type = "change_objective", text = "Extract with the cache" },
 ]

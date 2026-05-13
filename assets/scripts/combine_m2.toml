@@ -1,35 +1,90 @@
+# Mission 3 — The Pale Ground (Combine perspective).
+#
+# Per the map briefing: "Survey team at grid 7-Pale went silent forty hours
+# ago. A second team confirmed their last position before also going silent.
+# You are being sent to secure the site and extract whatever they found.
+# ... If you see something that doesn't look right, that is not your problem.
+# Bring back the equipment."
+#
+# Per docs/campaign.md canon: the Pale Ground is the third (and oldest)
+# ritual site. It reads fear. The Architect needs frightened soldiers from
+# both factions walking it. Combine soldiers will see things they cannot
+# categorize. Field Comms relays the company line — don't interact, don't
+# ask. The voice strains slightly under what it has to deny.
+#
+# Cinematic: Hollow corruption first appearance off_kilter (a glimpse, not
+# a fight yet), Ironborn arrival, a late "we are being watched" beat the
+# script does not let Field Comms name.
+
 [[events]]
-id = "setup_dialogue"
+id = "deployment"
 trigger = { type = "time", seconds = 0.0 }
 actions = [
-  { type = "dialogue", speaker = "Field Comms", text = "Hold this crossing. Northern supply integrity requires it. Fifteen minutes — reinforcements are in transit." },
-  { type = "objective", text = "Hold the crossing for 15 minutes" },
+  { type = "dialogue", speaker = "Field Comms", text = "Grid 7-Pale. Two survey teams silent. Secure the site, extract the equipment, do not engage with structures. If you see something that does not look right, that is not your problem." },
+  { type = "objective", text = "Secure the Pale Ground site and extract the survey equipment" },
 ]
 
 [[events]]
-id = "first_crossing"
-trigger = { type = "time", seconds = 30.0 }
+id = "ironborn_approach"
+trigger = { type = "time", seconds = 60.0 }
 actions = [
-  { type = "spawn_units", faction = "Ironborn", unit_type = "Riflemen", count = 3, x = 65, y = 20 },
-  { type = "dialogue", speaker = "Field Comms", text = "Ironborn infantry at the crossing. Engage." },
+  { type = "spawn_units", faction = "Ironborn", unit_type = "Riflemen", count = 3, x = 70, y = 35 },
+  { type = "dialogue", speaker = "Field Comms", text = "Ironborn elements approaching the site. They are not your priority. The equipment is." },
 ]
 
 [[events]]
-id = "armored_assault"
-trigger = { type = "time", seconds = 120.0 }
+id = "first_glimpse"
+trigger = { type = "time", seconds = 150.0 }
 actions = [
-  { type = "spawn_units", faction = "Ironborn", unit_type = "HeavyArmor", count = 1, x = 67, y = 18 },
-  { type = "spawn_units", faction = "Ironborn", unit_type = "Riflemen", count = 2, x = 65, y = 22 },
-  { type = "dialogue", speaker = "Field Comms", text = "Ironborn armor at the crossing. Prioritize — armor through the bridge will compromise the defensive position." },
+  # Single Hollow scout spawned briefly — Field Comms refuses to name what they are seeing.
+  { type = "spawn_units", faction = "Hollow", unit_type = "Riflemen", count = 1, x = 64, y = 35 },
+  { type = "camera_focus", target = { type = "unit", faction = "hollow", unit_type = "riflemen" }, framing = "off_kilter" },
+  { type = "camera_shake", intensity = 0.2, duration = 0.8 },
+  { type = "dialogue", speaker = "Field Comms", text = "Unidentified contact in the ruins. Do not approach the structures. Continue toward the equipment cache." },
 ]
 
 [[events]]
-id = "final_wave"
-trigger = { type = "time", seconds = 300.0 }
+id = "release_glimpse"
+trigger = { type = "time", seconds = 165.0 }
 actions = [
-  { type = "spawn_units", faction = "Ironborn", unit_type = "HeavyArmor", count = 2, x = 66, y = 16 },
-  { type = "spawn_units", faction = "Ironborn", unit_type = "Riflemen", count = 4, x = 68, y = 20 },
-  { type = "spawn_units", faction = "Ironborn", unit_type = "HeavyWeapons", count = 1, x = 64, y = 22 },
-  { type = "dialogue", speaker = "Field Comms", text = "Full Ironborn commitment at the crossing. Armor, infantry, heavy weapons. Reinforcements are ten minutes out. Hold." },
-  { type = "change_objective", text = "Hold the crossing under full Ironborn assault" },
+  { type = "camera_release" },
+]
+
+[[events]]
+id = "ironborn_pressure"
+trigger = { type = "time", seconds = 240.0 }
+actions = [
+  { type = "spawn_units", faction = "Ironborn", unit_type = "HeavyArmor", count = 1, x = 75, y = 32 },
+  { type = "spawn_units", faction = "Ironborn", unit_type = "Riflemen", count = 4, x = 72, y = 36 },
+  { type = "dialogue", speaker = "Field Comms", text = "Ironborn committing. They are not going to negotiate over the equipment. Hold the cache." },
+]
+
+[[events]]
+id = "we_are_being_watched"
+trigger = { type = "time", seconds = 420.0 }
+actions = [
+  { type = "camera_focus", target = { type = "home_base" }, framing = "close_up" },
+  { type = "dialogue", speaker = "Field Comms", text = "Reports from the perimeter. Soldiers are — reporting feelings of being observed. Command notes this is consistent with low-oxygen exposure in the ruins. Disregard the feeling. Maintain the position." },
+]
+
+[[events]]
+id = "release_watched"
+trigger = { type = "time", seconds = 442.0 }
+actions = [
+  { type = "camera_release" },
+]
+
+[[events]]
+id = "extract_window"
+trigger = { type = "time", seconds = 600.0 }
+actions = [
+  { type = "dialogue", speaker = "Field Comms", text = "Equipment is loaded. Three minutes to extraction. Hold." },
+  { type = "change_objective", text = "Hold until the survey equipment is extracted" },
+]
+
+[[events]]
+id = "extraction_complete"
+trigger = { type = "time", seconds = 780.0 }
+actions = [
+  { type = "dialogue", speaker = "Field Comms", text = "Extraction complete. Three members of your unit are being placed on medical observation. Standard protocol. Withdraw from the site." },
 ]
