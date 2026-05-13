@@ -14,14 +14,53 @@ actions = [
   { type = "dialogue", speaker = "Field Comms", text = "Ironborn infantry — four units, eastern approach. Engage at range. Minimize facility damage." },
 ]
 
+# ── armor_threat cinematic ──────────────────────────────────────────────────
+# Sequenced over ~13 seconds at t=180. The spawn fires, then on the next tick
+# camera_focus follows the heavy_armor entity (which now exists in the world);
+# the framing override "low_angle_hero" swaps the player's over_shoulder POV
+# for the Ironborn looming view while the Foreman taunts in first-person plural.
+# Field Comms then responds in procedural tone; camera returns to home_base
+# with the Combine's default framing for the tonal handoff back to gameplay.
+
 [[events]]
 id = "armor_threat"
 trigger = { type = "time", seconds = 180.0 }
 actions = [
   { type = "spawn_units", faction = "Ironborn", unit_type = "HeavyArmor", count = 1, x = 112, y = 15 },
   { type = "spawn_units", faction = "Ironborn", unit_type = "Riflemen", count = 3, x = 115, y = 18 },
+  { type = "camera_shake", intensity = 0.35, duration = 1.4 },
+]
+
+[[events]]
+id = "armor_threat_focus"
+trigger = { type = "time", seconds = 180.5 }
+actions = [
+  # Spawned entity exists on the world by the next tick; safe to follow now.
+  { type = "camera_focus", target = { type = "unit", faction = "ironborn", unit_type = "heavy_armor" }, framing = "low_angle_hero" },
+  { type = "dialogue", speaker = "Foreman", text = "Refinery Seven was ours before the contracts. We take it back." },
+]
+
+[[events]]
+id = "armor_threat_comms"
+trigger = { type = "time", seconds = 185.0 }
+actions = [
   { type = "dialogue", speaker = "Field Comms", text = "Ironborn armor on field. Armored unit, three infantry. Prioritize armor elimination." },
-  { type = "objective", text = "Destroy the Ironborn armor" },
+  { type = "change_objective", text = "Destroy the Ironborn armor" },
+]
+
+[[events]]
+id = "armor_threat_release"
+trigger = { type = "time", seconds = 190.0 }
+actions = [
+  # Camera lerps back to home_base under the Combine's over_shoulder framing.
+  { type = "camera_focus", target = { type = "home_base" } },
+]
+
+[[events]]
+id = "armor_threat_handoff"
+trigger = { type = "time", seconds = 193.0 }
+actions = [
+  { type = "camera_release" },
 ]
 
 [[events]]
