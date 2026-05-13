@@ -669,10 +669,12 @@ struct DeathFlash {
 // pre-loaded Handle<AudioSource>; `process_audio_events` spawns short-lived
 // AudioPlayer entities (PlaybackSettings::DESPAWN) for each queued event.
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 enum AudioEvent {
-    UnitSelected,
-    UnitMoved,
+    /// Carries the faction id of the selected unit (e.g. "combine") so the
+    /// player hears each faction's signature voice.
+    UnitSelected(String),
+    UnitMoved(String),
     Combat,
     BuildingComplete,
     UiClick,
@@ -684,11 +686,13 @@ enum AudioEvent {
 struct AudioEventQueue(Vec<AudioEvent>);
 
 /// Pre-loaded handles for each `AudioEvent`. Populated by `load_audio_assets` at startup.
-/// Stays empty when `AssetSource::Placeholder` — `process_audio_events` no-ops gracefully.
+/// `unit_selected` / `unit_moved` are keyed by faction id — clips per faction give each
+/// side its own acknowledgement voice (Synth Voice 1 for Combine, Voiceover Male for
+/// Ironborn, Voiceover Female for Covenant).
 #[derive(Resource, Default)]
 struct AudioAssets {
-    unit_selected: Option<Handle<AudioSource>>,
-    unit_moved: Option<Handle<AudioSource>>,
+    unit_selected: std::collections::HashMap<String, Handle<AudioSource>>,
+    unit_moved: std::collections::HashMap<String, Handle<AudioSource>>,
     combat: Option<Handle<AudioSource>>,
     building_complete: Option<Handle<AudioSource>>,
     ui_click: Option<Handle<AudioSource>>,
@@ -697,10 +701,10 @@ struct AudioAssets {
 }
 
 impl AudioAssets {
-    fn for_event(&self, event: AudioEvent) -> Option<&Handle<AudioSource>> {
+    fn for_event(&self, event: &AudioEvent) -> Option<&Handle<AudioSource>> {
         match event {
-            AudioEvent::UnitSelected => self.unit_selected.as_ref(),
-            AudioEvent::UnitMoved => self.unit_moved.as_ref(),
+            AudioEvent::UnitSelected(faction) => self.unit_selected.get(faction),
+            AudioEvent::UnitMoved(faction) => self.unit_moved.get(faction),
             AudioEvent::Combat => self.combat.as_ref(),
             AudioEvent::BuildingComplete => self.building_complete.as_ref(),
             AudioEvent::UiClick => self.ui_click.as_ref(),
@@ -1180,8 +1184,8 @@ fn prefetch_http_assets(
             }
         }
     }
-    for (_, rel) in AUDIO_PATHS {
-        paths.insert((*rel).to_string());
+    for rel in all_audio_paths() {
+        paths.insert(rel.to_string());
     }
     for rel in cindertide::cutscene_editor::FONT_PATHS {
         paths.insert((*rel).to_string());
@@ -3308,7 +3312,9 @@ fn handle_mouse_input(
 
                     if let Some(unit_entity) = clicked_unit {
                         selected.entities.push(unit_entity);
-                        audio_queue.0.push(AudioEvent::UnitSelected);
+                        if let Ok((_, _, fac)) = units.get(unit_entity) {
+                            audio_queue.0.push(AudioEvent::UnitSelected(fac.0.clone()));
+                        }
                         if let Ok((_, pos, _)) = units.get(unit_entity) {
                             let ring_pos = grid_to_world(pos.pos.x, pos.pos.y) - Vec3::Y * 0.35;
                             commands.spawn((
@@ -3449,7 +3455,12 @@ fn handle_mouse_input(
                 }
             }
             if any_moved {
-                audio_queue.0.push(AudioEvent::UnitMoved);
+                // Voice the first selected unit's faction (assume cohort homogeneity for now).
+                if let Some(first) = selected_entities.first() {
+                    if let Ok((_, _, fac)) = units.get(*first) {
+                        audio_queue.0.push(AudioEvent::UnitMoved(fac.0.clone()));
+                    }
+                }
             }
         }
     }
@@ -6881,41 +6892,80 @@ fn tick_death_flashes(
 
 // ── Audio event processing ────────────────────────────────────────────────────
 
-/// Per-variant kenney_aio path (relative to the asset source root).
-const AUDIO_PATHS: &[(AudioEvent, &str)] = &[
-    (AudioEvent::UnitSelected, "kenney_aio/Audio/Interface Sounds/Audio/pluck_001.ogg"),
-    (AudioEvent::UnitMoved, "kenney_aio/Audio/Voiceover Pack/Audio (Male)/go.ogg"),
-    (AudioEvent::Combat, "kenney_aio/Audio/Impact Sounds/Audio/impactPlate_heavy_000.ogg"),
-    (AudioEvent::BuildingComplete, "kenney_aio/Audio/Music Jingles/Audio (Steeldrum)/jingles-steel_03.ogg"),
-    (AudioEvent::UiClick, "kenney_aio/Audio/UI Audio/Audio/mouseclick1.ogg"),
-    (AudioEvent::MissionStart, "kenney_aio/Audio/Synth Voice 1/Audio/begin.ogg"),
-    (AudioEvent::MissionEnd, "kenney_aio/Audio/Synth Voice 1/Audio/objective complete.ogg"),
+/// Global / non-faction-specific audio events.
+const AUDIO_PATHS: &[(&str, &str)] = &[
+    ("combat", "kenney_aio/Audio/Impact Sounds/Audio/impactPlate_heavy_000.ogg"),
+    ("building_complete", "kenney_aio/Audio/Music Jingles/Audio (Steeldrum)/jingles-steel_03.ogg"),
+    ("ui_click", "kenney_aio/Audio/UI Audio/Audio/mouseclick1.ogg"),
+    ("mission_start", "kenney_aio/Audio/Synth Voice 1/Audio/begin.ogg"),
+    ("mission_end", "kenney_aio/Audio/Synth Voice 1/Audio/objective complete.ogg"),
 ];
 
-/// Startup system: pre-load one `Handle<AudioSource>` per AudioEvent. Skips entries
+/// Faction-keyed acknowledgement clips. Each faction's voice:
+///   - **Combine** → Synth Voice 1 (clean robotic, matches "Field Comms" procedural tone)
+///   - **Ironborn** → Voiceover Pack Male (direct human, matches "Foreman" ownership voice)
+///   - **Covenant** → Voiceover Pack Female (private/quieter, matches Architect's private-log tone)
+/// Hollow units don't acknowledge — they're enemies, not player-controllable.
+const FACTION_UNIT_SELECTED: &[(&str, &str)] = &[
+    ("combine", "kenney_aio/Audio/Synth Voice 1/Audio/ready.ogg"),
+    ("ironborn", "kenney_aio/Audio/Voiceover Pack/Audio (Male)/ready.ogg"),
+    ("covenant", "kenney_aio/Audio/Voiceover Pack/Audio (Female)/ready.ogg"),
+];
+const FACTION_UNIT_MOVED: &[(&str, &str)] = &[
+    ("combine", "kenney_aio/Audio/Synth Voice 1/Audio/go.ogg"),
+    ("ironborn", "kenney_aio/Audio/Voiceover Pack/Audio (Male)/go.ogg"),
+    ("covenant", "kenney_aio/Audio/Voiceover Pack/Audio (Female)/go.ogg"),
+];
+
+/// All audio paths the prefetch needs to download. Used by `prefetch_http_assets`.
+pub fn all_audio_paths() -> Vec<&'static str> {
+    AUDIO_PATHS.iter().map(|(_, p)| *p)
+        .chain(FACTION_UNIT_SELECTED.iter().map(|(_, p)| *p))
+        .chain(FACTION_UNIT_MOVED.iter().map(|(_, p)| *p))
+        .collect()
+}
+
+/// Startup system: pre-load one `Handle<AudioSource>` per audio entry. Skips entries
 /// whose underlying OGG isn't on disk (e.g., prefetch failed for that file).
 fn load_audio_assets(
     asset_server: Res<AssetServer>,
     model_assets: Res<ModelAssets>,
     mut audio: ResMut<AudioAssets>,
 ) {
-    for (event, rel) in AUDIO_PATHS {
+    let mut loaded = 0;
+    let mut load_one = |rel: &str| -> Option<Handle<AudioSource>> {
         if !model_assets.local_file(rel).exists() {
             warn!("Audio asset missing on disk: {}", rel);
-            continue;
+            return None;
         }
-        let handle: Handle<AudioSource> = asset_server.load(model_assets.asset_path(rel));
-        match event {
-            AudioEvent::UnitSelected => audio.unit_selected = Some(handle),
-            AudioEvent::UnitMoved => audio.unit_moved = Some(handle),
-            AudioEvent::Combat => audio.combat = Some(handle),
-            AudioEvent::BuildingComplete => audio.building_complete = Some(handle),
-            AudioEvent::UiClick => audio.ui_click = Some(handle),
-            AudioEvent::MissionStart => audio.mission_start = Some(handle),
-            AudioEvent::MissionEnd => audio.mission_end = Some(handle),
+        Some(asset_server.load(model_assets.asset_path(rel)))
+    };
+    for (kind, rel) in AUDIO_PATHS {
+        if let Some(h) = load_one(rel) {
+            loaded += 1;
+            match *kind {
+                "combat" => audio.combat = Some(h),
+                "building_complete" => audio.building_complete = Some(h),
+                "ui_click" => audio.ui_click = Some(h),
+                "mission_start" => audio.mission_start = Some(h),
+                "mission_end" => audio.mission_end = Some(h),
+                _ => {}
+            }
         }
     }
-    info!("Loaded {} audio handles", AUDIO_PATHS.len());
+    for (faction, rel) in FACTION_UNIT_SELECTED {
+        if let Some(h) = load_one(rel) {
+            loaded += 1;
+            audio.unit_selected.insert((*faction).to_string(), h);
+        }
+    }
+    for (faction, rel) in FACTION_UNIT_MOVED {
+        if let Some(h) = load_one(rel) {
+            loaded += 1;
+            audio.unit_moved.insert((*faction).to_string(), h);
+        }
+    }
+    info!("Loaded {} audio handles ({} factions)", loaded, audio.unit_selected.len());
 }
 
 fn process_audio_events(
@@ -6925,7 +6975,7 @@ fn process_audio_events(
 ) {
     for event in queue.0.drain(..) {
         trace!("audio event: {:?}", event);
-        if let Some(handle) = audio.for_event(event) {
+        if let Some(handle) = audio.for_event(&event) {
             commands.spawn((
                 AudioPlayer::<AudioSource>(handle.clone()),
                 PlaybackSettings::DESPAWN,
