@@ -49,9 +49,12 @@ const ACTION_TYPES: &[&str] = &[
     "camera_release",
     "camera_shake",
     "spawn_hollow_zone",
+    "set_music",
+    "clear_music",
 ];
 
 const HOLLOW_MODES: &[&str] = &["consuming", "subsuming", "indifferent"];
+const MUSIC_PRESET_NAMES: &[&str] = &["menu", "ambient", "tense", "horror", "march", "mystery", "silence"];
 
 /// Resource holding the on-disk root where prefetched assets live.
 /// Populated at startup by the client's main fn; needed by `load_egui_fonts`
@@ -471,8 +474,23 @@ fn edit_action(ui: &mut egui::Ui, a: &mut Action) {
         Action::Objective { text } | Action::ChangeObjective { text } => {
             ui.add(egui::TextEdit::multiline(text).desired_rows(2).desired_width(f32::INFINITY));
         }
-        Action::WinMission | Action::LoseMission | Action::CameraRelease => {
+        Action::WinMission | Action::LoseMission | Action::CameraRelease | Action::ClearMusic => {
             ui.label(egui::RichText::new("(no fields)").italics().small());
+        }
+        Action::SetMusic { track } => {
+            ui.horizontal(|ui| {
+                ui.label("track:");
+                let mut current = track.clone();
+                let prev = current.clone();
+                egui::ComboBox::from_id_salt(format!("music_track_{:p}", track as *const _))
+                    .selected_text(&current)
+                    .show_ui(ui, |ui| {
+                        for preset in MUSIC_PRESET_NAMES {
+                            ui.selectable_value(&mut current, preset.to_string(), *preset);
+                        }
+                    });
+                if current != prev { *track = current; }
+            });
         }
         Action::CameraFocus { target, framing } => {
             edit_focus_target(ui, target);
@@ -606,6 +624,8 @@ fn action_type_name(a: &Action) -> &'static str {
         Action::CameraRelease => "camera_release",
         Action::CameraShake { .. } => "camera_shake",
         Action::SpawnHollowZone { .. } => "spawn_hollow_zone",
+        Action::SetMusic { .. } => "set_music",
+        Action::ClearMusic => "clear_music",
     }
 }
 
@@ -627,6 +647,8 @@ fn default_action(kind: &str) -> Action {
         "camera_release" => Action::CameraRelease,
         "camera_shake" => Action::CameraShake { intensity: 0.2, duration: 0.8 },
         "spawn_hollow_zone" => Action::SpawnHollowZone { mode: "consuming".to_string(), x: 64, y: 40 },
+        "set_music" => Action::SetMusic { track: "ambient".to_string() },
+        "clear_music" => Action::ClearMusic,
         _ => Action::Dialogue { speaker: None, text: String::new() },
     }
 }

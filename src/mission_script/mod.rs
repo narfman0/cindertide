@@ -78,9 +78,21 @@ pub enum Action {
         x: i32,
         y: i32,
     },
+    /// Swap the in-mission music to a named preset (resolved by the client's
+    /// `music_for_preset`). Use `"silence"` to mute, or any unknown name to
+    /// fall back to the per-screen default. Override clears on leaving InMission.
+    SetMusic { track: String },
+    /// Clear any script-set music override and return to the screen default.
+    ClearMusic,
 }
 
 fn default_hollow_mode() -> String { "consuming".to_string() }
+
+/// Bridge resource set by `Action::SetMusic` / `ClearMusic`. The client reads
+/// this in `manage_music` to choose what to play; this module never resolves
+/// the actual file path — that's the client's `music_for_preset` job.
+#[derive(Resource, Default, Clone)]
+pub struct MusicRequest(pub Option<String>);
 
 impl MissionScript {
     pub fn load(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
@@ -170,6 +182,7 @@ pub fn script_tick_system(
     loaded: Res<LoadedFactions>,
     mut camera_target: ResMut<CameraTarget>,
     mut camera_shake: ResMut<CameraShake>,
+    mut music_request: ResMut<MusicRequest>,
     units_q: Query<(Entity, &Faction, &UnitTypeId, &UnitPos)>,
     buildings_q: Query<(&Faction, &BuildingTypeId, &BuildingPos)>,
     cinematic_q: Query<&CinematicFraming>,
@@ -317,6 +330,14 @@ pub fn script_tick_system(
                     info!("[script] spawned hollow zone ({:?}) at ({}, {})", m, x, y);
                     commands.spawn(HollowSpawner::new(m, *x, *y));
                 }
+                Action::SetMusic { track } => {
+                    info!("[script] set_music → {}", track);
+                    music_request.0 = Some(track.clone());
+                }
+                Action::ClearMusic => {
+                    info!("[script] clear_music");
+                    music_request.0 = None;
+                }
             }
         }
 
@@ -430,6 +451,7 @@ impl Plugin for MissionScriptPlugin {
         app.init_resource::<ScriptState>();
         app.init_resource::<CameraTarget>();
         app.init_resource::<CameraShake>();
+        app.init_resource::<MusicRequest>();
         app.add_systems(Update, script_tick_system);
     }
 }

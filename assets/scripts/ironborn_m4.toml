@@ -30,6 +30,8 @@ actions = [
   { type = "spawn_hollow_zone", mode = "consuming", x = 90, y = 30 },
   { type = "spawn_hollow_zone", mode = "consuming", x = 95, y = 35 },
   { type = "spawn_units", faction = "Hollow", unit_type = "Riflemen", count = 4, x = 90, y = 30 },
+  # Foreman refuses to name what they see; the music names it.
+  { type = "set_music", track = "horror" },
   { type = "camera_focus", target = { type = "unit", faction = "hollow", unit_type = "riflemen" }, framing = "off_kilter" },
   { type = "camera_shake", intensity = 0.3, duration = 1.2 },
   { type = "dialogue", speaker = "Foreman", text = "There they are. Or it. The shape is not right — but they are bodies and they are coming. That is enough to fight." },
@@ -87,6 +89,7 @@ actions = [
 id = "it_passes"
 trigger = { type = "time", seconds = 1080.0 }
 actions = [
+  { type = "set_music", track = "ambient" },
   { type = "camera_focus", target = { type = "home_base" }, framing = "close_up" },
   { type = "dialogue", speaker = "Foreman", text = "It is going. Past us. Through us, almost. We lost good people. But we are still here." },
 ]

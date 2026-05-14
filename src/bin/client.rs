@@ -19,7 +19,7 @@ use cindertide::combat::{PlayerAttackOrder, AttackMoveOrder, HoldPosition, Attac
 use cindertide::units::{MoveTarget, MoveProgress, UnitKind};
 use cindertide::buildings::Built;
 use cindertide::production::{ProductionQueue, unit_production_seconds};
-use cindertide::mission_script::{MissionScriptPlugin, ScriptState};
+use cindertide::mission_script::{MissionScriptPlugin, MusicRequest, ScriptState};
 use cindertide::camera::{framing_for, CameraShake, CameraTarget, CinematicFraming};
 use cindertide::cutscene_editor::{AssetCacheRoot, CutsceneEditorPlugin};
 use cindertide::{
@@ -92,6 +92,7 @@ fn main() {
         .init_resource::<AudioEventQueue>()
         .init_resource::<AudioAssets>()
         .init_resource::<AudioSettings>()
+        .init_resource::<MusicOverride>()
         .init_resource::<CurrentMusicPath>()
         .init_resource::<CameraSnapped>()
         .init_resource::<MultiplayerRole>()
@@ -164,6 +165,7 @@ fn main() {
         .add_systems(Update, handle_unit_death)
         .add_systems(Update, tick_death_flashes)
         .add_systems(Update, process_audio_events)
+        .add_systems(Update, forward_music_request.before(manage_music))
         .add_systems(Update, manage_music)
         .add_systems(Update, apply_music_volume)
         .add_systems(Update, host_broadcast_game_state)
@@ -6931,6 +6933,38 @@ fn tick_death_flashes(
 const MUSIC_TITLE: &str = "kenney_aio/Audio/Music Loops/Loops/Mission Plausible.ogg";
 const MUSIC_INMISSION: &str = "kenney_aio/Audio/Music Loops/Loops/Sad Town.ogg";
 
+/// Named music presets scripts can request via `Action::SetMusic { track }`.
+/// `"silence"` is special — resolves to `None` (mute, even if the screen would
+/// otherwise play something). Unknown names fall back to the screen default.
+pub fn music_for_preset(name: &str) -> Option<&'static str> {
+    match name.to_lowercase().as_str() {
+        "menu" => Some(MUSIC_TITLE),
+        "ambient" => Some(MUSIC_INMISSION),
+        "tense" => Some("kenney_aio/Audio/Music Loops/Loops/Flowing Rocks.ogg"),
+        "horror" => Some("kenney_aio/Audio/Music Loops/Loops/Sad Descent.ogg"),
+        "march" => Some("kenney_aio/Audio/Music Loops/Loops/German Virtue.ogg"),
+        "mystery" => Some("kenney_aio/Audio/Music Loops/Loops/Retro Mystic.ogg"),
+        "silence" => None,
+        _ => None,
+    }
+}
+
+/// All preset music paths the prefetch should download.
+pub const MUSIC_PRESETS: &[&str] = &[
+    MUSIC_TITLE,
+    MUSIC_INMISSION,
+    "kenney_aio/Audio/Music Loops/Loops/Flowing Rocks.ogg",
+    "kenney_aio/Audio/Music Loops/Loops/Sad Descent.ogg",
+    "kenney_aio/Audio/Music Loops/Loops/German Virtue.ogg",
+    "kenney_aio/Audio/Music Loops/Loops/Retro Mystic.ogg",
+];
+
+/// Script-driven music override. `Some(name)` means a preset name was requested
+/// (e.g. "tense"); `Some("silence")` means mute. `None` means use the screen
+/// default. Cleared on mission start/restart and on `Action::ClearMusic`.
+#[derive(Resource, Default, Clone)]
+pub struct MusicOverride(pub Option<String>);
+
 /// Volume settings, persisted across screens but in-memory only.
 /// Both fields are linear gain in [0.0, 1.0]. SFX applies at spawn time;
 /// music applies live to running MusicTrack entities so the slider takes
@@ -6982,7 +7016,7 @@ pub fn all_audio_paths() -> Vec<&'static str> {
     AUDIO_PATHS.iter().map(|(_, p)| *p)
         .chain(FACTION_UNIT_SELECTED.iter().map(|(_, p)| *p))
         .chain(FACTION_UNIT_MOVED.iter().map(|(_, p)| *p))
-        .chain([MUSIC_TITLE, MUSIC_INMISSION])
+        .chain(MUSIC_PRESETS.iter().copied())
         .collect()
 }
 
@@ -7061,19 +7095,32 @@ fn music_track_for_screen(screen: &ClientScreen) -> Option<&'static str> {
 #[derive(Resource, Default)]
 struct CurrentMusicPath(Option<&'static str>);
 
-/// Spawn / despawn the ambient music when ClientScreen transitions to a different track.
+/// Spawn / despawn the ambient music when the desired track changes.
+/// The override (set by script `Action::SetMusic`) takes precedence over the
+/// per-screen default. Leaving InMission clears the override automatically so
+/// the next mission starts with its own screen default.
 fn manage_music(
     mut commands: Commands,
     screen: Res<ClientScreen>,
     asset_server: Res<AssetServer>,
     model_assets: Res<ModelAssets>,
     settings: Res<AudioSettings>,
+    mut override_res: ResMut<MusicOverride>,
     mut current: ResMut<CurrentMusicPath>,
     existing: Query<Entity, With<MusicTrack>>,
 ) {
-    let desired = music_track_for_screen(&screen);
+    // Clear the script-set override when leaving InMission.
+    let in_mission = matches!(*screen, ClientScreen::InMission | ClientScreen::TestMission { .. });
+    if !in_mission && override_res.0.is_some() {
+        override_res.0 = None;
+    }
+
+    let desired: Option<&'static str> = match &override_res.0 {
+        Some(name) if name == "silence" => None,
+        Some(name) => music_for_preset(name).or_else(|| music_track_for_screen(&screen)),
+        None => music_track_for_screen(&screen),
+    };
     if desired == current.0 { return; }
-    // Despawn whatever's playing.
     for e in &existing { commands.entity(e).despawn(); }
     current.0 = desired;
     let Some(rel) = desired else { return };
@@ -7087,6 +7134,19 @@ fn manage_music(
         MusicTrack,
     ));
     info!("[music] now playing: {}", rel);
+}
+
+/// Forward script-set music requests into the client's MusicOverride. The
+/// mission_script module sets `MusicRequest` (its own resource, kept tone-
+/// neutral); this client-side system mirrors it into `MusicOverride` which
+/// `manage_music` actually reads.
+fn forward_music_request(
+    music_request: Res<MusicRequest>,
+    mut override_res: ResMut<MusicOverride>,
+) {
+    if music_request.is_changed() {
+        override_res.0 = music_request.0.clone();
+    }
 }
 
 /// Live-update music volume when AudioSettings changes.

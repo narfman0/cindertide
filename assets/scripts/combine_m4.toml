@@ -31,6 +31,9 @@ actions = [
   { type = "spawn_hollow_zone", mode = "consuming", x = 100, y = 30 },
   { type = "spawn_hollow_zone", mode = "consuming", x = 105, y = 35 },
   { type = "spawn_units", faction = "Hollow", unit_type = "Riflemen", count = 4, x = 100, y = 30 },
+  # Music drops to the horror preset — Field Comms's procedural frame breaks
+  # as something walks out of the ground that doesn't fit any category.
+  { type = "set_music", track = "horror" },
   { type = "camera_focus", target = { type = "unit", faction = "hollow", unit_type = "riflemen" }, framing = "off_kilter" },
   { type = "camera_shake", intensity = 0.3, duration = 1.2 },
   { type = "dialogue", speaker = "Field Comms", text = "Contact. Designation — unknown. They are not Ironborn. They are not — Command, what am I looking at?" },
@@ -88,6 +91,8 @@ actions = [
 id = "it_stops"
 trigger = { type = "time", seconds = 1080.0 }
 actions = [
+  # Horror lifts; return to the ambient mission loop as the Hollow leave.
+  { type = "set_music", track = "ambient" },
   { type = "camera_focus", target = { type = "home_base" }, framing = "close_up" },
   { type = "dialogue", speaker = "Field Comms", text = "It stopped. The ones nearest us — they stopped. Are they — they are leaving. They are not engaging us. They are leaving." },
 ]
