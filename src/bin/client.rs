@@ -3184,17 +3184,48 @@ fn sync_unit_positions(
     unit_positions: Query<&UnitPos, With<UnitTypeId>>,
     visual_entities: Res<VisualEntities>,
     mut transforms: Query<&mut Transform>,
+    time: Res<Time>,
 ) {
+    // Stable per-entity hash → phase offset, so different units bob out of sync
+    // (otherwise everybody bobs together and the cohort looks robotic).
+    fn phase(e: Entity) -> f32 {
+        let bits = e.to_bits();
+        // Mix bits down to [0, 2π).
+        (bits as u32 ^ (bits >> 32) as u32) as f32 * 0.0000001 % std::f32::consts::TAU
+    }
+    let elapsed = time.elapsed_secs();
+
     for (entity, pos, attack_target, move_target) in &units {
         let Some(&visual) = visual_entities.units.get(&entity) else { continue };
         let Ok(mut transform) = transforms.get_mut(visual) else { continue };
 
         let target_world = grid_to_world(pos.pos.x, pos.pos.y) + Vec3::Y * 0.75;
-        transform.translation = transform.translation.lerp(target_world, 0.15);
+        // Base smoothed translation toward the grid position.
+        let smoothed = transform.translation.lerp(target_world, 0.15);
+
+        // Phase 2 state cues — small Transform-only overlays. Bevy's animation
+        // system writes child bones, so adding to the visual root transform
+        // doesn't fight skeletal motion.
+        let p = phase(entity);
+        let mut bob_y = 0.0;
+        let mut recoil = 0.0;
+        if move_target.is_some() {
+            // Walking bob — 4 cycles/sec, amplitude ~3 cm. Same frequency as a
+            // typical infantry footstep cadence; subtle enough not to read as
+            // jitter.
+            bob_y = (elapsed * 8.0 + p).sin() * 0.03;
+        }
+        if attack_target.is_some() {
+            // Firing recoil — sharper, higher frequency, mostly Z (back-and-forth
+            // along the unit's facing). We multiply onto a small translation
+            // backward; rotation rather than translation reads cleaner at our
+            // zoom, so just a small twitch backward.
+            recoil = (elapsed * 24.0 + p).sin().max(0.0) * -0.05;
+        }
+        transform.translation = smoothed + Vec3::new(0.0, bob_y, 0.0);
 
         // Determine facing direction: attack target takes priority over movement.
         let desired_rot: Option<Quat> = if let Some(at) = attack_target {
-            // Face toward the attack target's world position.
             if let Ok(target_pos) = unit_positions.get(at.entity) {
                 let target_w = grid_to_world(target_pos.pos.x, target_pos.pos.y) + Vec3::Y * 0.75;
                 let dir = (target_w - transform.translation).with_y(0.0);
@@ -3207,7 +3238,6 @@ fn sync_unit_positions(
                 None
             }
         } else if move_target.is_some() {
-            // Face toward movement destination.
             let dir = (target_world - transform.translation).with_y(0.0);
             if dir.length_squared() > 0.0001 {
                 Some(Quat::from_rotation_arc(Vec3::Z, dir.normalize()))
@@ -3220,6 +3250,12 @@ fn sync_unit_positions(
 
         if let Some(rot) = desired_rot {
             transform.rotation = transform.rotation.slerp(rot, 0.15);
+        }
+
+        // Apply the recoil offset along the unit's facing (after rotation update).
+        if recoil != 0.0 {
+            let back = transform.rotation * Vec3::Z;
+            transform.translation += back * recoil;
         }
     }
 }
@@ -6978,7 +7014,8 @@ fn handle_unit_death(
     }
 }
 
-/// Ticks DeathFlash timers, shrinks flashes toward zero, then despawns them.
+/// Ticks DeathFlash timers, shrinks flashes toward zero with a tilt-and-sink
+/// motion, then despawns them.
 fn tick_death_flashes(
     mut commands: Commands,
     time: Res<Time>,
@@ -6990,9 +7027,13 @@ fn tick_death_flashes(
         if flash.timer <= 0.0 {
             commands.entity(entity).despawn();
         } else {
-            // Scale from 1.0 down to 0.0 as timer expires (timer starts at 0.3).
+            // 1.0 → 0.0 over the 0.3s lifetime.
             let frac = (flash.timer / 0.3).clamp(0.0, 1.0);
             transform.scale = Vec3::splat(frac);
+            // Tilt 90° forward as it expires (a body falling), plus a small sink.
+            let tilt_t = 1.0 - frac;
+            transform.rotation = Quat::from_rotation_x(-tilt_t * std::f32::consts::FRAC_PI_2);
+            transform.translation.y = transform.translation.y.min(0.75) - tilt_t * 0.4;
         }
     }
 }
