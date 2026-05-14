@@ -95,6 +95,7 @@ fn main() {
         .init_resource::<MusicOverride>()
         .init_resource::<CurrentMusicPath>()
         .init_resource::<UnitAnimGraphs>()
+        .init_resource::<SharedAnimGraph>()
         .init_resource::<CameraSnapped>()
         .init_resource::<MultiplayerRole>()
         .init_resource::<NetIdCounter>()
@@ -121,9 +122,12 @@ fn main() {
         .add_systems(Startup, startup_load_campaigns)
         .add_systems(Update, render_tiles)
         .add_systems(Update, sync_rendered_tile_colors)
+        .add_systems(Startup, try_load_shared_anim_graph)
         .add_systems(Update, spawn_unit_visuals)
         .add_systems(Update, sync_unit_positions)
         .add_systems(Update, animation_lod)
+        .add_systems(Update, update_unit_anim_states)
+        .add_systems(Update, apply_unit_anim_state.after(update_unit_anim_states))
         .add_systems(Update, spawn_building_visuals)
         .add_systems(Update, camera_pan_zoom)
         // attach_cinematic_framing must run before any camera resolver consults the component,
@@ -1111,30 +1115,122 @@ impl ModelAssets {
     }
 }
 
-// ── Unit animation (Phase 1) ─────────────────────────────────────────────────
+// ── Unit animation (Phase 1 + Phase 4) ────────────────────────────────────────
 //
-// Synty character GLBs each carry one animation ("Take 001"), all motion
-// concatenated in one timeline. We play index 0 on loop — characters get
-// generic motion that reads as alive at our zoom level. Vehicles/buildings
-// stay static (no animations baked in).
+// **Phase 1 (always active fallback):** each character GLB carries one bundled
+// animation ("Take 001"), 150 channels of motion. We loop it. Generic life.
 //
-// Pattern (from Bevy 0.16 examples):
-//   1. Build an AnimationGraph::from_clip per unit-type GLB, cached.
-//   2. Tag the spawned visual entity with `UnitAnimToPlay { graph, index }`.
-//   3. On SceneInstanceReady (fires when the GLB scene finishes spawning all
-//      its children), find the AnimationPlayer in the descendant hierarchy,
-//      call `play(index).repeat()`, and attach AnimationGraphHandle.
+// **Phase 4 (state-driven, auto-activates when a shared pack is on disk):**
+// When all four `SHARED_ANIM_FILES` GLBs exist in the cache, we build a
+// multi-node `AnimationGraph` keyed by `UnitAnimState` (Idle / Walking /
+// Attacking / Dying). Each spawned character uses this shared graph (since
+// Synty's POLYGON characters all use the same humanoid rig), and a
+// state-machine system transitions the active node with a 200 ms crossfade.
+//
+// To upgrade once you have a Synty animation pack:
+//   1. Convert the pack's FBX → GLB via `asset-server/fetch_and_convert.sh`.
+//   2. Upload converted GLBs to srv and refresh `index.json`.
+//   3. Update the four paths in `SHARED_ANIM_FILES` below to point at the
+//      pack's idle / walk / attack / die clip GLBs.
+//   4. Restart — `try_load_shared_anim_graph` will detect the files and
+//      switch automatically to state-driven mode.
+
+#[derive(Component, Default, Clone, Copy, PartialEq, Eq, Debug)]
+enum UnitAnimState {
+    #[default]
+    Idle,
+    Walking,
+    Attacking,
+    Dying,
+}
+
+/// Placeholder paths for the per-state animation clips of a future Synty
+/// animation pack. Until these files exist on disk, the engine falls back to
+/// Phase 1 (each character plays its own Take 001).
+///
+/// Replace the strings here with the actual GLB paths once a pack is installed
+/// and prefetched. Order MUST match `UnitAnimState` variants below.
+const SHARED_ANIM_FILES: [(UnitAnimState, &str); 4] = [
+    (UnitAnimState::Idle,      "POLYGON_Animations/Idle.glb"),
+    (UnitAnimState::Walking,   "POLYGON_Animations/Walk.glb"),
+    (UnitAnimState::Attacking, "POLYGON_Animations/Attack.glb"),
+    (UnitAnimState::Dying,     "POLYGON_Animations/Die.glb"),
+];
+
+/// Crossfade duration between animation states. 200 ms reads smooth without
+/// feeling sluggish for typical RTS state changes.
+const ANIM_TRANSITION_MS: u64 = 200;
 
 #[derive(Resource, Default)]
 struct UnitAnimGraphs {
-    /// unit_type id → (graph handle, node index for the first animation)
+    /// **Phase 1**: per-glb-path single-clip graph (each character's Take 001).
     by_type: std::collections::HashMap<String, (Handle<AnimationGraph>, AnimationNodeIndex)>,
 }
 
+#[derive(Resource, Default)]
+struct SharedAnimGraph {
+    /// **Phase 4**: one graph shared across all humanoid characters. `Some` iff
+    /// the configured `SHARED_ANIM_FILES` all exist on disk and we built the
+    /// graph successfully on startup.
+    handle: Option<Handle<AnimationGraph>>,
+    idle: AnimationNodeIndex,
+    walk: AnimationNodeIndex,
+    attack: AnimationNodeIndex,
+    die: AnimationNodeIndex,
+}
+
+impl SharedAnimGraph {
+    fn node_for(&self, state: UnitAnimState) -> AnimationNodeIndex {
+        match state {
+            UnitAnimState::Idle => self.idle,
+            UnitAnimState::Walking => self.walk,
+            UnitAnimState::Attacking => self.attack,
+            UnitAnimState::Dying => self.die,
+        }
+    }
+}
+
+/// Component on a unit's visual entity — stamps which graph + initial node the
+/// `play_unit_anim_when_ready` observer will play once the scene loads. For
+/// Phase 4 visuals this is set to the shared graph + the Idle node.
 #[derive(Component, Clone)]
 struct UnitAnimToPlay {
     graph: Handle<AnimationGraph>,
     index: AnimationNodeIndex,
+}
+
+/// Startup system: try to build the shared multi-clip animation graph. If any
+/// referenced GLB is missing, leaves the resource empty and Phase 1 fallback
+/// stays active.
+fn try_load_shared_anim_graph(
+    asset_server: Res<AssetServer>,
+    model_assets: Res<ModelAssets>,
+    mut anim_graphs: ResMut<Assets<AnimationGraph>>,
+    mut shared: ResMut<SharedAnimGraph>,
+) {
+    // All four clips must be on disk; otherwise we can't meaningfully use a
+    // partial graph.
+    for (_, rel) in SHARED_ANIM_FILES {
+        if !model_assets.local_file(rel).exists() {
+            info!("[animation] shared pack not present (missing {}); Phase 1 fallback active", rel);
+            return;
+        }
+    }
+    let mut graph = AnimationGraph::new();
+    let root = graph.root;
+    let mut node_for_state = [AnimationNodeIndex::new(0); 4];
+    for (idx, (_, rel)) in SHARED_ANIM_FILES.iter().enumerate() {
+        let clip = asset_server.load::<AnimationClip>(
+            model_assets.asset_path_with_label(rel, "Animation0"),
+        );
+        node_for_state[idx] = graph.add_clip(clip, 1.0, root);
+    }
+    shared.handle = Some(anim_graphs.add(graph));
+    shared.idle   = node_for_state[0];
+    shared.walk   = node_for_state[1];
+    shared.attack = node_for_state[2];
+    shared.die    = node_for_state[3];
+    info!("[animation] shared animation pack loaded (Phase 4 state-driven mode)");
 }
 
 /// Distance beyond which we pause AnimationPlayers (in world units). Our
@@ -1166,8 +1262,9 @@ fn animation_lod(
 
 /// Observer: when the GLB scene finishes spawning, walk descendants to find the
 /// AnimationPlayer (Bevy puts one on the armature root if the GLB has anims),
-/// start the configured clip on repeat, and attach the AnimationGraphHandle so
-/// the player knows where to read transitions from.
+/// start the configured clip on repeat, attach the AnimationGraphHandle, and
+/// install an `AnimationTransitions` component so subsequent state changes can
+/// crossfade smoothly via `transitions.play(...)`.
 fn play_unit_anim_when_ready(
     trigger: Trigger<bevy::scene::SceneInstanceReady>,
     mut commands: Commands,
@@ -1178,10 +1275,65 @@ fn play_unit_anim_when_ready(
     let Ok(anim) = anims_to_play.get(trigger.target()) else { return };
     for child in children.iter_descendants(trigger.target()) {
         if let Ok(mut player) = players.get_mut(child) {
-            player.play(anim.index).repeat();
+            let mut transitions = AnimationTransitions::new();
+            transitions.play(&mut player, anim.index, std::time::Duration::ZERO).repeat();
             commands
                 .entity(child)
-                .insert(AnimationGraphHandle(anim.graph.clone()));
+                .insert((AnimationGraphHandle(anim.graph.clone()), transitions));
+        }
+    }
+}
+
+/// Phase 4: read each unit's gameplay components and derive the desired
+/// animation state. Writes to the visual entity's `UnitAnimState`.
+fn update_unit_anim_states(
+    units: Query<(Entity, Option<&MoveTarget>, Option<&AttackTarget>), With<UnitTypeId>>,
+    dead_q: Query<(), With<cindertide::combat::Dead>>,
+    just_died_q: Query<(), With<cindertide::combat::JustDied>>,
+    visual_entities: Res<VisualEntities>,
+    mut anim_states: Query<&mut UnitAnimState>,
+) {
+    for (entity, move_t, attack_t) in &units {
+        let new_state = if dead_q.get(entity).is_ok() || just_died_q.get(entity).is_ok() {
+            UnitAnimState::Dying
+        } else if attack_t.is_some() {
+            UnitAnimState::Attacking
+        } else if move_t.is_some() {
+            UnitAnimState::Walking
+        } else {
+            UnitAnimState::Idle
+        };
+        let Some(&visual) = visual_entities.units.get(&entity) else { continue };
+        if let Ok(mut state) = anim_states.get_mut(visual) {
+            if *state != new_state {
+                *state = new_state;
+            }
+        }
+    }
+}
+
+/// Phase 4: on `Changed<UnitAnimState>`, walk descendants to find the
+/// AnimationPlayer and trigger a crossfade to the new state's clip. No-op
+/// when the shared graph isn't loaded (Phase 1 fallback handles motion via
+/// the per-character looping Take 001).
+fn apply_unit_anim_state(
+    shared: Res<SharedAnimGraph>,
+    children: Query<&Children>,
+    visual_states: Query<(Entity, &UnitAnimState), Changed<UnitAnimState>>,
+    mut players: Query<(&mut AnimationPlayer, &mut AnimationTransitions)>,
+) {
+    if shared.handle.is_none() { return; }
+    let transition = std::time::Duration::from_millis(ANIM_TRANSITION_MS);
+    for (visual_entity, state) in &visual_states {
+        let target = shared.node_for(*state);
+        for child in children.iter_descendants(visual_entity) {
+            if let Ok((mut player, mut transitions)) = players.get_mut(child) {
+                let active = transitions.play(&mut player, target, transition);
+                // Repeat all states except Dying (death plays once then holds).
+                if !matches!(state, UnitAnimState::Dying) {
+                    active.repeat();
+                }
+            }
         }
     }
 }
@@ -3164,6 +3316,7 @@ fn spawn_unit_visuals(
     loaded: Res<LoadedFactions>,
     mut anim_cache: ResMut<UnitAnimGraphs>,
     mut anim_graphs: ResMut<Assets<AnimationGraph>>,
+    shared_anim: Res<SharedAnimGraph>,
     units: Query<(Entity, &UnitPos, &Faction, &UnitTypeId), Added<UnitTypeId>>,
 ) {
     for (entity, pos, faction, unit_type) in &units {
@@ -3177,20 +3330,27 @@ fn spawn_unit_visuals(
         // Existence check guards against the `unit_<id>.glb` fallback path, which has
         // no corresponding file. Scale 0.01 assumes Synty-style centimetre-unit exports.
         let visual = if model_assets.local_file(&glb_name).exists() {
-            // Cache the AnimationGraph keyed by glb_name (not unit_type) so different
-            // factions sharing a unit_type but different models get their own graphs.
-            let anim = anim_cache.by_type.entry(glb_name.clone()).or_insert_with(|| {
-                let clip = asset_server.load::<AnimationClip>(
-                    model_assets.asset_path_with_label(&glb_name, "Animation0"),
-                );
-                let (graph, index) = AnimationGraph::from_clip(clip);
-                (anim_graphs.add(graph), index)
-            }).clone();
+            // Phase 4: prefer the shared multi-state graph if it was built. Falls
+            // back to Phase 1 (per-character single-clip Take 001) if the pack isn't
+            // on disk yet.
+            let (graph, initial_node) = if let Some(ref h) = shared_anim.handle {
+                (h.clone(), shared_anim.idle)
+            } else {
+                let anim = anim_cache.by_type.entry(glb_name.clone()).or_insert_with(|| {
+                    let clip = asset_server.load::<AnimationClip>(
+                        model_assets.asset_path_with_label(&glb_name, "Animation0"),
+                    );
+                    let (graph, index) = AnimationGraph::from_clip(clip);
+                    (anim_graphs.add(graph), index)
+                }).clone();
+                anim
+            };
 
             commands.spawn((
                 SceneRoot(asset_server.load(model_assets.asset_path(&glb_name))),
                 Transform::from_translation(world_pos).with_scale(Vec3::splat(0.01)),
-                UnitAnimToPlay { graph: anim.0, index: anim.1 },
+                UnitAnimToPlay { graph, index: initial_node },
+                UnitAnimState::default(),
             ))
             .observe(play_unit_anim_when_ready)
             .id()
