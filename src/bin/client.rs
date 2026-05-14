@@ -1144,17 +1144,27 @@ enum UnitAnimState {
     Dying,
 }
 
-/// Placeholder paths for the per-state animation clips of a future Synty
-/// animation pack. Until these files exist on disk, the engine falls back to
-/// Phase 1 (each character plays its own Take 001).
+/// Per-state animation clip paths. Sourced from the Synty
+/// `ANIMATION_Base_Locomotion_SourceFiles_v3` pack. Not all states are covered
+/// — Locomotion only ships idle/walk/run, no firing or death. Missing states
+/// fall back to the idle clip and rely on the existing Phase 2 transform
+/// overlays (`recoil` for fire, `DeathFlash` tilt+sink for death) to provide
+/// the visible state distinction.
 ///
-/// Replace the strings here with the actual GLB paths once a pack is installed
-/// and prefetched. Order MUST match `UnitAnimState` variants below.
+/// Use the `_Masc` variants (Synty's "Masculine" rig); all our character
+/// meshes share that skeleton. The `_RootMotion_` variants embed forward
+/// translation in the animation — we DON'T want those, since our movement
+/// system already handles position via UnitPos.
 const SHARED_ANIM_FILES: [(UnitAnimState, &str); 4] = [
-    (UnitAnimState::Idle,      "POLYGON_Animations/Idle.glb"),
-    (UnitAnimState::Walking,   "POLYGON_Animations/Walk.glb"),
-    (UnitAnimState::Attacking, "POLYGON_Animations/Attack.glb"),
-    (UnitAnimState::Dying,     "POLYGON_Animations/Die.glb"),
+    (UnitAnimState::Idle,      "ANIMATION_Base_Locomotion_SourceFiles_v3/SourceFiles/Animations/Polygon/Masculine/Idle/A_Idle_Standing_Masc.glb"),
+    (UnitAnimState::Walking,   "ANIMATION_Base_Locomotion_SourceFiles_v3/SourceFiles/Animations/Polygon/Masculine/Locomotion/Walk/A_Walk_F_Masc.glb"),
+    // No firing clip in Locomotion pack — reuse Idle; Phase 2 recoil overlay
+    // provides the visible firing punctuation. Replace with a Mixamo or
+    // dedicated combat clip once acquired.
+    (UnitAnimState::Attacking, "ANIMATION_Base_Locomotion_SourceFiles_v3/SourceFiles/Animations/Polygon/Masculine/Idle/A_Idle_Standing_Masc.glb"),
+    // No death clip in Locomotion pack — reuse Idle; DeathFlash tilt+sink
+    // already reads as collapse at our zoom.
+    (UnitAnimState::Dying,     "ANIMATION_Base_Locomotion_SourceFiles_v3/SourceFiles/Animations/Polygon/Masculine/Idle/A_Idle_Standing_Masc.glb"),
 ];
 
 /// Crossfade duration between animation states. 200 ms reads smooth without
@@ -7244,7 +7254,7 @@ pub fn music_for_preset(name: &str) -> Option<&'static str> {
         "tense" => Some("kenney_aio/Audio/Music Loops/Loops/Flowing Rocks.ogg"),
         "horror" => Some("kenney_aio/Audio/Music Loops/Loops/Sad Descent.ogg"),
         "march" => Some("kenney_aio/Audio/Music Loops/Loops/German Virtue.ogg"),
-        "mystery" => Some("kenney_aio/Audio/Music Loops/Loops/Retro Mystic.ogg"),
+        "mystery" => Some("kenney_aio/Audio/Music Loops/Retro/Retro Mystic.ogg"),
         "silence" => None,
         _ => None,
     }
@@ -7257,7 +7267,7 @@ pub const MUSIC_PRESETS: &[&str] = &[
     "kenney_aio/Audio/Music Loops/Loops/Flowing Rocks.ogg",
     "kenney_aio/Audio/Music Loops/Loops/Sad Descent.ogg",
     "kenney_aio/Audio/Music Loops/Loops/German Virtue.ogg",
-    "kenney_aio/Audio/Music Loops/Loops/Retro Mystic.ogg",
+    "kenney_aio/Audio/Music Loops/Retro/Retro Mystic.ogg",
 ];
 
 /// Script-driven music override. `Some(name)` means a preset name was requested
