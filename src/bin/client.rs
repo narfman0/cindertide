@@ -1454,6 +1454,9 @@ fn prefetch_http_assets(
     for rel in all_audio_paths() {
         paths.insert(rel.to_string());
     }
+    for rel in all_animation_paths() {
+        paths.insert(rel.to_string());
+    }
     for rel in cindertide::cutscene_editor::FONT_PATHS {
         paths.insert((*rel).to_string());
     }
@@ -7329,6 +7332,15 @@ pub fn all_audio_paths() -> Vec<&'static str> {
         .chain(FACTION_UNIT_MOVED.iter().map(|(_, p)| *p))
         .chain(MUSIC_PRESETS.iter().copied())
         .collect()
+}
+
+/// Animation clip paths the prefetch must pull. Derived from `SHARED_ANIM_FILES`
+/// but deduplicated (Attack/Die reuse Idle until we have proper clips).
+pub fn all_animation_paths() -> Vec<&'static str> {
+    let mut v: Vec<&'static str> = SHARED_ANIM_FILES.iter().map(|(_, p)| *p).collect();
+    v.sort();
+    v.dedup();
+    v
 }
 
 /// Startup system: pre-load one `Handle<AudioSource>` per audio entry. Skips entries
