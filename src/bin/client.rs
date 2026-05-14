@@ -123,6 +123,7 @@ fn main() {
         .add_systems(Update, sync_rendered_tile_colors)
         .add_systems(Update, spawn_unit_visuals)
         .add_systems(Update, sync_unit_positions)
+        .add_systems(Update, animation_lod)
         .add_systems(Update, spawn_building_visuals)
         .add_systems(Update, camera_pan_zoom)
         // attach_cinematic_framing must run before any camera resolver consults the component,
@@ -1134,6 +1135,33 @@ struct UnitAnimGraphs {
 struct UnitAnimToPlay {
     graph: Handle<AnimationGraph>,
     index: AnimationNodeIndex,
+}
+
+/// Distance beyond which we pause AnimationPlayers (in world units). Our
+/// ortho camera shows ~28 units vertically at default scale; anything beyond
+/// ~50 is comfortably off-screen.
+const ANIM_LOD_DISTANCE: f32 = 50.0;
+
+/// Phase 3: pause AnimationPlayer entities whose visual is far from the camera.
+/// Saves CPU on dozens of off-screen units. Toggles state only when crossing
+/// the threshold to avoid touching the player every frame.
+fn animation_lod(
+    camera_q: Query<&GlobalTransform, With<IsometricCamera>>,
+    mut players: Query<(&GlobalTransform, &mut AnimationPlayer)>,
+) {
+    let Ok(cam_xf) = camera_q.single() else { return };
+    let cam_pos = cam_xf.translation();
+    let cutoff = ANIM_LOD_DISTANCE * ANIM_LOD_DISTANCE;
+    for (xf, mut player) in &mut players {
+        let dist_sq = xf.translation().distance_squared(cam_pos);
+        if dist_sq > cutoff {
+            if !player.all_paused() {
+                player.pause_all();
+            }
+        } else if player.all_paused() {
+            player.resume_all();
+        }
+    }
 }
 
 /// Observer: when the GLB scene finishes spawning, walk descendants to find the
