@@ -94,6 +94,7 @@ fn main() {
         .init_resource::<AudioSettings>()
         .init_resource::<MusicOverride>()
         .init_resource::<CurrentMusicPath>()
+        .init_resource::<UnitAnimGraphs>()
         .init_resource::<CameraSnapped>()
         .init_resource::<MultiplayerRole>()
         .init_resource::<NetIdCounter>()
@@ -1092,12 +1093,68 @@ impl ModelAssets {
         format!("{}://{}", CACHE_SOURCE, relative)
     }
 
+    /// Like `asset_path` but rewrites whatever `#Label` the relative has to the
+    /// caller-provided label. Used to grab the `#Animation0` clip from a GLB
+    /// path that was originally written as `foo.glb#Scene0` in the faction TOML.
+    fn asset_path_with_label(&self, relative: &str, label: &str) -> String {
+        let bare = relative.split('#').next().unwrap_or(relative);
+        format!("{}://{}#{}", CACHE_SOURCE, bare, label)
+    }
+
     /// On-disk path to the bare file (without `#Scene0`), used to check existence
     /// before issuing `AssetServer::load` for paths that fall back to non-existent
     /// `unit_<id>.glb` names.
     fn local_file(&self, relative: &str) -> PathBuf {
         let bare = relative.split('#').next().unwrap_or(relative);
         self.local_root.join(bare)
+    }
+}
+
+// ── Unit animation (Phase 1) ─────────────────────────────────────────────────
+//
+// Synty character GLBs each carry one animation ("Take 001"), all motion
+// concatenated in one timeline. We play index 0 on loop — characters get
+// generic motion that reads as alive at our zoom level. Vehicles/buildings
+// stay static (no animations baked in).
+//
+// Pattern (from Bevy 0.16 examples):
+//   1. Build an AnimationGraph::from_clip per unit-type GLB, cached.
+//   2. Tag the spawned visual entity with `UnitAnimToPlay { graph, index }`.
+//   3. On SceneInstanceReady (fires when the GLB scene finishes spawning all
+//      its children), find the AnimationPlayer in the descendant hierarchy,
+//      call `play(index).repeat()`, and attach AnimationGraphHandle.
+
+#[derive(Resource, Default)]
+struct UnitAnimGraphs {
+    /// unit_type id → (graph handle, node index for the first animation)
+    by_type: std::collections::HashMap<String, (Handle<AnimationGraph>, AnimationNodeIndex)>,
+}
+
+#[derive(Component, Clone)]
+struct UnitAnimToPlay {
+    graph: Handle<AnimationGraph>,
+    index: AnimationNodeIndex,
+}
+
+/// Observer: when the GLB scene finishes spawning, walk descendants to find the
+/// AnimationPlayer (Bevy puts one on the armature root if the GLB has anims),
+/// start the configured clip on repeat, and attach the AnimationGraphHandle so
+/// the player knows where to read transitions from.
+fn play_unit_anim_when_ready(
+    trigger: Trigger<bevy::scene::SceneInstanceReady>,
+    mut commands: Commands,
+    children: Query<&Children>,
+    anims_to_play: Query<&UnitAnimToPlay>,
+    mut players: Query<&mut AnimationPlayer>,
+) {
+    let Ok(anim) = anims_to_play.get(trigger.target()) else { return };
+    for child in children.iter_descendants(trigger.target()) {
+        if let Ok(mut player) = players.get_mut(child) {
+            player.play(anim.index).repeat();
+            commands
+                .entity(child)
+                .insert(AnimationGraphHandle(anim.graph.clone()));
+        }
     }
 }
 
@@ -3077,6 +3134,8 @@ fn spawn_unit_visuals(
     model_assets: Res<ModelAssets>,
     asset_server: Res<AssetServer>,
     loaded: Res<LoadedFactions>,
+    mut anim_cache: ResMut<UnitAnimGraphs>,
+    mut anim_graphs: ResMut<Assets<AnimationGraph>>,
     units: Query<(Entity, &UnitPos, &Faction, &UnitTypeId), Added<UnitTypeId>>,
 ) {
     for (entity, pos, faction, unit_type) in &units {
@@ -3090,10 +3149,23 @@ fn spawn_unit_visuals(
         // Existence check guards against the `unit_<id>.glb` fallback path, which has
         // no corresponding file. Scale 0.01 assumes Synty-style centimetre-unit exports.
         let visual = if model_assets.local_file(&glb_name).exists() {
+            // Cache the AnimationGraph keyed by glb_name (not unit_type) so different
+            // factions sharing a unit_type but different models get their own graphs.
+            let anim = anim_cache.by_type.entry(glb_name.clone()).or_insert_with(|| {
+                let clip = asset_server.load::<AnimationClip>(
+                    model_assets.asset_path_with_label(&glb_name, "Animation0"),
+                );
+                let (graph, index) = AnimationGraph::from_clip(clip);
+                (anim_graphs.add(graph), index)
+            }).clone();
+
             commands.spawn((
                 SceneRoot(asset_server.load(model_assets.asset_path(&glb_name))),
                 Transform::from_translation(world_pos).with_scale(Vec3::splat(0.01)),
-            )).id()
+                UnitAnimToPlay { graph: anim.0, index: anim.1 },
+            ))
+            .observe(play_unit_anim_when_ready)
+            .id()
         } else {
             let color = faction_color(faction);
             commands.spawn((
