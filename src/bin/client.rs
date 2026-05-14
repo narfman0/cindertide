@@ -91,6 +91,8 @@ fn main() {
         .init_resource::<FogOfWar>()
         .init_resource::<AudioEventQueue>()
         .init_resource::<AudioAssets>()
+        .init_resource::<AudioSettings>()
+        .init_resource::<CurrentMusicPath>()
         .init_resource::<CameraSnapped>()
         .init_resource::<MultiplayerRole>()
         .init_resource::<NetIdCounter>()
@@ -162,6 +164,8 @@ fn main() {
         .add_systems(Update, handle_unit_death)
         .add_systems(Update, tick_death_flashes)
         .add_systems(Update, process_audio_events)
+        .add_systems(Update, manage_music)
+        .add_systems(Update, apply_music_volume)
         .add_systems(Update, host_broadcast_game_state)
         .add_systems(Update, receive_net_messages)
         .add_systems(Update, apply_player_cheat_trickle)
@@ -835,6 +839,20 @@ enum PlayerSettingsField {
     BuildSpeed,
     StartingBonus,
     FogOfWar,
+    MusicVolume,
+    SfxVolume,
+}
+
+const VOLUME_STEPS: &[f32] = &[0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0];
+
+fn cycle_volume(current: f32, forward: bool) -> f32 {
+    let idx = VOLUME_STEPS.iter().position(|&v| (v - current).abs() < 0.05).unwrap_or(5);
+    let new_idx = if forward {
+        (idx + 1).min(VOLUME_STEPS.len() - 1)
+    } else {
+        idx.saturating_sub(1)
+    };
+    VOLUME_STEPS[new_idx]
 }
 
 // ── Multiplayer networking ─────────────────────────────────────────────────────
@@ -1818,6 +1836,7 @@ fn update_screen_overlay(
     lobby: Res<LobbyConfig>,
     mp_role: Res<MultiplayerRole>,
     player_cheats: Res<PlayerCheats>,
+    audio_settings: Res<AudioSettings>,
     mut overlay_vis: Query<&mut Visibility, With<ScreenOverlay>>,
     mut title_text: Query<&mut Text, (With<OverlayTitleText>, Without<OverlayBodyText>, Without<OverlayHintText>)>,
     mut body_text: Query<&mut Text, (With<OverlayBodyText>, Without<OverlayTitleText>, Without<OverlayHintText>)>,
@@ -2009,6 +2028,8 @@ fn update_screen_overlay(
             let bs_marker = if *sel == PlayerSettingsField::BuildSpeed { ">" } else { " " };
             let sb_marker = if *sel == PlayerSettingsField::StartingBonus { ">" } else { " " };
             let fw_marker = if *sel == PlayerSettingsField::FogOfWar { ">" } else { " " };
+            let mv_marker = if *sel == PlayerSettingsField::MusicVolume { ">" } else { " " };
+            let sv_marker = if *sel == PlayerSettingsField::SfxVolume { ">" } else { " " };
 
             let fog_str = if player_cheats.fog_of_war { "ON" } else { "OFF" };
 
@@ -2018,11 +2039,16 @@ fn update_screen_overlay(
                  {}  Build speed:        [{:.2}×]  ←→\n\
                  {}  Starting resources: [+{}]    ←→\n\
                  {}  Fog of war:         [{}]    ←→\n\
-                 \nThese apply to YOUR faction only.\nAI uses its own difficulty settings.",
+                 \n── AUDIO ────────────────────────\n\
+                 {}  Music volume:       [{:>3}%]  ←→\n\
+                 {}  SFX volume:         [{:>3}%]  ←→\n\
+                 \nGameplay settings apply to YOUR faction only.\nAI uses its own difficulty settings.",
                 rm_marker, player_cheats.resource_multiplier,
                 bs_marker, player_cheats.build_speed_multiplier,
                 sb_marker, player_cheats.starting_resource_bonus as i32,
                 fw_marker, fog_str,
+                mv_marker, (audio_settings.music_volume * 100.0) as i32,
+                sv_marker, (audio_settings.sfx_volume * 100.0) as i32,
             );
             **body = body_str;
             **hint = "↑↓ select field  ←→ change value  Esc: back".to_string();
@@ -2067,6 +2093,7 @@ fn handle_ui_input(
     net_channels: Option<Res<NetChannels>>,
     mut commands: Commands,
     mut player_cheats: ResMut<PlayerCheats>,
+    mut audio_settings: ResMut<AudioSettings>,
 ) {
     // Only handle UI input when not in mission or editor
     if matches!(*screen, ClientScreen::InMission | ClientScreen::TestMission { .. } | ClientScreen::MapEditor | ClientScreen::CampaignEditor) {
@@ -2717,10 +2744,12 @@ fn handle_ui_input(
             // Cycle selected field with up/down
             if up {
                 let new_field = match selected_field {
-                    PlayerSettingsField::ResourceMultiplier => PlayerSettingsField::FogOfWar,
+                    PlayerSettingsField::ResourceMultiplier => PlayerSettingsField::SfxVolume,
                     PlayerSettingsField::BuildSpeed => PlayerSettingsField::ResourceMultiplier,
                     PlayerSettingsField::StartingBonus => PlayerSettingsField::BuildSpeed,
                     PlayerSettingsField::FogOfWar => PlayerSettingsField::StartingBonus,
+                    PlayerSettingsField::MusicVolume => PlayerSettingsField::FogOfWar,
+                    PlayerSettingsField::SfxVolume => PlayerSettingsField::MusicVolume,
                 };
                 *screen = ClientScreen::PlayerSettings { selected_field: new_field };
                 return;
@@ -2730,7 +2759,9 @@ fn handle_ui_input(
                     PlayerSettingsField::ResourceMultiplier => PlayerSettingsField::BuildSpeed,
                     PlayerSettingsField::BuildSpeed => PlayerSettingsField::StartingBonus,
                     PlayerSettingsField::StartingBonus => PlayerSettingsField::FogOfWar,
-                    PlayerSettingsField::FogOfWar => PlayerSettingsField::ResourceMultiplier,
+                    PlayerSettingsField::FogOfWar => PlayerSettingsField::MusicVolume,
+                    PlayerSettingsField::MusicVolume => PlayerSettingsField::SfxVolume,
+                    PlayerSettingsField::SfxVolume => PlayerSettingsField::ResourceMultiplier,
                 };
                 *screen = ClientScreen::PlayerSettings { selected_field: new_field };
                 return;
@@ -2744,6 +2775,8 @@ fn handle_ui_input(
                     PlayerSettingsField::BuildSpeed => player_cheats.cycle_build_speed(forward),
                     PlayerSettingsField::StartingBonus => player_cheats.cycle_starting_bonus(forward),
                     PlayerSettingsField::FogOfWar => player_cheats.fog_of_war = !player_cheats.fog_of_war,
+                    PlayerSettingsField::MusicVolume => audio_settings.music_volume = cycle_volume(audio_settings.music_volume, forward),
+                    PlayerSettingsField::SfxVolume => audio_settings.sfx_volume = cycle_volume(audio_settings.sfx_volume, forward),
                 }
             }
         }
@@ -6892,6 +6925,33 @@ fn tick_death_flashes(
 
 // ── Audio event processing ────────────────────────────────────────────────────
 
+/// Per-screen ambient music loops. `Title` and the briefing/picker screens get
+/// the same RTS-flavored track; in-mission gets a heavier, more somber loop
+/// fitting the dieselpunk tone.
+const MUSIC_TITLE: &str = "kenney_aio/Audio/Music Loops/Loops/Mission Plausible.ogg";
+const MUSIC_INMISSION: &str = "kenney_aio/Audio/Music Loops/Loops/Sad Town.ogg";
+
+/// Volume settings, persisted across screens but in-memory only.
+/// Both fields are linear gain in [0.0, 1.0]. SFX applies at spawn time;
+/// music applies live to running MusicTrack entities so the slider takes
+/// effect immediately.
+#[derive(Resource, Clone, Debug)]
+pub struct AudioSettings {
+    pub music_volume: f32,
+    pub sfx_volume: f32,
+}
+
+impl Default for AudioSettings {
+    fn default() -> Self {
+        Self { music_volume: 0.4, sfx_volume: 0.8 }
+    }
+}
+
+/// Marker for the currently-playing music entity. Lets us swap tracks on
+/// screen transition and apply live volume changes via AudioSink::set_volume.
+#[derive(Component)]
+struct MusicTrack;
+
 /// Global / non-faction-specific audio events.
 const AUDIO_PATHS: &[(&str, &str)] = &[
     ("combat", "kenney_aio/Audio/Impact Sounds/Audio/impactPlate_heavy_000.ogg"),
@@ -6922,6 +6982,7 @@ pub fn all_audio_paths() -> Vec<&'static str> {
     AUDIO_PATHS.iter().map(|(_, p)| *p)
         .chain(FACTION_UNIT_SELECTED.iter().map(|(_, p)| *p))
         .chain(FACTION_UNIT_MOVED.iter().map(|(_, p)| *p))
+        .chain([MUSIC_TITLE, MUSIC_INMISSION])
         .collect()
 }
 
@@ -6972,15 +7033,70 @@ fn process_audio_events(
     mut commands: Commands,
     mut queue: ResMut<AudioEventQueue>,
     audio: Res<AudioAssets>,
+    settings: Res<AudioSettings>,
 ) {
     for event in queue.0.drain(..) {
         trace!("audio event: {:?}", event);
         if let Some(handle) = audio.for_event(&event) {
             commands.spawn((
                 AudioPlayer::<AudioSource>(handle.clone()),
-                PlaybackSettings::DESPAWN,
+                PlaybackSettings::DESPAWN.with_volume(bevy::audio::Volume::Linear(settings.sfx_volume)),
             ));
         }
+    }
+}
+
+/// Pick the music track for a given screen, or None to silence music.
+fn music_track_for_screen(screen: &ClientScreen) -> Option<&'static str> {
+    match screen {
+        ClientScreen::InMission | ClientScreen::TestMission { .. } => Some(MUSIC_INMISSION),
+        ClientScreen::MapEditor | ClientScreen::CampaignEditor => None,
+        ClientScreen::GameOver { .. } => None,
+        // Title, picker, briefing, debrief, multiplayer menus, etc. share the title loop.
+        _ => Some(MUSIC_TITLE),
+    }
+}
+
+/// Local memory of the path currently spawned, so we only restart when the track changes.
+#[derive(Resource, Default)]
+struct CurrentMusicPath(Option<&'static str>);
+
+/// Spawn / despawn the ambient music when ClientScreen transitions to a different track.
+fn manage_music(
+    mut commands: Commands,
+    screen: Res<ClientScreen>,
+    asset_server: Res<AssetServer>,
+    model_assets: Res<ModelAssets>,
+    settings: Res<AudioSettings>,
+    mut current: ResMut<CurrentMusicPath>,
+    existing: Query<Entity, With<MusicTrack>>,
+) {
+    let desired = music_track_for_screen(&screen);
+    if desired == current.0 { return; }
+    // Despawn whatever's playing.
+    for e in &existing { commands.entity(e).despawn(); }
+    current.0 = desired;
+    let Some(rel) = desired else { return };
+    if !model_assets.local_file(rel).exists() {
+        warn!("Music missing on disk: {}", rel);
+        return;
+    }
+    commands.spawn((
+        AudioPlayer::<AudioSource>(asset_server.load(model_assets.asset_path(rel))),
+        PlaybackSettings::LOOP.with_volume(bevy::audio::Volume::Linear(settings.music_volume)),
+        MusicTrack,
+    ));
+    info!("[music] now playing: {}", rel);
+}
+
+/// Live-update music volume when AudioSettings changes.
+fn apply_music_volume(
+    settings: Res<AudioSettings>,
+    mut sinks: Query<&mut AudioSink, With<MusicTrack>>,
+) {
+    if !settings.is_changed() { return; }
+    for mut sink in &mut sinks {
+        sink.set_volume(bevy::audio::Volume::Linear(settings.music_volume));
     }
 }
 
