@@ -120,17 +120,48 @@ Two options:
 
 ## Free fallback: Mixamo
 
-If a Synty pack isn't in budget, Adobe's Mixamo (free) provides retargetable
-mocap animations. Process per clip:
+Adobe's Mixamo (free) provides a huge library of mocap animations. Process per
+clip:
 
-1. Upload one Synty character FBX to mixamo.com (auto-rigger maps it to
-   Mixamo's rig).
-2. Browse Mixamo's animation library; pick a clip.
-3. Download as FBX "with Skin," 30fps.
-4. Open in Blender, retarget animation channels from Mixamo's bone names
-   (`mixamorig:Hips`, etc.) to our Synty bone names. Plugins exist
-   (`auto-rig-pro`, `rokoko-studio-live`, free retargeter scripts).
-5. Export as GLB.
+1. Upload one Synty character FBX to mixamo.com (auto-rigger maps the mesh
+   to Mixamo's own `mixamorig:*` rig).
+2. Browse Mixamo's animation library; pick a clip. Preview attaches the clip
+   to the auto-rigged character.
+3. Download as FBX **without** Skin, 30fps. The FBX contains the auto-rigged
+   skeleton (with `mixamorig:*` bone names) plus the animation.
+4. Run our converter with the **`--rename mixamo`** flag, which renames bones
+   from `mixamorig:*` to Synty equivalents during the FBX→GLB step:
 
-~1-2 hours per clip with a retargeting plugin. ~5 clips × 1.5h = a day of
-work for a full state set.
+   ```sh
+   blender --background --python convert_fbx_to_gltf.py -- \
+     ~/.cindertide/assets/raw/mixamo_clips \
+     ~/.cindertide/assets/converted/mixamo_clips \
+     --rename mixamo
+   ```
+
+5. Drop the converted GLB path into `SHARED_ANIM_FILES` in `src/bin/client.rs`.
+   Restart — Phase 4 picks it up.
+
+The `--rename mixamo` preset (see `RENAME_PRESETS` in
+`asset-server/convert_fbx_to_gltf.py`) handles the bone-name conversion
+including the spine collapse (Mixamo 4-bone spine → Synty 3-bone). About 30
+mapping entries. Bones not in the map (mostly Mixamo's extra hand IK targets)
+fall through unmapped and silently no-op at runtime — body silhouette
+animates correctly.
+
+**Estimated time:** ~5 minutes per Mixamo clip from download to working GLB.
+A full state set (idle/walk/run/fire/reload/death/hit) is roughly half an hour.
+
+### Why this works without runtime code changes
+
+Bevy stores `AnimationClip` curves keyed by `AnimationTargetId` — a UUID
+computed by hashing the bone's ancestor path (e.g.,
+`hash(["Spine_01", "Hips"])`). The IDs are computed at GLB load time from
+whatever names the GLB nodes have. By renaming bones during Blender import
+**before** glTF export, we get IDs computed against Synty-named paths.
+Those IDs match the IDs Bevy assigns to our character's bone entities at
+spawn time, and the animation plays through normally.
+
+A runtime rename would require either reversing the UUID (impossible) or
+maintaining a parallel "ghost armature" that animates separately and a
+per-frame sync system. Doing it once at import time is dramatically simpler.
